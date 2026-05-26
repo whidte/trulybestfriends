@@ -1,0 +1,11 @@
+{
+  "mod.trulybestfriends.name": "真正的永远好朋友",
+  "mod.trulybestfriends.description": "一个让宠物永远陪伴你的模组",
+  "itemGroup.trulybestfriends": "真正的好朋友",
+  "trulybestfriends.pet.saved": "宠物数据已保存",
+  "trulybestfriends.pet.loaded": "宠物数据已加载",
+  "trulybestfriends.pet.index.updated": "宠物索引已更新",
+  "trulybestfriends.error.save": "保存宠物数据时出错",
+  "trulybestfriends.error.load": "加载宠物数据时出错"
+}
+

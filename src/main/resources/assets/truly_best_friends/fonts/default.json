@@ -1,0 +1,24 @@
+{
+  "providers": [
+    {
+      "type": "bitmap",
+      "file": "truly_best_friends:textures/font/ascii.png",
+      "ascent": 8,
+      "height": 8,
+      "chars": [
+        "\u0020\u007F"
+      ]
+    },
+    {
+      "type": "ttf",
+      "file": "truly_best_friends:font/noto_sans_sc_regular.ttf",
+      "size": 11.0,
+      "oversample": 2.0,
+      "shift": [0.0, 0.0],
+      "chars": [
+        "\u4E00\u9FFF"
+      ]
+    }
+  ]
+}
+

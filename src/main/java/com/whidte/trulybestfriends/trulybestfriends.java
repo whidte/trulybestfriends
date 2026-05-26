@@ -1,77 +1,61 @@
 package com.whidte.trulybestfriends;
 
 import com.mojang.logging.LogUtils;
-import net.minecraft.client.Minecraft;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.StringTag;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.animal.Animal;
-import net.minecraft.world.food.FoodProperties;
-import net.minecraft.world.item.*;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockBehaviour;
-import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.level.storage.LevelResource;
-import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.AnimalTameEvent;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.server.ServerStartingEvent;
-import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.registries.RegistryObject;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.StringTag;
-import net.minecraft.world.entity.animal.Wolf;
-import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 
-// The value here should match an entry in the META-INF/mods.toml file
 @Mod.EventBusSubscriber(bus = Mod.EventBusSubscriber.Bus.MOD)
-@Mod(value = trulybestfriends.MODID) // 重要！使用静态常量替代字符串字面量
+@Mod(value = trulybestfriends.MODID)
 public class trulybestfriends {
     public static final String MODID = "trulybestfriends";
     public static final String NAME = "Truly Best Friends Forever";
-    public static final Logger LOGGER = LogManager.getFormatterLogger();
+    public static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
 
     private static final String PETS_INDEX_FILE = "pets_index.nbt";
     private static final Map<String, List<UUID>> indexCache = new ConcurrentHashMap<>();
+    private static final Set<UUID> trackedPetUUIDs = ConcurrentHashMap.newKeySet();
 
-    public trulybestfriends() {
+    private int tickCounter = 0;
+
+    public trulybestfriends(FMLJavaModLoadingContext context) {
+        context.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
         MinecraftForge.EVENT_BUS.register(this);
     }
 
     @SubscribeEvent
     public void onAnimalTamed(AnimalTameEvent event) {
-        Animal animal = event.getAnimal(); // 直接获取Animal实例
-        if (!animal.level().isClientSide()) {
-            ServerPlayer player = (ServerPlayer) event.getTamer();
-            savePetData(player, animal);
-            updatePetIndex(animal);
+        Animal animal = event.getAnimal();
+        if (!animal.level().isClientSide() && animal instanceof TamableAnimal tameable) {
+            UUID ownerUUID = event.getTamer().getUUID();
+            savePetData(ownerUUID, tameable, (ServerLevel) animal.level());
+            updatePetIndex(tameable);
         }
     }
 
@@ -82,29 +66,49 @@ public class trulybestfriends {
         }
     }
 
-    private void savePetData(ServerPlayer player, Animal pet) {
-        try {
-            ServerLevel level = (ServerLevel) player.level();
-            Path worldPath = level.getServer().getWorldPath(LevelResource.ROOT);
-
-            Path modDir = worldPath.resolve("trulybestfriends");
-            Files.createDirectories(modDir);
-
-            Path playerDir = modDir.resolve(player.getScoreboardName());
-            Files.createDirectories(playerDir);
-
-            CompoundTag nbt = new CompoundTag();
-            pet.saveWithoutId(nbt);
-            File nbtFile = playerDir.resolve(pet.getUUID().toString() + ".nbt").toFile();
-            NbtIo.writeCompressed(nbt, nbtFile);
-
-            LOGGER.info("SUCCESSFUL:{}", pet.getUUID());
-        } catch (IOException e) {
-            LOGGER.error("FAILED:{}", e.getMessage());
+    @SubscribeEvent
+    public void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            tickCounter++;
+            if (tickCounter >= Config.syncIntervalTicks) {
+                tickCounter = 0;
+                syncLoadedPets(event.getServer());
+            }
         }
     }
 
-    private void updatePetIndex(Animal pet) {
+    @SubscribeEvent
+    public void onLivingDeath(LivingDeathEvent event) {
+        if (event.getEntity() instanceof TamableAnimal pet
+                && !pet.level().isClientSide()
+                && trackedPetUUIDs.contains(pet.getUUID())
+                && pet.getOwnerUUID() != null) {
+            savePetData(pet.getOwnerUUID(), pet, (ServerLevel) pet.level());
+        }
+    }
+
+    private void savePetData(UUID ownerUUID, Animal pet, ServerLevel level) {
+        try {
+            Path worldPath = level.getServer().getWorldPath(LevelResource.ROOT);
+            Path modDir = worldPath.resolve("trulybestfriends");
+            Files.createDirectories(modDir);
+
+            Path ownerDir = modDir.resolve(ownerUUID.toString());
+            Files.createDirectories(ownerDir);
+
+            CompoundTag nbt = new CompoundTag();
+            pet.saveWithoutId(nbt);
+            nbt.putString("OwnerUUID", ownerUUID.toString());
+            nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());
+
+            File nbtFile = ownerDir.resolve(pet.getUUID() + ".nbt").toFile();
+            NbtIo.writeCompressed(nbt, nbtFile);
+        } catch (IOException e) {
+            LOGGER.error("Failed to save pet data for {}: {}", pet.getUUID(), e.getMessage());
+        }
+    }
+
+    private void updatePetIndex(TamableAnimal pet) {
         try {
             ServerLevel level = (ServerLevel) pet.level();
             Path modDir = level.getServer().getWorldPath(LevelResource.ROOT).resolve("trulybestfriends");
@@ -116,19 +120,28 @@ public class trulybestfriends {
             }
 
             String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString();
-            ListTag uuidList = indexTag.getList(typeKey, 8);
-            uuidList.add(StringTag.valueOf(pet.getUUID().toString()));
-            indexTag.put(typeKey, uuidList);
+            UUID petUUID = pet.getUUID();
+            String uuidStr = petUUID.toString();
 
-            NbtIo.writeCompressed(indexTag, indexFile);
-            LOGGER.info("SUCCESSFUL:{}", typeKey);
+            ListTag uuidList = indexTag.getList(typeKey, Tag.TAG_STRING);
+            boolean alreadyExists = false;
+            for (Tag tag : uuidList) {
+                if (tag instanceof StringTag st && uuidStr.equals(st.getAsString())) {
+                    alreadyExists = true;
+                    break;
+                }
+            }
+            if (!alreadyExists) {
+                uuidList.add(StringTag.valueOf(uuidStr));
+                indexTag.put(typeKey, uuidList);
+                NbtIo.writeCompressed(indexTag, indexFile);
 
-            // 更新缓存
-            indexCache.computeIfAbsent(typeKey, k -> new ArrayList<>())
-                    .add(pet.getUUID());
+                indexCache.computeIfAbsent(typeKey, k -> new ArrayList<>()).add(petUUID);
+            }
 
+            trackedPetUUIDs.add(petUUID);
         } catch (IOException e) {
-            LOGGER.error("FAILED:{}", e.getMessage());
+            LOGGER.error("Failed to update pet index for {}: {}", pet.getUUID(), e.getMessage());
         }
     }
 
@@ -142,27 +155,38 @@ public class trulybestfriends {
             if (indexFile.exists()) {
                 CompoundTag indexTag = NbtIo.readCompressed(indexFile);
                 for (String key : indexTag.getAllKeys()) {
-                    ListTag uuidList = indexTag.getList(key, 8);
+                    ListTag uuidList = indexTag.getList(key, Tag.TAG_STRING);
                     List<UUID> uuids = new ArrayList<>();
                     for (Tag rawTag : uuidList) {
-                        // 确保是字符串类型的NBT标签
                         if (rawTag instanceof StringTag stringTag) {
                             try {
-                                uuids.add(UUID.fromString(stringTag.getAsString()));
+                                UUID uuid = UUID.fromString(stringTag.getAsString());
+                                uuids.add(uuid);
+                                trackedPetUUIDs.add(uuid);
                             } catch (IllegalArgumentException e) {
-                                LOGGER.warn("FAILED:{}", stringTag);
+                                LOGGER.warn("Invalid UUID in pet index: {}", stringTag.getAsString());
                             }
-                        } else {
-                            LOGGER.warn("非字符串类型的UUID数据: {}", rawTag);
                         }
                     }
                     indexCache.put(key, uuids);
                 }
             }
         } catch (IOException e) {
-            LOGGER.error("FAILED:{}", e.getMessage());
+            LOGGER.error("Failed to load pet index: {}", e.getMessage());
         }
         return indexCache;
+    }
+
+    private void syncLoadedPets(MinecraftServer server) {
+        for (ServerLevel level : server.getAllLevels()) {
+            for (Entity entity : level.getEntities().getAll()) {
+                if (entity instanceof TamableAnimal tameable
+                        && trackedPetUUIDs.contains(entity.getUUID())
+                        && tameable.getOwnerUUID() != null) {
+                    savePetData(tameable.getOwnerUUID(), tameable, level);
+                }
+            }
+        }
     }
 
     private void loadPlayerPetsData(ServerPlayer player) {
@@ -170,21 +194,20 @@ public class trulybestfriends {
             ServerLevel level = (ServerLevel) player.level();
             Path modDir = level.getServer().getWorldPath(LevelResource.ROOT)
                     .resolve("trulybestfriends")
-                    .resolve(player.getScoreboardName());
+                    .resolve(player.getUUID().toString());
 
             if (Files.exists(modDir)) {
-                Files.list(modDir).forEach(file -> {
+                Files.list(modDir).filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
                     try {
                         CompoundTag nbt = NbtIo.readCompressed(file.toFile());
-                        // 这里可以添加生物重生逻辑
-                        LOGGER.info("SUCCESSFUL:{}", file.getFileName());
+                        LOGGER.info("Loaded pet data: {}", file.getFileName());
                     } catch (IOException e) {
-                        LOGGER.error("FAILED:{}", e.getMessage());
+                        LOGGER.error("Failed to load pet data {}: {}", file.getFileName(), e.getMessage());
                     }
                 });
             }
         } catch (IOException e) {
-            LOGGER.error("FAILED:{}", e.getMessage());
+            LOGGER.error("Failed to load player pets data: {}", e.getMessage());
         }
     }
 }
@@ -284,4 +307,4 @@ public class trulybestfriends
         }
     }
 }
-*/
+    */
