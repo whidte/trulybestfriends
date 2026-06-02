@@ -9,13 +9,13 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.TamableAnimal;
-import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.AnimalTameEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -51,11 +51,10 @@ public class trulybestfriends {
 
     @SubscribeEvent
     public void onAnimalTamed(AnimalTameEvent event) {
-        Animal animal = event.getAnimal();
-        if (!animal.level().isClientSide() && animal instanceof TamableAnimal tameable) {
-            UUID ownerUUID = event.getTamer().getUUID();
-            savePetData(ownerUUID, tameable, (ServerLevel) animal.level());
-            updatePetIndex(tameable);
+        Entity animal = event.getAnimal();
+        if (!animal.level().isClientSide() && animal instanceof OwnableEntity ownable && ownable.getOwnerUUID() != null) {
+            savePetData(ownable.getOwnerUUID(), animal, (ServerLevel) animal.level());
+            updatePetIndex(animal);
         }
     }
 
@@ -72,22 +71,30 @@ public class trulybestfriends {
             tickCounter++;
             if (tickCounter >= Config.syncIntervalTicks) {
                 tickCounter = 0;
-                syncLoadedPets(event.getServer());
+                syncAllPets(event.getServer());
             }
         }
     }
 
     @SubscribeEvent
     public void onLivingDeath(LivingDeathEvent event) {
-        if (event.getEntity() instanceof TamableAnimal pet
-                && !pet.level().isClientSide()
-                && trackedPetUUIDs.contains(pet.getUUID())
-                && pet.getOwnerUUID() != null) {
-            savePetData(pet.getOwnerUUID(), pet, (ServerLevel) pet.level());
+        Entity entity = event.getEntity();
+        if (!entity.level().isClientSide()
+                && trackedPetUUIDs.contains(entity.getUUID())
+                && entity instanceof OwnableEntity ownable
+                && ownable.getOwnerUUID() != null) {
+            savePetData(ownable.getOwnerUUID(), entity, (ServerLevel) entity.level());
         }
     }
 
-    private void savePetData(UUID ownerUUID, Animal pet, ServerLevel level) {
+    @SubscribeEvent
+    public void onLivingDrops(LivingDropsEvent event) {
+        if (trackedPetUUIDs.contains(event.getEntity().getUUID())) {
+            event.getDrops().clear();
+        }
+    }
+
+    private void savePetData(UUID ownerUUID, Entity pet, ServerLevel level) {
         try {
             Path worldPath = level.getServer().getWorldPath(LevelResource.ROOT);
             Path modDir = worldPath.resolve("trulybestfriends");
@@ -108,7 +115,7 @@ public class trulybestfriends {
         }
     }
 
-    private void updatePetIndex(TamableAnimal pet) {
+    private void updatePetIndex(Entity pet) {
         try {
             ServerLevel level = (ServerLevel) pet.level();
             Path modDir = level.getServer().getWorldPath(LevelResource.ROOT).resolve("trulybestfriends");
@@ -177,13 +184,15 @@ public class trulybestfriends {
         return indexCache;
     }
 
-    private void syncLoadedPets(MinecraftServer server) {
+    private void syncAllPets(MinecraftServer server) {
         for (ServerLevel level : server.getAllLevels()) {
             for (Entity entity : level.getEntities().getAll()) {
-                if (entity instanceof TamableAnimal tameable
-                        && trackedPetUUIDs.contains(entity.getUUID())
-                        && tameable.getOwnerUUID() != null) {
-                    savePetData(tameable.getOwnerUUID(), tameable, level);
+                if (entity instanceof OwnableEntity ownable
+                        && ownable.getOwnerUUID() != null) {
+                    if (!trackedPetUUIDs.contains(entity.getUUID())) {
+                        updatePetIndex(entity);
+                    }
+                    savePetData(ownable.getOwnerUUID(), entity, level);
                 }
             }
         }
