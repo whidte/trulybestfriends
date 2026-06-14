@@ -1,0 +1,13 @@
+{
+  "mod.trulybestfriends.name": "Truly Best Friends Forever",
+  "mod.trulybestfriends.description": "A mod that makes your pets stay with you forever",
+  "itemGroup.trulybestfriends": "Truly Best Friends",
+  "trulybestfriends.pet.saved": "Pet data saved",
+  "trulybestfriends.pet.loaded": "Pet data loaded",
+  "trulybestfriends.pet.index.updated": "Pet index updated",
+  "trulybestfriends.error.save": "Failed to save pet data",
+  "trulybestfriends.error.load": "Failed to load pet data",
+  "tab.trulybestfriends.pets": "Pet Friends",
+  "key.trulybestfriends.open_tab": "Open Pet Tab",
+  "key.categories.trulybestfriends": "Truly Best Friends"
+}

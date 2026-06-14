@@ -1,16 +1,31 @@
 package com.whidte.trulybestfriends;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.logging.LogUtils;
+import com.whidte.trulybestfriends.network.GlowPetPacket;
+import com.whidte.trulybestfriends.tab.TrulyScreen;
+import com.whidte.trulybestfriends.tab.TrulyTab;
+import dev.xkmc.l2tabs.tabs.core.TabRegistry;
+import dev.xkmc.l2tabs.tabs.core.TabToken;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtIo;
-import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.StringTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.OwnableEntity;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.storage.LevelResource;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.InputEvent;
+import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.AnimalTameEvent;
@@ -20,14 +35,18 @@ import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.simple.SimpleChannel;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import net.minecraft.nbt.ListTag;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -42,11 +61,32 @@ public class trulybestfriends {
     private static final Map<String, List<UUID>> indexCache = new ConcurrentHashMap<>();
     private static final Set<UUID> trackedPetUUIDs = ConcurrentHashMap.newKeySet();
 
+    public static TabToken<TrulyTab> TRULY_TAB;
+
+    private static final String PROTOCOL_VERSION = "1";
+    public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
+            new ResourceLocation(MODID, "main"),
+            () -> PROTOCOL_VERSION,
+            PROTOCOL_VERSION::equals,
+            PROTOCOL_VERSION::equals
+    );
+
+	public static final KeyMapping OPEN_TAB_KEY = new KeyMapping(
+			"key.trulybestfriends.open_tab",
+			InputConstants.UNKNOWN.getValue(),
+			"key.categories.trulybestfriends"
+	);
+
     private int tickCounter = 0;
 
     public trulybestfriends(FMLJavaModLoadingContext context) {
         context.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
         MinecraftForge.EVENT_BUS.register(this);
+        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::commonSetup);
+    }
+
+    private void commonSetup(final FMLCommonSetupEvent event) {
+        CHANNEL.registerMessage(0, GlowPetPacket.class, GlowPetPacket::encode, GlowPetPacket::decode, GlowPetPacket::handle);
     }
 
     @SubscribeEvent
@@ -206,21 +246,51 @@ public class trulybestfriends {
                     .resolve(player.getUUID().toString());
 
             if (Files.exists(modDir)) {
+                int[] counts = new int[2]; // [0]=success, [1]=failed
                 Files.list(modDir).filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
                     try {
-                        CompoundTag nbt = NbtIo.readCompressed(file.toFile());
-                        LOGGER.info("Loaded pet data: {}", file.getFileName());
+                        NbtIo.readCompressed(file.toFile());
+                        counts[0]++;
                     } catch (IOException e) {
+                        counts[1]++;
                         LOGGER.error("Failed to load pet data {}: {}", file.getFileName(), e.getMessage());
                     }
                 });
+                if (counts[0] + counts[1] > 0) {
+                    LOGGER.info("Loaded {} pet data file(s), {} failed", counts[0], counts[1]);
+                }
             }
         } catch (IOException e) {
             LOGGER.error("Failed to load player pets data: {}", e.getMessage());
         }
     }
+
+    @SubscribeEvent
+	public static void onClientSetup(FMLClientSetupEvent event) {
+		event.enqueueWork(() -> {
+			TRULY_TAB = TabRegistry.registerTab(500, TrulyTab::new,
+					() -> Items.LEAD,
+					Component.translatable("tab.trulybestfriends.pets"));
+		});
+	}
+
+	@SubscribeEvent
+	public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
+		event.register(OPEN_TAB_KEY);
+	}
 }
-/*@Mod(trulybestfriends.MODID)
+
+@Mod.EventBusSubscriber(modid = trulybestfriends.MODID, value = Dist.CLIENT)
+class TrulyKeyHandler {
+	@SubscribeEvent
+	public static void onKeyInput(InputEvent.Key event) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null) return;
+		if (trulybestfriends.OPEN_TAB_KEY.consumeClick()) {
+			mc.setScreen(new TrulyScreen(Component.translatable("tab.trulybestfriends.pets")));
+		}
+	}
+}/*@Mod(trulybestfriends.MODID)
 public class trulybestfriends
 {
     // Define mod id in a common place for everything to reference

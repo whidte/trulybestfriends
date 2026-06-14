@@ -60,7 +60,7 @@ public class FontUtil {
         
         if (!Files.exists(fontFile)) {
             // 从模组资源中复制字体文件
-            ResourceLocation fontResource = new ResourceLocation("truly_best_friends", "font/" + DEFAULT_CHINESE_FONT);
+            ResourceLocation fontResource = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "font/" + DEFAULT_CHINESE_FONT);
             
             try (InputStream inputStream = Minecraft.getInstance().getResourceManager()
                     .getResource(fontResource).orElseThrow().open()) {
