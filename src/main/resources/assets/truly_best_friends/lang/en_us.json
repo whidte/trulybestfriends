@@ -7,7 +7,21 @@
   "trulybestfriends.pet.index.updated": "Pet index updated",
   "trulybestfriends.error.save": "Failed to save pet data",
   "trulybestfriends.error.load": "Failed to load pet data",
-  "tab.trulybestfriends.pets": "Pet Friends",
+  "tab.trulybestfriends.pets": "Pet Friends Tab",
   "key.trulybestfriends.open_tab": "Open Pet Tab",
-  "key.categories.trulybestfriends": "Truly Best Friends"
+  "key.categories.trulybestfriends": "Truly Best Friends",
+  "trulybestfriends.glow.tooltip": "Apply 5 seconds of Glowing",
+  "trulybestfriends.action.recall": "Recall",
+  "trulybestfriends.action.summon": "Summon",
+  "trulybestfriends.action.dead": "This entity is dead",
+  "trulybestfriends.action.cooldown": "%ss cooldown",
+  "trulybestfriends.location.unknown": "Unknown",
+  "trulybestfriends.coords.recalled": "Recalled",
+  "trulybestfriends.teleport.hint": "Click to teleport",
+  "trulybestfriends.recall.out_of_range": "This entity is out of range",
+  "trulybestfriends.shoulder.on_shoulder": "On your shoulder!",
+  "trulybestfriends.summon_to_player.label": "Summon",
+  "trulybestfriends.info.name": "Name: %s",
+  "trulybestfriends.info.species": "Species: %s",
+  "trulybestfriends.limit.reached": "Cannot track more pets (limit: %s)"
 }

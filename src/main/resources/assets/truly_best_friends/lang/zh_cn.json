@@ -7,8 +7,21 @@
   "trulybestfriends.pet.index.updated": "宠物索引已更新",
   "trulybestfriends.error.save": "保存宠物数据时出错",
   "trulybestfriends.error.load": "加载宠物数据时出错",
-  "tab.trulybestfriends.pets": "宠物伙伴",
+  "tab.trulybestfriends.pets": "宠物伙伴标签页",
   "key.trulybestfriends.open_tab": "打开宠物标签页",
-  "key.categories.trulybestfriends": "真正的永远好朋友"
+  "key.categories.trulybestfriends": "真正的永远好朋友",
+  "trulybestfriends.glow.tooltip": "施加5秒发光",
+  "trulybestfriends.action.recall": "收回该实体",
+  "trulybestfriends.action.summon": "放出该实体",
+  "trulybestfriends.action.dead": "该实体已死亡",
+  "trulybestfriends.action.cooldown": "%s秒后可再次操作",
+  "trulybestfriends.location.unknown": "未知位面",
+  "trulybestfriends.coords.recalled": "已收回",
+  "trulybestfriends.teleport.hint": "点击传送到此处",
+  "trulybestfriends.recall.out_of_range": "实体超出收回距离",
+  "trulybestfriends.shoulder.on_shoulder": "它在你身上呢！",
+  "trulybestfriends.summon_to_player.label": "召唤",
+  "trulybestfriends.info.name": "名称：%s",
+  "trulybestfriends.info.species": "种族：%s",
+  "trulybestfriends.limit.reached": "无法追踪更多宠物（上限：%s）"
 }
-

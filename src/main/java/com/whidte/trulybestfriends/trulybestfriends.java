@@ -3,6 +3,9 @@ package com.whidte.trulybestfriends;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.logging.LogUtils;
 import com.whidte.trulybestfriends.network.GlowPetPacket;
+import com.whidte.trulybestfriends.network.RecallPetPacket;
+import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
+import com.whidte.trulybestfriends.network.TeleportToPetPacket;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
 import com.whidte.trulybestfriends.tab.TrulyTab;
 import dev.xkmc.l2tabs.tabs.core.TabRegistry;
@@ -20,6 +23,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.storage.LevelResource;
@@ -60,6 +64,7 @@ public class trulybestfriends {
     private static final String PETS_INDEX_FILE = "pets_index.nbt";
     private static final Map<String, List<UUID>> indexCache = new ConcurrentHashMap<>();
     private static final Set<UUID> trackedPetUUIDs = ConcurrentHashMap.newKeySet();
+    private static final Map<UUID, String> shoulderPetTypes = new ConcurrentHashMap<>(); // UUID -> entity type key
 
     public static TabToken<TrulyTab> TRULY_TAB;
 
@@ -87,20 +92,33 @@ public class trulybestfriends {
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         CHANNEL.registerMessage(0, GlowPetPacket.class, GlowPetPacket::encode, GlowPetPacket::decode, GlowPetPacket::handle);
+        CHANNEL.registerMessage(1, RecallPetPacket.class, RecallPetPacket::encode, RecallPetPacket::decode, RecallPetPacket::handle);
+        CHANNEL.registerMessage(2, TeleportToPetPacket.class, TeleportToPetPacket::encode, TeleportToPetPacket::decode, TeleportToPetPacket::handle);
+        CHANNEL.registerMessage(3, TeleportPetToPlayerPacket.class, TeleportPetToPlayerPacket::encode, TeleportPetToPlayerPacket::decode, TeleportPetToPlayerPacket::handle);
     }
 
     @SubscribeEvent
     public void onAnimalTamed(AnimalTameEvent event) {
         Entity animal = event.getAnimal();
         if (!animal.level().isClientSide() && animal instanceof OwnableEntity ownable && ownable.getOwnerUUID() != null) {
-            savePetData(ownable.getOwnerUUID(), animal, (ServerLevel) animal.level());
+            UUID owner = ownable.getOwnerUUID();
+            if (countOwnerPets((ServerLevel) animal.level(), owner) >= Config.maxPets) {
+                ServerPlayer ownerPlayer = animal.level().getServer().getPlayerList().getPlayer(owner);
+                if (ownerPlayer != null) {
+                    ownerPlayer.displayClientMessage(
+                            net.minecraft.network.chat.Component.translatable("trulybestfriends.limit.reached", Config.maxPets)
+                                    .withStyle(net.minecraft.ChatFormatting.RED), true);
+                }
+                return;
+            }
+            savePetData(owner, animal, (ServerLevel) animal.level());
             updatePetIndex(animal);
         }
     }
 
     @SubscribeEvent
     public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
+        if (event.getEntity() instanceof ServerPlayer player && Config.enableLoginLoadDiagnostics) {
             loadPlayerPetsData(player);
         }
     }
@@ -112,6 +130,7 @@ public class trulybestfriends {
             if (tickCounter >= Config.syncIntervalTicks) {
                 tickCounter = 0;
                 syncAllPets(event.getServer());
+                trackShoulderPets(event.getServer());
             }
         }
     }
@@ -143,12 +162,29 @@ public class trulybestfriends {
             Path ownerDir = modDir.resolve(ownerUUID.toString());
             Files.createDirectories(ownerDir);
 
+            File nbtFile = ownerDir.resolve(pet.getUUID() + ".nbt").toFile();
+
+            // Preserve Priority from existing file
+            int existingPriority = 6;
+            boolean existingRecalled = false;
+            if (nbtFile.exists()) {
+                try {
+                    CompoundTag oldNbt = NbtIo.readCompressed(nbtFile);
+                    if (oldNbt.contains("Priority")) {
+                        existingPriority = Math.max(1, Math.min(6, oldNbt.getInt("Priority")));
+                    }
+                    existingRecalled = oldNbt.getBoolean("Recalled");
+                } catch (IOException ignored) {}
+            }
+
             CompoundTag nbt = new CompoundTag();
             pet.saveWithoutId(nbt);
             nbt.putString("OwnerUUID", ownerUUID.toString());
             nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());
+            nbt.putString("Dimension", level.dimension().location().toString());
+            nbt.putInt("Priority", existingPriority);
+            if (existingRecalled) nbt.putBoolean("Recalled", true);
 
-            File nbtFile = ownerDir.resolve(pet.getUUID() + ".nbt").toFile();
             NbtIo.writeCompressed(nbt, nbtFile);
         } catch (IOException e) {
             LOGGER.error("Failed to save pet data for {}: {}", pet.getUUID(), e.getMessage());
@@ -230,11 +266,111 @@ public class trulybestfriends {
                 if (entity instanceof OwnableEntity ownable
                         && ownable.getOwnerUUID() != null) {
                     if (!trackedPetUUIDs.contains(entity.getUUID())) {
+                        UUID owner = ownable.getOwnerUUID();
+                        if (countOwnerPets(level, owner) >= Config.maxPets) continue;
                         updatePetIndex(entity);
+                    }
+                    // If pet was recalled while chunk was unloaded, complete the removal now
+                    Path modDir = level.getServer().getWorldPath(LevelResource.ROOT)
+                            .resolve("trulybestfriends")
+                            .resolve(ownable.getOwnerUUID().toString());
+                    File nbtFile = modDir.resolve(entity.getUUID() + ".nbt").toFile();
+                    if (nbtFile.exists()) {
+                        try {
+                            CompoundTag existing = NbtIo.readCompressed(nbtFile);
+                            if (existing.getBoolean("Recalled")) {
+                                entity.discard();
+                                continue; // don't save over the Recalled NBT
+                            }
+                        } catch (IOException ignored) {}
                     }
                     savePetData(ownable.getOwnerUUID(), entity, level);
                 }
             }
+        }
+    }
+
+    private void trackShoulderPets(MinecraftServer server) {
+        Map<UUID, String> currentShoulder = new java.util.HashMap<>();
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            for (var shoulder : new CompoundTag[]{player.getShoulderEntityLeft(), player.getShoulderEntityRight()}) {
+                if (shoulder.contains("UUID") && !shoulder.isEmpty()) {
+                    UUID uuid = shoulder.getUUID("UUID");
+                    String typeKey = shoulder.getString("id");
+                    currentShoulder.put(uuid, typeKey);
+                }
+            }
+        }
+
+        // Detect newly dismounted shoulder pets
+        for (var entry : shoulderPetTypes.entrySet()) {
+            UUID oldUuid = entry.getKey();
+            if (!currentShoulder.containsKey(oldUuid)) {
+                // Shoulder pet dismounted - find the new entity
+                String typeKey = entry.getValue();
+                for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                    Entity found = findNearbyPetOfType(player, typeKey);
+                    if (found != null && !trackedPetUUIDs.contains(found.getUUID())) {
+                        replacePetUuidInIndex((ServerLevel) player.level(), oldUuid, found);
+                        trackedPetUUIDs.remove(oldUuid);
+                        trackedPetUUIDs.add(found.getUUID());
+                        LOGGER.debug("Shoulder pet dismounted: {} -> {}", oldUuid, found.getUUID());
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Update current shoulder state
+        shoulderPetTypes.clear();
+        shoulderPetTypes.putAll(currentShoulder);
+    }
+
+    private Entity findNearbyPetOfType(ServerPlayer player, String typeKey) {
+        ResourceLocation rl = ResourceLocation.tryParse(typeKey);
+        if (rl == null) return null;
+        EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(rl);
+        if (type == null) return null;
+
+        for (Entity entity : player.level().getEntities(player, player.getBoundingBox().inflate(5))) {
+            if (entity.getType() == type
+                    && entity instanceof OwnableEntity ownable
+                    && player.getUUID().equals(ownable.getOwnerUUID())) {
+                return entity;
+            }
+        }
+        return null;
+    }
+
+    private void replacePetUuidInIndex(ServerLevel level, UUID oldUuid, Entity newEntity) {
+        try {
+            Path modDir = level.getServer().getWorldPath(LevelResource.ROOT).resolve("trulybestfriends");
+            File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
+            if (!indexFile.exists()) return;
+
+            CompoundTag indexTag = NbtIo.readCompressed(indexFile);
+            String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(newEntity.getType()).toString();
+            String oldStr = oldUuid.toString();
+            String newStr = newEntity.getUUID().toString();
+
+            ListTag uuidList = indexTag.getList(typeKey, Tag.TAG_STRING);
+            for (int i = 0; i < uuidList.size(); i++) {
+                if (uuidList.getString(i).equals(oldStr)) {
+                    uuidList.set(i, StringTag.valueOf(newStr));
+                    indexTag.put(typeKey, uuidList);
+                    NbtIo.writeCompressed(indexTag, indexFile);
+
+                    // Update cache
+                    List<UUID> cachedList = indexCache.get(typeKey);
+                    if (cachedList != null) {
+                        int idx = cachedList.indexOf(oldUuid);
+                        if (idx >= 0) cachedList.set(idx, newEntity.getUUID());
+                    }
+                    return;
+                }
+            }
+        } catch (IOException e) {
+            LOGGER.error("Failed to replace pet UUID in index: {}", e.getMessage());
         }
     }
 
@@ -274,6 +410,18 @@ public class trulybestfriends {
 		});
 	}
 
+	private int countOwnerPets(ServerLevel level, UUID ownerUUID) {
+		Path ownerDir = level.getServer().getWorldPath(LevelResource.ROOT)
+				.resolve("trulybestfriends")
+				.resolve(ownerUUID.toString());
+		if (!Files.exists(ownerDir)) return 0;
+		try {
+			return (int) Files.list(ownerDir).filter(p -> p.toString().endsWith(".nbt")).count();
+		} catch (IOException e) {
+			return 0;
+		}
+	}
+
 	@SubscribeEvent
 	public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
 		event.register(OPEN_TAB_KEY);
@@ -290,100 +438,4 @@ class TrulyKeyHandler {
 			mc.setScreen(new TrulyScreen(Component.translatable("tab.trulybestfriends.pets")));
 		}
 	}
-}/*@Mod(trulybestfriends.MODID)
-public class trulybestfriends
-{
-    // Define mod id in a common place for everything to reference
-    public static final String MODID = "trulybestfriends";
-    // Directly reference a slf4j logger
-    private static final Logger LOGGER = LogUtils.getLogger();
-    // Create a Deferred Register to hold Blocks which will all be registered under the "examplemod" namespace
-    public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, MODID);
-    // Create a Deferred Register to hold Items which will all be registered under the "examplemod" namespace
-    public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MODID);
-    // Create a Deferred Register to hold CreativeModeTabs which will all be registered under the "examplemod" namespace
-    public static final DeferredRegister<CreativeModeTab> CREATIVE_MODE_TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB, MODID);
-
-    // Creates a new Block with the id "examplemod:example_block", combining the namespace and path
-    public static final RegistryObject<Block> EXAMPLE_BLOCK = BLOCKS.register("example_block", () -> new Block(BlockBehaviour.Properties.of().mapColor(MapColor.STONE)));
-    // Creates a new BlockItem with the id "examplemod:example_block", combining the namespace and path
-    public static final RegistryObject<Item> EXAMPLE_BLOCK_ITEM = ITEMS.register("example_block", () -> new BlockItem(EXAMPLE_BLOCK.get(), new Item.Properties()));
-
-    // Creates a new food item with the id "examplemod:example_id", nutrition 1 and saturation 2
-    public static final RegistryObject<Item> EXAMPLE_ITEM = ITEMS.register("example_item", () -> new Item(new Item.Properties().food(new FoodProperties.Builder()
-            .alwaysEat().nutrition(1).saturationMod(2f).build())));
-
-    // Creates a creative tab with the id "examplemod:example_tab" for the example item, that is placed after the combat tab
-    public static final RegistryObject<CreativeModeTab> EXAMPLE_TAB = CREATIVE_MODE_TABS.register("example_tab", () -> CreativeModeTab.builder()
-            .withTabsBefore(CreativeModeTabs.COMBAT)
-            .icon(() -> EXAMPLE_ITEM.get().getDefaultInstance())
-            .displayItems((parameters, output) -> {
-                output.accept(EXAMPLE_ITEM.get()); // Add the example item to the tab. For your own tabs, this method is preferred over the event
-            }).build());
-
-    public trulybestfriends(FMLJavaModLoadingContext context)
-    {
-        IEventBus modEventBus = context.getModEventBus();
-
-        // Register the commonSetup method for modloading
-        modEventBus.addListener(this::commonSetup);
-
-        // Register the Deferred Register to the mod event bus so blocks get registered
-        BLOCKS.register(modEventBus);
-        // Register the Deferred Register to the mod event bus so items get registered
-        ITEMS.register(modEventBus);
-        // Register the Deferred Register to the mod event bus so tabs get registered
-        CREATIVE_MODE_TABS.register(modEventBus);
-
-        // Register ourselves for server and other game events we are interested in
-        MinecraftForge.EVENT_BUS.register(this);
-
-        // Register the item to a creative tab
-        modEventBus.addListener(this::addCreative);
-
-        // Register our mod's ForgeConfigSpec so that Forge can create and load the config file for us
-        context.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
-    }
-
-    private void commonSetup(final FMLCommonSetupEvent event)
-    {
-        // Some common setup code
-        LOGGER.info("HELLO FROM COMMON SETUP");
-
-        if (Config.logDirtBlock)
-            LOGGER.info("DIRT BLOCK >> {}", ForgeRegistries.BLOCKS.getKey(Blocks.DIRT));
-
-        LOGGER.info(Config.magicNumberIntroduction + Config.magicNumber);
-
-        Config.items.forEach((item) -> LOGGER.info("ITEM >> {}", item.toString()));
-    }
-
-    // Add the example block item to the building blocks tab
-    private void addCreative(BuildCreativeModeTabContentsEvent event)
-    {
-        if (event.getTabKey() == CreativeModeTabs.BUILDING_BLOCKS)
-            event.accept(EXAMPLE_BLOCK_ITEM);
-    }
-
-    // You can use SubscribeEvent and let the Event Bus discover methods to call
-    @SubscribeEvent
-    public void onServerStarting(ServerStartingEvent event)
-    {
-        // Do something when the server starts
-        LOGGER.info("HELLO from server starting");
-    }
-
-    // You can use EventBusSubscriber to automatically register all static methods in the class annotated with @SubscribeEvent
-    @Mod.EventBusSubscriber(modid = MODID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
-    public static class ClientModEvents
-    {
-        @SubscribeEvent
-        public static void onClientSetup(FMLClientSetupEvent event)
-        {
-            // Some client setup code
-            LOGGER.info("HELLO FROM CLIENT SETUP");
-            LOGGER.info("MINECRAFT NAME >> {}", Minecraft.getInstance().getUser().getName());
-        }
-    }
 }
-    */

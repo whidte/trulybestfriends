@@ -214,3 +214,19 @@ publishing {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
 }
+
+// Clean stale lock files from previous runClient before launching
+tasks.register('cleanRunLocks') {
+    doLast {
+        def runDir = file('run')
+        if (runDir.exists()) {
+            fileTree(runDir).matching {
+                include '**/session.lock'
+                include '**/*.lock'
+            }.each { it.delete() }
+        }
+    }
+}
+tasks.matching { it.name == 'runClient' }.configureEach {
+    dependsOn 'cleanRunLocks'
+}
