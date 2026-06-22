@@ -144,10 +144,10 @@ dependencies {
     // then special handling is done to allow a setup of a vanilla dependency without the use of an external repository.
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    // L2Library - https://www.curseforge.com/minecraft/mc-mods/l2library
-    implementation fg.deobf("curse.maven:l2library-620203:6806000")
+    // L2Library and L2Tabs are optional soft dependencies.
+    compileOnly fg.deobf("curse.maven:l2library-620203:6806000")
 
-    // L2Tabs (extracted from L2Library jar-in-jar) - compile-time only
+    // When installed, the mod gains an inventory tab; otherwise a keybinding opens the screen.
     compileOnly files('libs/l2tabs-0.3.3.jar')
 
     // For more info:
@@ -230,3 +230,4 @@ tasks.register('cleanRunLocks') {
 tasks.matching { it.name == 'runClient' }.configureEach {
     dependsOn 'cleanRunLocks'
 }
+

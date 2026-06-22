@@ -1,7 +1,5 @@
 package com.whidte.trulybestfriends.tab;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -11,14 +9,12 @@ import java.util.UUID;
 
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.trulybestfriends;
-import dev.xkmc.l2tabs.tabs.contents.BaseTextScreen;
-import dev.xkmc.l2tabs.tabs.core.TabManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -26,56 +22,16 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.joml.Quaternionf;
 
-public class TrulyScreen extends BaseTextScreen {
+import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
+import static com.whidte.trulybestfriends.tab.RenderHelper.*;
 
-	private static final ResourceLocation TEXTURE =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/empty.png");
+public class TrulyScreen extends Screen {
 
-	// --- Constants ---
-	private static final int MAX_VISIBLE = 8;
-	private static final int COLUMNS = 2;
-	private static final int ENTRY_WIDTH = 40;
-	private static final int ENTRY_HEIGHT = 37;
-	private static final int ENTRY_GAP_X = 2;
-	private static final int LIST_PANEL_OFFSET_X = 86;
-	private static final int LIST_PANEL_OFFSET_Y = 10;
-	private static final int LIST_PANEL_HEIGHT = (MAX_VISIBLE / COLUMNS) * ENTRY_HEIGHT;
-	private static final int LIST_PANEL_WIDTH = COLUMNS * (ENTRY_WIDTH + ENTRY_GAP_X) - ENTRY_GAP_X + 4;
-	private static final int SCROLLBAR_RIGHT_OFFSET = 8;
-	private static final int SCROLLBAR_WIDTH = 4;
-	private static final int ENTITY_PREVIEW_OFFSET_X = 35;
-	private static final int ENTITY_PREVIEW_OFFSET_Y = 50;
-	private static final int GLOW_X = 61;
-	private static final int GLOW_Y = 13;
-	private static final int ACTION_X = 61;
-	private static final int ACTION_Y = 37;
-	private static final int HEART_X = 7;
-	private static final int HEART_Y = 62;
-	private static final int BAR_MIDDLE_WIDTH = 50;
-	private static final int NAME_Y = 74;
-	private static final int SPECIES_Y = 84;
-	private static final int LOCATION_Y = 98;
-	static final float BASE_SCALE = 17f;
-	static final float DEFAULT_ROT_X = -37f;
-	static final float DEFAULT_ROT_Y = -73f;
-	static final float HORSE_MAX_DIM = 1.6f;
-	private static final float BASE_DRAG_SENSITIVITY = 0.25f;
-	private static final int REFERENCE_WINDOW_WIDTH = 1920;
-	private static final int REFRESH_INTERVAL = 20;
-	static final int GLOW_BUTTON_SIZE = 18;
-	private static final int SUMMON_TO_PLAYER_X = 7;
-	private static final int SUMMON_TO_PLAYER_Y = 124;
-	private static final int SUMMON_TO_PLAYER_W = 60;
-
-	// --- Textures ---
-	static final ResourceLocation GLOWING_ICON = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/mob_effect/glowing.png");
-	static final ResourceLocation WIDGET_BUTTON = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/widget_button.png");
-	static final ResourceLocation WIDGETS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/widgets.png");
-	private static final ResourceLocation ICONS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/icons.png");
-	private static final ResourceLocation BARS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/bars.png");
+	protected int leftPos, topPos, imageWidth, imageHeight;
 
 	// --- State ---
 	List<UUID> petUuids = new ArrayList<>();
@@ -98,10 +54,25 @@ public class TrulyScreen extends BaseTextScreen {
 	String tpDimKey;
 	int tpX, tpY, tpZ;
 	boolean coordsHovered;
+	int areaRecallRange = Config.areaRecallDefaultRange;
+	Component warningText;
+	long warningUntil;
+	UUID warningUuid;
+
+	/** Cached sync packet received before the screen was open (e.g. server pushed
+	 *  an update while the player was in another screen). Applied on init(). */
+	private static com.whidte.trulybestfriends.network.SyncPetDataPacket pendingSyncPacket;
+
+	/** The pet UUID that was selected when saveSelectionThenReload was called.
+     *  Used by applySyncPacket(MODE_FULL_LIST) to restore the selection. */
+    private UUID lastRequestedSelection;
+
+    /** L2Tabs TabManager, set via L2TabsIntegration.createTabManager() when L2Tabs is present. */
+    public dev.xkmc.l2tabs.tabs.core.TabManager tabManager;
 
 	// --- Constructor ---
 	public TrulyScreen(Component title) {
-		super(title, TEXTURE);
+		super(title);
 		this.imageWidth = 176;
 		this.imageHeight = 166;
 	}
@@ -110,11 +81,23 @@ public class TrulyScreen extends BaseTextScreen {
 		return this.font;
 	}
 
+	/** Expose protected addRenderableWidget for L2Tabs TabManager. */
+	public <T extends net.minecraft.client.gui.components.events.GuiEventListener & net.minecraft.client.gui.components.Renderable & net.minecraft.client.gui.narration.NarratableEntry> T addWidgetPublic(T widget) {
+		return this.addRenderableWidget(widget);
+	}
+
 	// === Selection helpers ===
 
 	UUID getSelectedUuid() {
 		if (selectedPetIndex < 0 || selectedPetIndex >= petUuids.size()) return null;
 		return petUuids.get(selectedPetIndex);
+	}
+
+	/** Called from PetWarningPacket (client thread) to show a timed warning at the coordinates position. */
+	public void showWarning(Component msg, UUID uuid) {
+		this.warningText = msg;
+		this.warningUntil = System.currentTimeMillis() + 3000;
+		this.warningUuid = uuid;
 	}
 
 	CompoundTag getSelectedNbt() {
@@ -132,7 +115,7 @@ public class TrulyScreen extends BaseTextScreen {
 		if (nbt == null || getMinecraft().level == null) return null;
 		String typeKey = nbt.getString("EntityType");
 		if (typeKey.isEmpty()) return null;
-		EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(new ResourceLocation(typeKey));
+		EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
 		if (type == null) return null;
 		Entity entity = type.create(getMinecraft().level);
 		if (entity == null) return null;
@@ -140,20 +123,24 @@ public class TrulyScreen extends BaseTextScreen {
 		return entity instanceof LivingEntity le ? le : null;
 	}
 
-	/** Discard a preview entity from the client world. */
-	static void discardPreviewEntity(LivingEntity entity) {
-		if (entity != null && entity.isAlive()) {
-			entity.discard();
-		}
-	}
-
 	// === Lifecycle ===
 
 	@Override
 	public void init() {
 		super.init();
-		TabManager manager = new TabManager(this);
-		manager.init(this::addRenderableWidget, trulybestfriends.TRULY_TAB);
+		this.leftPos = (this.width - this.imageWidth) / 2;
+		this.topPos = (this.height - this.imageHeight) / 2;
+
+		// L2Tabs tab bar integration
+		if (net.minecraftforge.fml.ModList.get().isLoaded("l2tabs")) {
+			try {
+				Class.forName("com.whidte.trulybestfriends.tab.L2TabsIntegration")
+					.getMethod("createTabManager", TrulyScreen.class)
+					.invoke(null, this);
+			} catch (Exception e) {
+				trulybestfriends.LOGGER.warn("L2Tabs tab bar init failed: {}", e.toString());
+			}
+		}
 
 		saveSelectionThenReload();
 		addButtons();
@@ -167,6 +154,7 @@ public class TrulyScreen extends BaseTextScreen {
 
 	private void saveSelectionThenReload() {
 		UUID selectedUuid = getSelectedUuid();
+		lastRequestedSelection = selectedUuid;
 
 		petUuids.clear();
 		petNbtCache.clear();
@@ -174,17 +162,35 @@ public class TrulyScreen extends BaseTextScreen {
 		selectedPetIndex = -1;
 		scrollOffset = 0;
 
-		PetDataLoader.loadAll(getMinecraft(), petNbtCache, petPriorities);
-		petUuids.addAll(petNbtCache.keySet());
-		sortPetUuids();
+		// 1. Apply any cached full-list snapshot (arrived while screen was closed).
+		if (pendingSyncPacket != null) {
+			applySyncPacket(pendingSyncPacket);
+			pendingSyncPacket = null;
+			if (selectedUuid != null) restoreSelection(selectedUuid);
+		}
+
+		// 2. Singleplayer: also load from disk for instant feedback (server is
+		//    same process, no network round-trip needed).
+		Minecraft mc = getMinecraft();
+		if (mc.hasSingleplayerServer() && mc.getSingleplayerServer() != null && petNbtCache.isEmpty()) {
+			PetDataLoader.loadAll(mc, petNbtCache, petPriorities);
+			petUuids.addAll(petNbtCache.keySet());
+			sortPetUuids();
+			if (selectedUuid != null) restoreSelection(selectedUuid);
+			if (!hasSelection() && !petUuids.isEmpty()) selectedPetIndex = 0;
+		}
+
 		rebuildPetWidgets();
 
-		if (selectedUuid != null) {
-			restoreSelection(selectedUuid);
+		// 3. Always ask the server for a fresh full-list snapshot (works for both
+		//    singleplayer and multiplayer). The reply updates the cache via
+		//    applySyncPacket(). In singleplayer this overwrites the disk-loaded
+		//    data with the authoritative server version.
+		if (mc.player != null && mc.getConnection() != null) {
+			com.whidte.trulybestfriends.trulybestfriends.CHANNEL.sendToServer(
+					com.whidte.trulybestfriends.network.RequestPetDataPacket.requestFullList());
 		}
-		if (!hasSelection() && !petUuids.isEmpty()) {
-			selectedPetIndex = 0;
-		}
+
 		if (hasSelection()) {
 			adjustScaleForCurrentPet();
 		}
@@ -228,50 +234,95 @@ public class TrulyScreen extends BaseTextScreen {
 	}
 
 	private void refreshSelectedFromDisk() {
+		// Replaced by server-driven sync: ask the server for the latest NBT of
+		// the selected pet.  Server replies with SyncPetDataPacket (update/delete),
+		// handled in applySyncPacket().  No client disk I/O.
 		UUID selUuid = getSelectedUuid();
 		if (selUuid == null) return;
-
 		Minecraft mc = getMinecraft();
-		if (mc.player == null || mc.level == null) return;
+		if (mc.player == null || mc.getConnection() == null) return;
+		com.whidte.trulybestfriends.trulybestfriends.CHANNEL.sendToServer(
+				com.whidte.trulybestfriends.network.RequestPetDataPacket.requestSelected(selUuid));
+	}
 
-		Path petDir = PetDataLoader.getPetSaveDir(mc);
-		if (petDir == null || !Files.exists(petDir)) return;
-
-		java.io.File nbtFile = petDir.resolve(selUuid + ".nbt").toFile();
-		if (!nbtFile.exists()) {
-			// File was deleted — remove from lists
-			petUuids.remove(selUuid);
-			petNbtCache.remove(selUuid);
-			petPriorities.remove(selUuid);
-			selectedPetIndex = -1;
-			if (!petUuids.isEmpty()) selectedPetIndex = 0;
-			boolean has = hasSelection();
-			if (glowButton != null) glowButton.visible = has;
-			if (actionButton != null) actionButton.visible = has;
-			if (summonToPlayerButton != null) summonToPlayerButton.visible = has;
-			sortPetUuids();
-			rebuildPetWidgets();
-			return;
-		}
-
-		try {
-			CompoundTag nbt = NbtIo.readCompressed(nbtFile);
-			petNbtCache.put(selUuid, nbt);
-
-			int priority = nbt.contains("Priority") ? nbt.getInt("Priority") : 6;
-			priority = Math.max(1, Math.min(6, priority));
-			Integer old = petPriorities.put(selUuid, priority);
-			if (old == null || old != priority) {
+	/** Apply a server-pushed sync packet. Called from SyncPetDataPacket.handle
+	 *  when this screen is open. */
+	public void applySyncPacket(com.whidte.trulybestfriends.network.SyncPetDataPacket packet) {
+		switch (packet.getMode()) {
+			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_FULL_LIST -> {
+				petUuids.clear();
+				petNbtCache.clear();
+				petPriorities.clear();
+				selectedPetIndex = -1;
+				UUID prevSelected = lastRequestedSelection;
+				for (Tag raw : packet.getFullList()) {
+					if (raw instanceof CompoundTag entry && entry.hasUUID("UUID")) {
+						UUID uuid = entry.getUUID("UUID");
+						CompoundTag nbt = entry.getCompound("NBT");
+						petNbtCache.put(uuid, nbt);
+						int priority = nbt.contains("Priority") ? nbt.getInt("Priority") : 6;
+						petPriorities.put(uuid, Math.max(1, Math.min(6, priority)));
+						petUuids.add(uuid);
+					}
+				}
+				sortPetUuids();
+				if (prevSelected != null) restoreSelection(prevSelected);
+				if (!hasSelection() && !petUuids.isEmpty()) selectedPetIndex = 0;
+				rebuildPetWidgets();
+				updateButtonVisibility();
+				if (hasSelection()) adjustScaleForCurrentPet();
+			}
+			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_UPDATE -> {
+				UUID uuid = packet.getPetUuid();
+				CompoundTag nbt = packet.getPetNbt();
+				petNbtCache.put(uuid, nbt);
+				int priority = nbt.contains("Priority") ? nbt.getInt("Priority") : 6;
+				priority = Math.max(1, Math.min(6, priority));
+				Integer old = petPriorities.put(uuid, priority);
+				if (!petUuids.contains(uuid)) {
+					petUuids.add(uuid);
+					sortPetUuids();
+					rebuildPetWidgets();
+				} else if (old == null || old != priority) {
+					sortPetUuids();
+					rebuildPetWidgets();
+				}
+			}
+			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_DELETE -> {
+				UUID uuid = packet.getPetUuid();
+				petUuids.remove(uuid);
+				petNbtCache.remove(uuid);
+				petPriorities.remove(uuid);
+				if (!petUuids.contains(getSelectedUuid())) {
+					selectedPetIndex = petUuids.isEmpty() ? -1 : 0;
+				}
 				sortPetUuids();
 				rebuildPetWidgets();
+				updateButtonVisibility();
 			}
-		} catch (Exception e) {
-			trulybestfriends.LOGGER.error("Failed to refresh pet file for {}: {}", selUuid, e.getMessage());
 		}
 	}
 
+	/** Cache a sync packet that arrived while the screen was not open.
+	 *  Applied on next init(). */
+	public static void cacheSyncPacket(com.whidte.trulybestfriends.network.SyncPetDataPacket packet) {
+		// Only full-list snapshots are worth caching for the next screen open;
+		// updates/deletes for a closed screen are stale and can be dropped.
+		if (packet.getMode() == com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_FULL_LIST) {
+			pendingSyncPacket = packet;
+		}
+	}
+
+	private void updateButtonVisibility() {
+		boolean has = hasSelection();
+		if (glowButton != null) glowButton.visible = has;
+		if (actionButton != null) actionButton.visible = has;
+		if (summonToPlayerButton != null) summonToPlayerButton.visible = has;
+	}
+
 	private void cleanExpiredCooldowns() {
-		long cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000;
+		// Cooldowns never exceed recallCooldownMs; keep 2x as safety margin for clock skew.
+		long cutoff = System.currentTimeMillis() - (Config.recallCooldownMs * 2L);
 		cooldowns.values().removeIf(t -> t < cutoff);
 	}
 
@@ -340,7 +391,7 @@ public class TrulyScreen extends BaseTextScreen {
 		}
 		String typeKey = nbt.getString("EntityType");
 		if (!typeKey.isEmpty()) {
-			var type = ForgeRegistries.ENTITY_TYPES.getValue(new ResourceLocation(typeKey));
+			var type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
 			if (type != null) return type.getDescription();
 		}
 		return Component.literal("???");
@@ -352,14 +403,21 @@ public class TrulyScreen extends BaseTextScreen {
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-		super.render(g, mouseX, mouseY, partialTick);
+		// Draw the panel first, then layer custom widgets and overlays on top.
+		this.renderBackground(g);
+		g.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
+		renderListBackground(g);
+		for (GuiEventListener listener : this.children()) {
+			if (listener instanceof net.minecraft.client.gui.components.Renderable renderable) {
+				renderable.render(g, mouseX, mouseY, partialTick);
+			}
+		}
 
 		if (sortNeeded && !net.minecraft.client.gui.screens.Screen.hasShiftDown()) {
 			sortNeeded = false;
 			onShiftReleased();
 		}
 
-		renderListBackground(g);
 		renderScrollBar(g);
 
 		if (hasSelection()) {
@@ -367,6 +425,11 @@ public class TrulyScreen extends BaseTextScreen {
 			renderHealthBar(g);
 			renderPetInfo(g);
 			renderPetLocation(g, mouseX, mouseY);
+		}
+
+		// L2Tabs tooltip overlay (must render after children)
+		if (tabManager != null) {
+			tabManager.onToolTipRender(g, mouseX, mouseY);
 		}
 	}
 
@@ -385,17 +448,20 @@ public class TrulyScreen extends BaseTextScreen {
 		int barH = LIST_PANEL_HEIGHT;
 		int barW = SCROLLBAR_WIDTH;
 
-		g.fill(barX, barY, barX + barW, barY + barH, 0xFF000000);
-		g.fill(barX + 1, barY + 1, barX + barW - 1, barY + barH - 1, 0xFF2D2D2D);
+		// Track: 3-segment blit (top border, stretched middle, bottom border)
+		g.blit(SCROLLBAR, barX, barY, barW, 1, 0, 0, 4, 1, 4, 3);
+		g.blit(SCROLLBAR, barX, barY + 1, barW, barH - 2, 0, 1, 4, 1, 4, 3);
+		g.blit(SCROLLBAR, barX, barY + barH - 1, barW, 1, 0, 2, 4, 1, 4, 3);
 
 		float ratio = (float) MAX_VISIBLE / petUuids.size();
 		int thumbH = Math.max(8, (int) (barH * ratio));
 		float scrollRatio = (float) scrollOffset / Math.max(1, getMaxScrollOffset());
 		int thumbY = barY + (int) ((barH - thumbH) * scrollRatio);
 
-		g.fill(barX, thumbY, barX + barW, thumbY + thumbH, 0xFF000000);
-		g.fill(barX, thumbY, barX + barW - 1, thumbY + thumbH - 1, 0xFFFFFFFF);
-		g.fill(barX + 1, thumbY + 1, barX + barW - 1, thumbY + thumbH - 1, 0xFF8B8B8B);
+		// Thumb: 3-segment blit (top, stretched middle, bottom)
+		g.blit(SCROLLBAR_THUMB, barX, thumbY, barW, 1, 0, 0, 4, 1, 4, 3);
+		g.blit(SCROLLBAR_THUMB, barX, thumbY + 1, barW, thumbH - 2, 0, 1, 4, 1, 4, 3);
+		g.blit(SCROLLBAR_THUMB, barX, thumbY + thumbH - 1, barW, 1, 0, 2, 4, 1, 4, 3);
 	}
 
 	private void renderPetPreview(GuiGraphics g) {
@@ -421,16 +487,6 @@ public class TrulyScreen extends BaseTextScreen {
 		InventoryScreen.renderEntityInInventory(g, ex, ey, (int) currentScale, quat, quatPitch, entity);
 
 		discardPreviewEntity(entity);
-	}
-
-	private static void setXRotUnclamped(Entity entity, float value) {
-		try {
-			var f = Entity.class.getDeclaredField("xRot");
-			f.setAccessible(true);
-			f.setFloat(entity, value);
-		} catch (Exception e) {
-			entity.setXRot(value);
-		}
 	}
 
 	private void renderHealthBar(GuiGraphics g) {
@@ -491,20 +547,43 @@ public class TrulyScreen extends BaseTextScreen {
 		UUID uuid = getSelectedUuid();
 		int scissorWidth = this.leftPos + this.imageWidth - lx - 4;
 
-		// Name (scrolls when name part exceeds ~5 Chinese chars)
-		Component nameLabel = Component.translatable("trulybestfriends.info.name", getPetDisplayName(uuid));
-		int labelPrefixW = this.font().width(Component.translatable("trulybestfriends.info.name", Component.literal("")));
-		int nameMaxW = labelPrefixW + 60; // ~5 full-width Chinese characters
+		// Name: prefix fixed, only the name suffix scrolls when it exceeds 50px
+		Component namePrefix = Component.translatable("trulybestfriends.info.name", Component.literal(""));
+		Component nameSuffix = getPetDisplayName(uuid);
+		int namePrefixW = this.font().width(namePrefix);
+		int nameSuffixW = this.font().width(nameSuffix);
+		int nameSuffixMaxW = 50;
 		int nameY = this.topPos + NAME_Y;
-		g.enableScissor(lx, nameY, lx + scissorWidth, nameY + 10);
-		drawScrollingString(g, nameLabel, lx, nameY, nameMaxW, 0x000000);
-		g.disableScissor();
+		int nameSuffixX = lx + namePrefixW;
+		drawString(g, namePrefix, lx, nameY, 0x000000);
+		if (nameSuffixW <= nameSuffixMaxW) {
+			drawString(g, nameSuffix, nameSuffixX, nameY, 0x000000);
+		} else {
+			// Scroll the name within [nameSuffixX, nameSuffixX + 50]
+			long t = System.currentTimeMillis();
+			int overflow = nameSuffixW - nameSuffixMaxW + 12;
+			int cycle = 8000;
+			long phase = t % cycle;
+			int scroll;
+			if (phase < 2000) {
+				scroll = 0;
+			} else if (phase < 6000) {
+				scroll = (int) (overflow * (phase - 2000) / 4000f);
+			} else {
+				scroll = overflow;
+			}
+			g.flush();
+			g.enableScissor(nameSuffixX, nameY, nameSuffixX + nameSuffixMaxW, nameY + 10);
+			drawString(g, nameSuffix, nameSuffixX - scroll, nameY, 0x000000);
+			g.flush();
+			g.disableScissor();
+		}
 
 		// Species
 		String typeKey = nbt.getString("EntityType");
 		Component speciesName;
 		if (!typeKey.isEmpty()) {
-			var entityType = ForgeRegistries.ENTITY_TYPES.getValue(new ResourceLocation(typeKey));
+			var entityType = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
 			speciesName = entityType != null ? entityType.getDescription() : Component.literal(typeKey);
 		} else {
 			speciesName = Component.translatable("trulybestfriends.location.unknown");
@@ -520,8 +599,41 @@ public class TrulyScreen extends BaseTextScreen {
 
 	private void renderPetLocation(GuiGraphics g, int mouseX, int mouseY) {
 		CompoundTag nbt = getSelectedNbt();
-		if (nbt == null || !nbt.contains("Pos")) return;
-		if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) return;
+		if (nbt == null) return;
+
+		int lx = this.leftPos + HEART_X;
+		int ly = this.topPos + LOCATION_Y;
+
+		// Dead pet: show revive info with item icon
+		if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) {
+			coordsHovered = false;
+			tpDimKey = null;
+			// Whitelisted entity types cannot be revived: show warning instead of item icon
+			if (nbt.contains("EntityType") && Config.isNoReviveEntity(nbt.getString("EntityType"))) {
+				Component warning = Component.translatable("trulybestfriends.revive.not_revivable")
+						.withStyle(net.minecraft.ChatFormatting.RED);
+				int maxW = this.leftPos + this.imageWidth - lx - 4;
+				for (var line : font().split(warning, maxW)) {
+					g.drawString(font(), line, lx, ly, 0xFF0000);
+					ly += font().lineHeight;
+				}
+				return;
+			}
+			var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
+			if (item != null) {
+				Component prefixText = Component.translatable("trulybestfriends.revive.prefix");
+				drawString(g, prefixText, lx, ly, 0x000000);
+				int itemX = lx + font().width(prefixText) + 2;
+				ItemStack icon = new ItemStack(item, Config.reviveItemCount);
+				g.renderItem(icon, itemX, ly - 2);
+				g.renderItemDecorations(font(), icon, itemX, ly - 2);
+				Component suffixText = Component.translatable("trulybestfriends.revive.suffix");
+				drawString(g, suffixText, itemX + 20, ly, 0x000000);
+			}
+			return;
+		}
+
+		if (!nbt.contains("Pos")) return;
 
 		UUID uuid = getSelectedUuid();
 		if (uuid != null && isPetOnShoulder(uuid)) {
@@ -535,32 +647,51 @@ public class TrulyScreen extends BaseTextScreen {
 		var pos = nbt.getList("Pos", 6);
 		if (pos.size() < 3) return;
 
-		int lx = this.leftPos + HEART_X;
-		int ly = this.topPos + LOCATION_Y;
 		int x = (int) Math.round(pos.getDouble(0));
 		int y = (int) Math.round(pos.getDouble(1));
 		int z = (int) Math.round(pos.getDouble(2));
 		String dimKey = nbt.contains("Dimension") ? nbt.getString("Dimension") : "";
 		boolean isRecalled = nbt.getBoolean("Recalled");
-
-		Component dimText;
-		if (!dimKey.isEmpty()) {
-			String name = Config.getDimensionDisplayName(dimKey);
-			dimText = Component.literal(name != null ? name : dimKey);
-		} else {
-			dimText = Component.translatable("trulybestfriends.location.unknown");
-		}
 		int maxTextWidth = this.leftPos + this.imageWidth - lx - 4;
-		g.enableScissor(lx, ly, lx + maxTextWidth, ly + 10);
-		drawString(g, dimText, lx, ly, 0x000000);
-		g.disableScissor();
 
+		// Line 1 (ly): world name, or "已收回" for recalled pets
 		if (isRecalled) {
 			coordsHovered = false;
 			tpDimKey = null;
-			drawString(g, Component.translatable("trulybestfriends.coords.recalled"), lx, ly + 10, 0xAA5555);
+			drawString(g, Component.translatable("trulybestfriends.coords.recalled"), lx, ly, 0xAA5555);
+		} else {
+			Component dimText;
+			if (!dimKey.isEmpty()) {
+				String name = Config.getDimensionDisplayName(dimKey);
+				dimText = Component.literal(name != null ? name : dimKey);
+			} else {
+				dimText = Component.translatable("trulybestfriends.location.unknown");
+			}
+			g.enableScissor(lx, ly, lx + maxTextWidth, ly + 10);
+			drawString(g, dimText, lx, ly, 0x000000);
+			g.disableScissor();
+		}
+
+		// Line 2 (ly + 10): timed warning or coordinates
+		if (warningText != null && System.currentTimeMillis() < warningUntil
+				&& warningUuid != null && warningUuid.equals(getSelectedUuid())) {
+			int wrapWidth = font().width("字") * 8;
+			var lines = font().split(warningText, wrapWidth);
+			int warnColor = isRecalled ? 0xFFFF55 : 0xFF5555;
+			int lineY = ly + 10;
+			int totalHeight = lines.size() * 10;
+			g.enableScissor(lx, ly + 10, lx + maxTextWidth, ly + 10 + totalHeight);
+			for (var line : lines) {
+				font().drawInBatch(line, lx, lineY, warnColor, false,
+						g.pose().last().pose(), g.bufferSource(),
+						net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+				lineY += 10;
+			}
+			g.disableScissor();
 			return;
 		}
+
+		if (isRecalled) return;
 
 		String coordStr = x + " " + y + " " + z;
 		boolean canTp = !dimKey.isEmpty() && minecraft.player != null && minecraft.player.isCreative();
@@ -586,31 +717,11 @@ public class TrulyScreen extends BaseTextScreen {
 	}
 
 	private void drawString(GuiGraphics g, Component text, int x, int y, int color) {
-		this.font().drawInBatch(text.getVisualOrderText(), x, y, color, false,
-				g.pose().last().pose(), g.bufferSource(),
-				net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+		RenderHelper.drawString(g, font(), text, x, y, color);
 	}
 
 	private void drawScrollingString(GuiGraphics g, Component text, int x, int y, int maxWidth, int color) {
-		int textWidth = this.font().width(text);
-		if (textWidth <= maxWidth) {
-			drawString(g, text, x, y, color);
-			return;
-		}
-		long time = System.currentTimeMillis();
-		int overflow = textWidth - maxWidth + 12;
-		int cycleMs = 8000;
-		long phase = time % cycleMs;
-
-		int scrollOffset;
-		if (phase < 2000) {
-			scrollOffset = 0;
-		} else if (phase < 6000) {
-			scrollOffset = (int) (overflow * (phase - 2000) / 4000f);
-		} else {
-			scrollOffset = overflow;
-		}
-		drawString(g, text, x - scrollOffset, y, color);
+		RenderHelper.drawScrollingString(g, font(), text, x, y, maxWidth, color);
 	}
 
 	// ============================
@@ -619,6 +730,10 @@ public class TrulyScreen extends BaseTextScreen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+		if (net.minecraft.client.gui.screens.Screen.hasShiftDown()) {
+			areaRecallRange = Mth.clamp(areaRecallRange + (delta > 0 ? 1 : -1), 1, 16);
+			return true;
+		}
 		if (hasSelection() && isOverEntityPreview(mouseX, mouseY)) {
 			currentScale = Mth.clamp(currentScale + (delta > 0 ? 1 : -1), 5, 50);
 			return true;
@@ -727,15 +842,5 @@ public class TrulyScreen extends BaseTextScreen {
 	@Override
 	public boolean isPauseScreen() {
 		return false;
-	}
-
-	private static void tileBlitH(GuiGraphics g, ResourceLocation tex, int x, int y, int drawW, int drawH,
-	                              int u, int v, int srcW, int srcH, int texW, int texH) {
-		int drawn = 0;
-		while (drawn < drawW) {
-			int chunk = Math.min(srcW, drawW - drawn);
-			g.blit(tex, x + drawn, y, chunk, drawH, u, v, chunk, srcH, texW, texH);
-			drawn += chunk;
-		}
 	}
 }

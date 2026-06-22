@@ -26,23 +26,17 @@ final class PetDataLoader {
 
 	private PetDataLoader() {}
 
-	/** Resolve the owner-specific pet save directory. */
+	/** Resolve the owner-specific pet save directory.
+	 *  Returns null in multiplayer (client cannot access server saves); use
+	 *  RequestPetDataPacket / SyncPetDataPacket for multiplayer data sync. */
 	static Path getPetSaveDir(Minecraft mc) {
 		if (mc.player == null) return null;
 		if (mc.hasSingleplayerServer() && mc.getSingleplayerServer() != null) {
 			Path worldPath = mc.getSingleplayerServer().getWorldPath(LevelResource.ROOT);
 			return worldPath.resolve("trulybestfriends").resolve(mc.player.getUUID().toString());
 		}
-		// Multiplayer: scan local saves directory
-		Path savesDir = mc.gameDirectory.toPath().resolve("saves");
-		if (Files.exists(savesDir)) {
-			try {
-				for (File worldDir : savesDir.toFile().listFiles(File::isDirectory)) {
-					Path petDir = worldDir.toPath().resolve("trulybestfriends").resolve(mc.player.getUUID().toString());
-					if (Files.exists(petDir)) return petDir;
-				}
-			} catch (Exception ignored) {}
-		}
+		// Multiplayer: client cannot read server saves. Data must arrive via
+		// SyncPetDataPacket (server -> client). Return null so callers skip disk I/O.
 		return null;
 	}
 

@@ -20,8 +20,15 @@
   "trulybestfriends.teleport.hint": "Click to teleport",
   "trulybestfriends.recall.out_of_range": "This entity is out of range",
   "trulybestfriends.shoulder.on_shoulder": "On your shoulder!",
+  "trulybestfriends.action.area_recall": "Recall pets within %s blocks(Scroll wheel to adjust range)",
   "trulybestfriends.summon_to_player.label": "Summon",
+  "trulybestfriends.revive.label": "Revive",
+  "trulybestfriends.revive.prefix": "Use ",
+  "trulybestfriends.revive.suffix": " to revive",
+  "trulybestfriends.revive.not_revivable": "This creature cannot be revived this way!",
   "trulybestfriends.info.name": "Name: %s",
   "trulybestfriends.info.species": "Species: %s",
-  "trulybestfriends.limit.reached": "Cannot track more pets (limit: %s)"
+  "trulybestfriends.limit.reached": "Cannot track more pets (limit: %s)",
+  "trulybestfriends.teleport.recalled_warning": "This pet is recalled. Release it first",
+  "trulybestfriends.teleport.lost_warning": "This pet is lost and cannot be summoned"
 }

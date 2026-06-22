@@ -2,14 +2,17 @@ package com.whidte.trulybestfriends;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.logging.LogUtils;
+import com.whidte.trulybestfriends.network.AreaRecallPacket;
 import com.whidte.trulybestfriends.network.GlowPetPacket;
+import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
+import com.whidte.trulybestfriends.network.RequestPetDataPacket;
+import com.whidte.trulybestfriends.network.RevivePetPacket;
+import com.whidte.trulybestfriends.network.SetPriorityPacket;
+import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.TeleportToPetPacket;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
-import com.whidte.trulybestfriends.tab.TrulyTab;
-import dev.xkmc.l2tabs.tabs.core.TabRegistry;
-import dev.xkmc.l2tabs.tabs.core.TabToken;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
@@ -25,7 +28,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.OwnableEntity;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.InputEvent;
@@ -42,7 +44,6 @@ import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.fml.loading.FMLEnvironment;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.simple.SimpleChannel;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -66,11 +67,9 @@ public class trulybestfriends {
     private static final Set<UUID> trackedPetUUIDs = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, String> shoulderPetTypes = new ConcurrentHashMap<>(); // UUID -> entity type key
 
-    public static TabToken<TrulyTab> TRULY_TAB;
-
     private static final String PROTOCOL_VERSION = "1";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            new ResourceLocation(MODID, "main"),
+            ResourceLocation.fromNamespaceAndPath(MODID, "main"),
             () -> PROTOCOL_VERSION,
             PROTOCOL_VERSION::equals,
             PROTOCOL_VERSION::equals
@@ -87,7 +86,7 @@ public class trulybestfriends {
     public trulybestfriends(FMLJavaModLoadingContext context) {
         context.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
         MinecraftForge.EVENT_BUS.register(this);
-        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::commonSetup);
+        context.getModEventBus().addListener(this::commonSetup);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -95,6 +94,12 @@ public class trulybestfriends {
         CHANNEL.registerMessage(1, RecallPetPacket.class, RecallPetPacket::encode, RecallPetPacket::decode, RecallPetPacket::handle);
         CHANNEL.registerMessage(2, TeleportToPetPacket.class, TeleportToPetPacket::encode, TeleportToPetPacket::decode, TeleportToPetPacket::handle);
         CHANNEL.registerMessage(3, TeleportPetToPlayerPacket.class, TeleportPetToPlayerPacket::encode, TeleportPetToPlayerPacket::decode, TeleportPetToPlayerPacket::handle);
+        CHANNEL.registerMessage(4, AreaRecallPacket.class, AreaRecallPacket::encode, AreaRecallPacket::decode, AreaRecallPacket::handle);
+        CHANNEL.registerMessage(5, PetWarningPacket.class, PetWarningPacket::encode, PetWarningPacket::decode, PetWarningPacket::handle);
+        CHANNEL.registerMessage(6, RequestPetDataPacket.class, RequestPetDataPacket::encode, RequestPetDataPacket::decode, RequestPetDataPacket::handle);
+        CHANNEL.registerMessage(7, RevivePetPacket.class, RevivePetPacket::encode, RevivePetPacket::decode, RevivePetPacket::handle);
+        CHANNEL.registerMessage(8, SetPriorityPacket.class, SetPriorityPacket::encode, SetPriorityPacket::decode, SetPriorityPacket::handle);
+        CHANNEL.registerMessage(9, SyncPetDataPacket.class, SyncPetDataPacket::encode, SyncPetDataPacket::decode, SyncPetDataPacket::handle);
     }
 
     @SubscribeEvent
@@ -179,6 +184,7 @@ public class trulybestfriends {
 
             CompoundTag nbt = new CompoundTag();
             pet.saveWithoutId(nbt);
+            com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket.backupChestInventory(pet, nbt);
             nbt.putString("OwnerUUID", ownerUUID.toString());
             nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());
             nbt.putString("Dimension", level.dimension().location().toString());
@@ -404,9 +410,18 @@ public class trulybestfriends {
     @SubscribeEvent
 	public static void onClientSetup(FMLClientSetupEvent event) {
 		event.enqueueWork(() -> {
-			TRULY_TAB = TabRegistry.registerTab(500, TrulyTab::new,
-					() -> Items.LEAD,
-					Component.translatable("tab.trulybestfriends.pets"));
+			if (net.minecraftforge.fml.ModList.get().isLoaded("l2tabs")) {
+				try {
+					Class.forName("com.whidte.trulybestfriends.tab.L2TabsIntegration")
+						.getMethod("register")
+						.invoke(null);
+					LOGGER.info("L2Tabs detected - inventory tab registered.");
+				} catch (Exception e) {
+					LOGGER.warn("L2Tabs present but integration failed: {}", e.toString());
+				}
+			} else {
+				LOGGER.info("L2Tabs not installed - use keybinding to open pet screen.");
+			}
 		});
 	}
 

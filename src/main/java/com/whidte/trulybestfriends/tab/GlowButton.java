@@ -8,6 +8,8 @@ import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
 import org.jetbrains.annotations.NotNull;
 
+import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
+
 class GlowButton extends AbstractWidget {
 	private final TrulyScreen screen;
 
@@ -20,8 +22,8 @@ class GlowButton extends AbstractWidget {
 	public void renderWidget(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
 		if (!screen.hasSelection()) return;
 		int frameV = isHovered() ? 20 : 0;
-		guiGraphics.blit(TrulyScreen.WIDGET_BUTTON, getX(), getY(), 0, frameV, 20, 20, 256, 256);
-		guiGraphics.blit(TrulyScreen.GLOWING_ICON, getX() + 1, getY() + 1, 0, 0, TrulyScreen.GLOW_BUTTON_SIZE, TrulyScreen.GLOW_BUTTON_SIZE, TrulyScreen.GLOW_BUTTON_SIZE, TrulyScreen.GLOW_BUTTON_SIZE);
+		guiGraphics.blit(WIDGET_BUTTON, getX(), getY(), 0, frameV, 20, 20, 256, 256);
+		guiGraphics.blit(GLOWING_ICON, getX() + 1, getY() + 1, 0, 0, GLOW_BUTTON_SIZE, GLOW_BUTTON_SIZE, GLOW_BUTTON_SIZE, GLOW_BUTTON_SIZE);
 
 		if (isHovered()) {
 			guiGraphics.renderTooltip(screen.font(), Component.translatable("trulybestfriends.glow.tooltip"), mouseX, mouseY);

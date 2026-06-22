@@ -20,8 +20,15 @@
   "trulybestfriends.teleport.hint": "点击传送到此处",
   "trulybestfriends.recall.out_of_range": "实体超出收回距离",
   "trulybestfriends.shoulder.on_shoulder": "它在你身上呢！",
+  "trulybestfriends.action.area_recall": "收回 %s 格范围内的实体（可通过滚轮切换范围）",
   "trulybestfriends.summon_to_player.label": "召唤",
+  "trulybestfriends.revive.label": "复活吧！",
+  "trulybestfriends.revive.prefix": "消耗",
+  "trulybestfriends.revive.suffix": "复活",
+  "trulybestfriends.revive.not_revivable": "该生物无法通过此途径复活！",
   "trulybestfriends.info.name": "名称：%s",
   "trulybestfriends.info.species": "种族：%s",
-  "trulybestfriends.limit.reached": "无法追踪更多宠物（上限：%s）"
+  "trulybestfriends.limit.reached": "无法追踪更多宠物（上限：%s）",
+  "trulybestfriends.teleport.recalled_warning": "该宠物已被收回，请先释放",
+  "trulybestfriends.teleport.lost_warning": "该宠物已遗失，无法召唤"
 }
