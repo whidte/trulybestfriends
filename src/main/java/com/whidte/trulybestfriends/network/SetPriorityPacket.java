@@ -47,10 +47,7 @@ public class SetPriorityPacket {
             // Clamp to valid range [1, 6]
             int priority = Math.max(1, Math.min(6, packet.priority));
 
-            Path petDir = player.serverLevel().getServer().getWorldPath(
-                    net.minecraft.world.level.storage.LevelResource.ROOT)
-                    .resolve("trulybestfriends")
-                    .resolve(player.getUUID().toString());
+            Path petDir = PetIOUtil.getOwnerDir(player);
 
             File nbtFile = petDir.resolve(packet.petUuid + ".nbt").toFile();
             if (!nbtFile.exists()) {

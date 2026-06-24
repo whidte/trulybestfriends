@@ -51,6 +51,7 @@ final class TrulyConstants {
 	static final ResourceLocation TEXTURE =
 			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/empty.png");
 	static final ResourceLocation GLOWING_ICON = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/mob_effect/glowing.png");
+	static final ResourceLocation BEACON_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/container/beacon.png");
 	static final ResourceLocation WIDGET_BUTTON = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/widget_button.png");
 	static final ResourceLocation WIDGETS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/widgets.png");
 	static final ResourceLocation ICONS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/icons.png");

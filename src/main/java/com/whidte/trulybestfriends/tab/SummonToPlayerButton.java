@@ -79,6 +79,13 @@ class SummonToPlayerButton extends AbstractWidget {
         return System.currentTimeMillis() - last < Config.recallCooldownMs;
     }
 
+    private long getReviveCooldownRemainingMs() {
+        CompoundTag nbt = screen.getSelectedNbt();
+        if (nbt == null || Config.reviveCooldownSeconds <= 0 || !nbt.contains("LastReviveTime")) return 0;
+        long remaining = nbt.getLong("LastReviveTime") + Config.reviveCooldownSeconds * 1000L - screen.currentServerTimeMillis();
+        return Math.max(0, remaining);
+    }
+
     /** Check if the local player has enough revive items in inventory. Creative players always pass. */
     private boolean hasReviveItems() {
         var player = screen.getMinecraft().player;
@@ -105,11 +112,13 @@ class SummonToPlayerButton extends AbstractWidget {
         boolean recallCooldown = isRecallCooldownActive();
         boolean hasItems = hasReviveItems();
         boolean notRevivable = dead && isPetNotRevivable();
+        long reviveCooldownRemainingMs = dead ? getReviveCooldownRemainingMs() : 0;
+        boolean reviveCooldown = reviveCooldownRemainingMs > 0;
 
         if (notRevivable) {
             this.active = false;
         } else if (dead) {
-            this.active = hasItems && !isOnCooldown();
+            this.active = hasItems && !cooldown && !reviveCooldown;
         } else if (recalled) {
             this.active = !recallCooldown;
         } else {
@@ -121,7 +130,7 @@ class SummonToPlayerButton extends AbstractWidget {
             v = 46; // disabled — cannot be revived
         } else if (dead && !hasItems) {
             v = 46; // disabled style — lack items
-        } else if (dead && cooldown) {
+        } else if (dead && (cooldown || reviveCooldown)) {
             v = 46; // cooldown
         } else if (dead) {
             v = isHovered() ? 86 : 66; // revive available
@@ -145,6 +154,8 @@ class SummonToPlayerButton extends AbstractWidget {
         Component label;
         if (notRevivable) {
             label = Component.translatable("trulybestfriends.revive.not_revivable");
+        } else if (dead && reviveCooldown) {
+            label = Component.translatable("trulybestfriends.revive.cooldown", (reviveCooldownRemainingMs + 999) / 1000);
         } else if (dead) {
             label = Component.translatable("trulybestfriends.revive.label");
         } else {
@@ -155,7 +166,7 @@ class SummonToPlayerButton extends AbstractWidget {
         if (notRevivable) {
             color = COLOR_DISABLED;
         } else if (dead) {
-            if (!hasItems || cooldown) {
+            if (!hasItems || cooldown || reviveCooldown) {
                 color = COLOR_DISABLED;
             } else if (isHovered()) {
                 color = COLOR_REVIVE_OK;
@@ -192,6 +203,7 @@ class SummonToPlayerButton extends AbstractWidget {
             // Whitelisted entity types cannot be revived
             if (isPetNotRevivable()) return;
             if (isOnCooldown()) return;
+            if (getReviveCooldownRemainingMs() > 0) return;
             if (!hasReviveItems()) return;
             if (screen.getMinecraft().level != null) {
                 lastClickTick = screen.getMinecraft().level.getGameTime();

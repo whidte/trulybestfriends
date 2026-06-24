@@ -1,5 +1,7 @@
 package com.whidte.trulybestfriends;
 
+import net.minecraft.client.resources.language.I18n;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.ForgeConfigSpec;
@@ -7,10 +9,8 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.config.ModConfigEvent;
 
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Locale;
 
 @Mod.EventBusSubscriber(modid = trulybestfriends.MODID, bus = Mod.EventBusSubscriber.Bus.MOD)
 public class Config
@@ -18,8 +18,16 @@ public class Config
     private static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
 
     public static final ForgeConfigSpec.IntValue SYNC_INTERVAL_TICKS = BUILDER
-            .comment("Interval in ticks for reading stored pet data and syncing loaded pet data back to disk")
-            .defineInRange("syncIntervalTicks", 5, 1, 100);
+            .comment("Interval in ticks for full fallback scan of all loaded owned entities and caching their latest pet data")
+            .defineInRange("syncIntervalTicks", 103, 1, 1200);
+
+    public static final ForgeConfigSpec.IntValue LOCAL_SYNC_INTERVAL_TICKS = BUILDER
+            .comment("Interval in ticks for scanning nearby entities around players who completed the Truly Best Friends advancement")
+            .defineInRange("localSyncIntervalTicks", 5, 1, 100);
+
+    public static final ForgeConfigSpec.IntValue SAVE_PET_DATA_COOLDOWN_TICKS = BUILDER
+            .comment("Interval in ticks for flushing cached pet data to disk. Player logout and server stop always flush immediately.")
+            .defineInRange("savePetDataCooldownTicks", 100, 1, 1200);
 
     public static final ForgeConfigSpec.DoubleValue RECALL_RANGE = BUILDER
             .comment("Maximum distance (blocks) for recalling a pet back into storage. Set to -1 for unlimited range")
@@ -49,9 +57,30 @@ public class Config
             .comment("Number of revive items required to revive a dead pet.")
             .defineInRange("reviveItemCount", 1, 1, 64);
 
+    public static final ForgeConfigSpec.IntValue REVIVE_COOLDOWN_SECONDS = BUILDER
+            .comment("Cooldown in seconds after reviving a pet before another revive can be used.")
+            .defineInRange("reviveCooldownSeconds", 120, 0, 86400);
+
     public static final ForgeConfigSpec.BooleanValue ENABLE_LOGIN_LOAD_DIAGNOSTICS = BUILDER
             .comment("If true, validates all pet .nbt files on player login and logs counts. Debug only.")
             .define("enableLoginLoadDiagnostics", false);
+
+    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> AUTO_REGISTER_BLACKLIST = BUILDER
+            .comment("Entity types that should not be automatically registered as pets even if they are OwnableEntity.",
+                    "Format: entity id such as \"minecraft:wolf\", or namespace wildcard such as \"some_mod:*\".",
+                    "This only blocks future automatic registration and does not remove already tracked pets.")
+            .defineListAllowEmpty("autoRegisterBlacklist", java.util.Arrays.asList(
+                    "irons_spellbooks:spectral_steed",
+                    "irons_spellbooks:summoned_vex",
+                    "irons_spellbooks:summoned_zombie",
+                    "irons_spellbooks:summoned_skeleton",
+                    "irons_spellbooks:summoned_polar_bear",
+                    "irons_spellbooks:summoned_sword",
+                    "irons_spellbooks:summoned_claymore",
+                    "irons_spellbooks:summoned_rapier",
+                    "irons_spellbooks:spectral_hammer",
+                    "irons_spellbooks:wisp"
+            ), s -> s instanceof String && (((String) s).contains(":") || ((String) s).endsWith(":*")));
 
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> NO_REVIVE_WHITELIST = BUILDER
             .comment("Entity types that keep their death drops and cannot be revived via this mod.",
@@ -61,20 +90,12 @@ public class Config
                     "touhou_little_maid:maid"
             ), s -> s instanceof String && ((String) s).contains(":"));
 
-    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> DIMENSION_NAMES = BUILDER
-            .comment("Dimension display names. Format: \"dimension_id|lang_code|Name\". Separate entries per language.")
-            .defineListAllowEmpty("dimensionNames", java.util.Arrays.asList(
-                    "minecraft:overworld|en_us|Overworld",
-                    "minecraft:overworld|zh_cn|主世界",
-                    "minecraft:the_nether|en_us|The Nether",
-                    "minecraft:the_nether|zh_cn|下界",
-                    "minecraft:the_end|en_us|The End",
-                    "minecraft:the_end|zh_cn|末地"
-            ), s -> s instanceof String && ((String) s).contains("|"));
 
     static final ForgeConfigSpec SPEC = BUILDER.build();
 
     public static int syncIntervalTicks;
+    public static int localSyncIntervalTicks;
+    public static int savePetDataCooldownTicks;
     public static double recallRange;
     public static int recallCooldownMs;
     public static int maxPets;
@@ -82,16 +103,18 @@ public class Config
     public static int maxPendingSummons;
     public static String reviveItem;
     public static int reviveItemCount;
+    public static int reviveCooldownSeconds;
     public static boolean enableLoginLoadDiagnostics;
+    public static java.util.Set<String> autoRegisterBlacklist = new java.util.HashSet<>();
     /** Entity type ids that keep death drops and cannot be revived. */
     public static java.util.Set<String> noReviveWhitelist = new java.util.HashSet<>();
-    /** dimKey -> (langCode -> displayName) */
-    public static Map<String, Map<String, String>> customDimensionNames = new LinkedHashMap<>();
 
     @SubscribeEvent
     static void onLoad(final ModConfigEvent event)
     {
         syncIntervalTicks = SYNC_INTERVAL_TICKS.get();
+        localSyncIntervalTicks = LOCAL_SYNC_INTERVAL_TICKS.get();
+        savePetDataCooldownTicks = SAVE_PET_DATA_COOLDOWN_TICKS.get();
         recallRange = RECALL_RANGE.get();
         recallCooldownMs = RECALL_COOLDOWN_MS.get();
         maxPets = MAX_PETS.get();
@@ -99,48 +122,66 @@ public class Config
         maxPendingSummons = MAX_PENDING_SUMMONS.get();
         reviveItem = REVIVE_ITEM.get();
         reviveItemCount = REVIVE_ITEM_COUNT.get();
+        reviveCooldownSeconds = REVIVE_COOLDOWN_SECONDS.get();
         enableLoginLoadDiagnostics = ENABLE_LOGIN_LOAD_DIAGNOSTICS.get();
+
+        autoRegisterBlacklist.clear();
+        autoRegisterBlacklist.addAll(AUTO_REGISTER_BLACKLIST.get());
 
         noReviveWhitelist.clear();
         noReviveWhitelist.addAll(NO_REVIVE_WHITELIST.get());
 
-        customDimensionNames.clear();
-        for (String entry : DIMENSION_NAMES.get()) {
-            String[] parts = entry.split("\\|", 3);
-            if (parts.length == 3) {
-                customDimensionNames
-                        .computeIfAbsent(parts[0], k -> new HashMap<>())
-                        .put(parts[1], parts[2]);
-            }
-        }
     }
 
     /**
      * Get the display name for a dimension in the currently selected language.
-     * Falls back: current lang → en_us → first available → null.
+     * Falls back to the raw dimension id when no language entry exists.
      */
     @OnlyIn(Dist.CLIENT)
     public static String getDimensionDisplayName(String dimKey) {
-        String currentLang = net.minecraft.client.Minecraft.getInstance()
-                .getLanguageManager().getSelected();
-        return getDimensionDisplayName(dimKey, currentLang);
+        String translationKey = getDimensionTranslationKey(dimKey);
+        if (translationKey != null && I18n.exists(translationKey)) {
+            return I18n.get(translationKey);
+        }
+        return formatDimensionId(dimKey);
     }
 
-    /**
-     * Testable overload: get display name given an explicit language code.
-     * Falls back: currentLang → en_us → first available → null.
-     */
-    static String getDimensionDisplayName(String dimKey, String currentLang) {
-        Map<String, String> langMap = customDimensionNames.get(dimKey);
-        if (langMap == null || langMap.isEmpty()) return null;
+    private static String formatDimensionId(String dimKey) {
+        if (dimKey == null || dimKey.isEmpty()) return null;
 
-        String name = langMap.get(currentLang);
-        if (name != null) return name;
+        String normalizedDimKey = dimKey.toLowerCase(Locale.ROOT);
+        ResourceLocation id = ResourceLocation.tryParse(normalizedDimKey);
+        String path = id != null ? id.getPath() : normalizedDimKey;
+        String[] words = path.replace('/', '_').split("_");
+        StringBuilder result = new StringBuilder();
+        for (String word : words) {
+            if (word.isEmpty()) continue;
+            if (!result.isEmpty()) result.append(' ');
+            result.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+        }
+        return result.isEmpty() ? dimKey : result.toString();
+    }
 
-        name = langMap.get("en_us");
-        if (name != null) return name;
+    static String getDimensionTranslationKey(String dimKey) {
+        if (dimKey == null || dimKey.isEmpty()) return null;
 
-        return langMap.values().iterator().next();
+        String normalizedDimKey = dimKey.toLowerCase(Locale.ROOT);
+        return switch (normalizedDimKey) {
+            case "minecraft:overworld" -> "dimension.minecraft.overworld";
+            case "minecraft:the_nether" -> "dimension.minecraft.the_nether";
+            case "minecraft:the_end" -> "dimension.minecraft.the_end";
+            default -> {
+                ResourceLocation id = ResourceLocation.tryParse(normalizedDimKey);
+                yield id != null ? "dimension." + id.getNamespace() + "." + id.getPath().replace('/', '.') : null;
+            }
+        };
+    }
+
+    public static boolean isAutoRegisterBlacklisted(String entityTypeKey) {
+        if (entityTypeKey == null || entityTypeKey.isEmpty()) return false;
+        if (autoRegisterBlacklist.contains(entityTypeKey)) return true;
+        ResourceLocation id = ResourceLocation.tryParse(entityTypeKey);
+        return id != null && autoRegisterBlacklist.contains(id.getNamespace() + ":*");
     }
 
     /**

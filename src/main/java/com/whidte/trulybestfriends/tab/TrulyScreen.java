@@ -38,6 +38,7 @@ public class TrulyScreen extends Screen {
 	Map<UUID, CompoundTag> petNbtCache = new LinkedHashMap<>();
 	Map<UUID, Integer> petPriorities = new LinkedHashMap<>();
 	Map<UUID, Long> cooldowns = new java.util.HashMap<>();
+	long serverTimeOffsetMs = 0L;
 	int selectedPetIndex = -1;
 	int scrollOffset = 0;
 	float currentScale = 17;
@@ -48,6 +49,7 @@ public class TrulyScreen extends Screen {
 	boolean sortNeeded = false;
 	int tickCounter = 0;
 	long lastGlowClickTime = 0;
+	UUID deletePromptUuid;
 	GlowButton glowButton;
 	ActionButton actionButton;
 	SummonToPlayerButton summonToPlayerButton;
@@ -107,6 +109,21 @@ public class TrulyScreen extends Screen {
 
 	boolean hasSelection() {
 		return getSelectedUuid() != null;
+	}
+
+	boolean isSelectedPetInactive() {
+		CompoundTag nbt = getSelectedNbt();
+		return nbt != null && (nbt.getBoolean("Recalled") || isSelectedPetDead() || isSelectedPetLost());
+	}
+
+	boolean isSelectedPetDead() {
+		CompoundTag nbt = getSelectedNbt();
+		return nbt != null && nbt.contains("Health") && nbt.getFloat("Health") <= 0;
+	}
+
+	boolean isSelectedPetLost() {
+		CompoundTag nbt = getSelectedNbt();
+		return nbt != null && (nbt.getBoolean("Lost") || !nbt.contains("Pos") || !nbt.contains("Dimension"));
 	}
 
 	/** Create a temporary client-side LivingEntity from the selected NBT. Caller must discard when done. */
@@ -275,8 +292,12 @@ public class TrulyScreen extends Screen {
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_UPDATE -> {
 				UUID uuid = packet.getPetUuid();
 				CompoundTag nbt = packet.getPetNbt();
-				petNbtCache.put(uuid, nbt);
-				int priority = nbt.contains("Priority") ? nbt.getInt("Priority") : 6;
+				CompoundTag merged = petNbtCache.getOrDefault(uuid, new CompoundTag()).copy();
+				for (String key : nbt.getAllKeys()) {
+					merged.put(key, nbt.get(key));
+				}
+				petNbtCache.put(uuid, merged);
+				int priority = merged.contains("Priority") ? merged.getInt("Priority") : 6;
 				priority = Math.max(1, Math.min(6, priority));
 				Integer old = petPriorities.put(uuid, priority);
 				if (!petUuids.contains(uuid)) {
@@ -293,6 +314,7 @@ public class TrulyScreen extends Screen {
 				petUuids.remove(uuid);
 				petNbtCache.remove(uuid);
 				petPriorities.remove(uuid);
+				if (uuid.equals(deletePromptUuid)) deletePromptUuid = null;
 				if (!petUuids.contains(getSelectedUuid())) {
 					selectedPetIndex = petUuids.isEmpty() ? -1 : 0;
 				}
@@ -311,6 +333,10 @@ public class TrulyScreen extends Screen {
 		if (packet.getMode() == com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_FULL_LIST) {
 			pendingSyncPacket = packet;
 		}
+	}
+
+	long currentServerTimeMillis() {
+		return System.currentTimeMillis() + serverTimeOffsetMs;
 	}
 
 	private void updateButtonVisibility() {
@@ -493,9 +519,9 @@ public class TrulyScreen extends Screen {
 		CompoundTag nbt = getSelectedNbt();
 		if (nbt == null) return;
 		float currentHealth = nbt.contains("Health") ? nbt.getFloat("Health") : 20;
-		float maxHealth = 20;
+		float maxHealth = nbt.contains("MaxHealth") ? nbt.getFloat("MaxHealth") : 20;
 
-		if (nbt.contains("Attributes")) {
+		if (!nbt.contains("MaxHealth") && nbt.contains("Attributes")) {
 			for (Tag tag : nbt.getList("Attributes", 10)) {
 				CompoundTag attr = (CompoundTag) tag;
 				if ("minecraft:generic.max_health".equals(attr.getString("Name"))) {
@@ -612,7 +638,8 @@ public class TrulyScreen extends Screen {
 			if (nbt.contains("EntityType") && Config.isNoReviveEntity(nbt.getString("EntityType"))) {
 				Component warning = Component.translatable("trulybestfriends.revive.not_revivable")
 						.withStyle(net.minecraft.ChatFormatting.RED);
-				int maxW = this.leftPos + this.imageWidth - lx - 4;
+				int infoRight = this.leftPos + LIST_PANEL_OFFSET_X - 4;
+				int maxW = Math.min(infoRight - lx, 72);
 				for (var line : font().split(warning, maxW)) {
 					g.drawString(font(), line, lx, ly, 0xFF0000);
 					ly += font().lineHeight;
@@ -652,7 +679,8 @@ public class TrulyScreen extends Screen {
 		int z = (int) Math.round(pos.getDouble(2));
 		String dimKey = nbt.contains("Dimension") ? nbt.getString("Dimension") : "";
 		boolean isRecalled = nbt.getBoolean("Recalled");
-		int maxTextWidth = this.leftPos + this.imageWidth - lx - 4;
+		int infoRight = this.leftPos + LIST_PANEL_OFFSET_X - 4;
+		int maxTextWidth = infoRight - lx;
 
 		// Line 1 (ly): world name, or "已收回" for recalled pets
 		if (isRecalled) {
@@ -668,14 +696,14 @@ public class TrulyScreen extends Screen {
 				dimText = Component.translatable("trulybestfriends.location.unknown");
 			}
 			g.enableScissor(lx, ly, lx + maxTextWidth, ly + 10);
-			drawString(g, dimText, lx, ly, 0x000000);
+			drawScrollingString(g, dimText, lx, ly, maxTextWidth, 0x000000);
 			g.disableScissor();
 		}
 
 		// Line 2 (ly + 10): timed warning or coordinates
 		if (warningText != null && System.currentTimeMillis() < warningUntil
 				&& warningUuid != null && warningUuid.equals(getSelectedUuid())) {
-			int wrapWidth = font().width("字") * 8;
+			int wrapWidth = Math.min(maxTextWidth, 72);
 			var lines = font().split(warningText, wrapWidth);
 			int warnColor = isRecalled ? 0xFFFF55 : 0xFF5555;
 			int lineY = ly + 10;

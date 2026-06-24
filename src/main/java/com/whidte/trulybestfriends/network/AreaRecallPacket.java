@@ -40,7 +40,7 @@ public class AreaRecallPacket {
             int range = packet.range;
             int recalled = 0;
 
-            Path ownerDir = PetIOUtil.getOwnerDir(level, player.getUUID());
+            Path ownerDir = PetIOUtil.getOwnerDir(player);
             if (!Files.exists(ownerDir)) {
                 ctx.get().setPacketHandled(true);
                 return;
@@ -87,6 +87,7 @@ public class AreaRecallPacket {
                     // Entity not in world: check shoulder
                     CompoundTag shoulderNbt = PetIOUtil.getShoulderEntity(player, petUuid);
                     if (shoulderNbt != null) {
+                        trulybestfriends.flushPendingPetSaves(player.getUUID());
                         PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, level);
                         PetIOUtil.clearShoulderSlot(player, petUuid);
                         recalled++;

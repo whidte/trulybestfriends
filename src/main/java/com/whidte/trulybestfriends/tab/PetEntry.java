@@ -146,6 +146,9 @@ class PetEntry extends AbstractWidget {
 			screen.sortNeeded = true;
 			return;
 		}
+		if (screen.selectedPetIndex != index) {
+			screen.deletePromptUuid = null;
+		}
 		screen.selectedPetIndex = index;
 		screen.glowButton.visible = true;
 		screen.actionButton.visible = true;

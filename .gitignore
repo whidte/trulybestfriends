@@ -23,3 +23,9 @@ run
 
 # Files from Forge MDK
 forge*changelog.txt
+
+# local/generated files
+.gitattributes
+l2tabs.mixins
+l2tabs.mixins.json
+l2library.refmap.json

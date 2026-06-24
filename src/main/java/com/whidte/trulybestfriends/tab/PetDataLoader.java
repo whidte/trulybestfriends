@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.UUID;
 
+import com.whidte.trulybestfriends.network.PetIOUtil;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
@@ -33,7 +34,7 @@ final class PetDataLoader {
 		if (mc.player == null) return null;
 		if (mc.hasSingleplayerServer() && mc.getSingleplayerServer() != null) {
 			Path worldPath = mc.getSingleplayerServer().getWorldPath(LevelResource.ROOT);
-			return worldPath.resolve("trulybestfriends").resolve(mc.player.getUUID().toString());
+			return PetIOUtil.getOwnerDir(PetIOUtil.getModDir(worldPath), mc.player.getUUID());
 		}
 		// Multiplayer: client cannot read server saves. Data must arrive via
 		// SyncPetDataPacket (server -> client). Return null so callers skip disk I/O.

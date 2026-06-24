@@ -34,29 +34,31 @@ public class SyncPetDataPacket {
     private final UUID petUuid;          // used by UPDATE / DELETE; null for FULL_LIST
     private final CompoundTag petNbt;    // used by FULL_LIST (wrapped) / UPDATE; null for DELETE
     private final ListTag fullList;      // used by FULL_LIST only; null otherwise
+    private final long serverTime;
 
     // --- Constructors ---
 
-    private SyncPetDataPacket(int mode, UUID petUuid, CompoundTag petNbt, ListTag fullList) {
+    private SyncPetDataPacket(int mode, UUID petUuid, CompoundTag petNbt, ListTag fullList, long serverTime) {
         this.mode = mode;
         this.petUuid = petUuid;
         this.petNbt = petNbt;
         this.fullList = fullList;
+        this.serverTime = serverTime;
     }
 
     /** Full list snapshot: each entry is a CompoundTag with "UUID" and "NBT". */
     public static SyncPetDataPacket fullList(ListTag list) {
-        return new SyncPetDataPacket(MODE_FULL_LIST, null, null, list);
+        return new SyncPetDataPacket(MODE_FULL_LIST, null, null, list, System.currentTimeMillis());
     }
 
     /** Single pet update. */
     public static SyncPetDataPacket update(UUID uuid, CompoundTag nbt) {
-        return new SyncPetDataPacket(MODE_UPDATE, uuid, nbt, null);
+        return new SyncPetDataPacket(MODE_UPDATE, uuid, nbt, null, System.currentTimeMillis());
     }
 
     /** Pet deletion notice. */
     public static SyncPetDataPacket delete(UUID uuid) {
-        return new SyncPetDataPacket(MODE_DELETE, uuid, null, null);
+        return new SyncPetDataPacket(MODE_DELETE, uuid, null, null, System.currentTimeMillis());
     }
 
     // --- Codec ---
@@ -72,9 +74,15 @@ public class SyncPetDataPacket {
             }
             case MODE_UPDATE -> {
                 buf.writeUUID(packet.petUuid);
-                buf.writeNbt(packet.petNbt);
+                CompoundTag holder = new CompoundTag();
+                holder.put("NBT", packet.petNbt);
+                holder.putLong("ServerTime", packet.serverTime);
+                buf.writeNbt(holder);
             }
-            case MODE_DELETE -> buf.writeUUID(packet.petUuid);
+            case MODE_DELETE -> {
+                buf.writeUUID(packet.petUuid);
+                buf.writeLong(packet.serverTime);
+            }
             default -> throw new IllegalArgumentException("Unknown mode: " + packet.mode);
         }
     }
@@ -85,18 +93,33 @@ public class SyncPetDataPacket {
             case MODE_FULL_LIST -> {
                 Tag tag = buf.readNbt();
                 ListTag list = new ListTag();
-                if (tag instanceof CompoundTag ct && ct.contains("List")) {
-                    list = ct.getList("List", Tag.TAG_COMPOUND);
+                long serverTime = System.currentTimeMillis();
+                if (tag instanceof CompoundTag ct) {
+                    if (ct.contains("List")) list = ct.getList("List", Tag.TAG_COMPOUND);
+                    if (ct.contains("ServerTime")) serverTime = ct.getLong("ServerTime");
                 }
-                yield fullList(list);
+                yield new SyncPetDataPacket(MODE_FULL_LIST, null, null, list, serverTime);
             }
             case MODE_UPDATE -> {
                 UUID uuid = buf.readUUID();
                 Tag tag = buf.readNbt();
-                CompoundTag nbt = tag instanceof CompoundTag ct ? ct : new CompoundTag();
-                yield update(uuid, nbt);
+                CompoundTag nbt = new CompoundTag();
+                long serverTime = System.currentTimeMillis();
+                if (tag instanceof CompoundTag ct) {
+                    if (ct.contains("NBT")) {
+                        nbt = ct.getCompound("NBT");
+                        if (ct.contains("ServerTime")) serverTime = ct.getLong("ServerTime");
+                    } else {
+                        nbt = ct;
+                    }
+                }
+                yield new SyncPetDataPacket(MODE_UPDATE, uuid, nbt, null, serverTime);
             }
-            case MODE_DELETE -> delete(buf.readUUID());
+            case MODE_DELETE -> {
+                UUID uuid = buf.readUUID();
+                long serverTime = buf.readLong();
+                yield new SyncPetDataPacket(MODE_DELETE, uuid, null, null, serverTime);
+            }
             default -> throw new IllegalArgumentException("Unknown mode: " + mode);
         };
     }
@@ -122,4 +145,5 @@ public class SyncPetDataPacket {
     public UUID getPetUuid() { return petUuid; }
     public CompoundTag getPetNbt() { return petNbt; }
     public ListTag getFullList() { return fullList; }
+    public long getServerTime() { return serverTime; }
 }

@@ -65,7 +65,7 @@ public class TeleportPetToPlayerPacket {
             }
 
             // Read NBT for cross-dimension lookup
-            java.nio.file.Path ownerDir = PetIOUtil.getOwnerDir(playerLevel, player.getUUID());
+            java.nio.file.Path ownerDir = PetIOUtil.getOwnerDir(player);
             File nbtFile = ownerDir.resolve(packet.petUuid + ".nbt").toFile();
             if (!nbtFile.exists()) {
                 sendWarning(player, 1, packet.petUuid); // lost / no data
@@ -109,24 +109,35 @@ public class TeleportPetToPlayerPacket {
             // Case 3: pet is in an unloaded chunk — force-load and defer to next tick.
             // setChunkForced cannot return entities in the same tick (async entity
             // loading), so we queue the request and process it in onServerTick.
+            // ChunkX/ChunkZ are derived from the entity's Pos (vanilla NBT stores
+            // only world coordinates, not chunk coordinates).
+            int cx = Integer.MIN_VALUE;
+            int cz = Integer.MIN_VALUE;
             if (nbt.contains("ChunkX", 3) && nbt.contains("ChunkZ", 3)) {
-                int cx = nbt.getInt("ChunkX");
-                int cz = nbt.getInt("ChunkZ");
+                cx = nbt.getInt("ChunkX");
+                cz = nbt.getInt("ChunkZ");
+            } else if (nbt.contains("Pos", 9)) {
+                var posList = nbt.getList("Pos", 6);
+                if (posList.size() >= 3) {
+                    cx = net.minecraft.util.Mth.floor(posList.getDouble(0)) >> 4;
+                    cz = net.minecraft.util.Mth.floor(posList.getDouble(2)) >> 4;
+                }
+            }
+            if (cx != Integer.MIN_VALUE && cz != Integer.MIN_VALUE) {
                 // Per-player limit: prevent unbounded queue growth from rapid re-summons
                 long playerPending = pendingSummons.stream()
                         .filter(p -> p.playerUuid.equals(player.getUUID()))
                         .count();
                 if (playerPending >= maxPendingPerPlayer()) {
-                    // Too many pending — summon directly without discarding original
-                    summonFromDisk(nbt, packet.petUuid, player, playerLevel);
+                    sendWarning(player, 2, packet.petUuid);
                     return;
                 }
+                trulybestfriends.flushPendingPetSaves(player.getUUID());
                 petLevel.setChunkForced(cx, cz, true);
                 pendingSummons.add(new PendingSummon(
                         packet.petUuid, player.getUUID(), cx, cz, petLevel));
             } else {
-                // No chunk info — cannot locate original, summon directly (best effort)
-                summonFromDisk(nbt, packet.petUuid, player, playerLevel);
+                sendWarning(player, 1, packet.petUuid);
             }
         });
         ctx.get().setPacketHandled(true);
@@ -436,6 +447,7 @@ public class TeleportPetToPlayerPacket {
             Entity entity = pending.petLevel.getEntity(pending.petUuid);
             if (entity instanceof LivingEntity living && living.isAlive()) {
                 // Chunk loaded — discard original and summon at player
+                trulybestfriends.flushPendingPetSaves(player.getUUID());
                 living.discard();
                 pending.petLevel.setChunkForced(pending.chunkX, pending.chunkZ, false);
                 completeSummon(player, pending.petUuid);
@@ -443,10 +455,8 @@ public class TeleportPetToPlayerPacket {
             } else {
                 pending.attempts++;
                 if (pending.attempts >= MAX_PENDING_ATTEMPTS) {
-                    // Timeout — chunk failed to load in time. Summon directly
-                    // without discarding (best effort; syncAllPets will reconcile).
                     pending.petLevel.setChunkForced(pending.chunkX, pending.chunkZ, false);
-                    completeSummon(player, pending.petUuid);
+                    sendWarning(player, 1, pending.petUuid);
                     pendingSummons.remove(pending);
                 }
             }
@@ -456,7 +466,7 @@ public class TeleportPetToPlayerPacket {
     /** Read NBT and summon pet from disk at player's current location. */
     private static void completeSummon(ServerPlayer player, UUID petUuid) {
         ServerLevel playerLevel = player.serverLevel();
-        java.nio.file.Path ownerDir = PetIOUtil.getOwnerDir(playerLevel, player.getUUID());
+        java.nio.file.Path ownerDir = PetIOUtil.getOwnerDir(player);
         File nbtFile = ownerDir.resolve(petUuid + ".nbt").toFile();
         if (!nbtFile.exists()) return;
         try {

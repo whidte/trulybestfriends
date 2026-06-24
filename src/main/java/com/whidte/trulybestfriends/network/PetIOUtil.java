@@ -29,10 +29,29 @@ public final class PetIOUtil {
 
     // ---- Owner directory ----
 
+    public static Path getModDir(ServerLevel level) {
+        return level.getServer().getWorldPath(LevelResource.ROOT).resolve("trulybestfriends");
+    }
+
+    public static Path getModDir(ServerPlayer player) {
+        return player.server.getWorldPath(LevelResource.ROOT).resolve("trulybestfriends");
+    }
+
+    public static Path getModDir(Path worldPath) {
+        return worldPath.resolve("trulybestfriends");
+    }
+
     /** Resolve the per-owner pet storage directory under {world}/trulybestfriends/{ownerUuid}. */
+    public static Path getOwnerDir(Path modDir, UUID playerUuid) {
+        return modDir.resolve(playerUuid.toString());
+    }
+
     public static Path getOwnerDir(ServerLevel level, UUID playerUuid) {
-        Path worldPath = level.getServer().getWorldPath(LevelResource.ROOT);
-        return worldPath.resolve("trulybestfriends").resolve(playerUuid.toString());
+        return getOwnerDir(getModDir(level), playerUuid);
+    }
+
+    public static Path getOwnerDir(ServerPlayer player) {
+        return getModDir(player).resolve(player.getUUID().toString());
     }
 
     // ---- Safe Y search ----

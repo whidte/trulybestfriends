@@ -63,6 +63,7 @@ public class RecallPetPacket {
             // Entity not in world: check shoulder
             var shoulderNbt = PetIOUtil.getShoulderEntity(player, packet.petUuid);
             if (shoulderNbt != null) {
+                trulybestfriends.flushPendingPetSaves(player.getUUID());
                 PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, level);
                 PetIOUtil.clearShoulderSlot(player, packet.petUuid);
                 player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
@@ -70,7 +71,7 @@ public class RecallPetPacket {
             }
 
             // Pet not in world and not on shoulder: check disk NBT
-            Path ownerDir = PetIOUtil.getOwnerDir(level, player.getUUID());
+            Path ownerDir = PetIOUtil.getOwnerDir(player);
             File nbtFile = ownerDir.resolve(packet.petUuid + ".nbt").toFile();
             if (nbtFile.exists()) {
                 try {
@@ -109,28 +110,25 @@ public class RecallPetPacket {
                             }
                         }
 
-                        // Force-load the chunk containing the pet and discard the entity
-                        // in-world. Entities load asynchronously (next tick), so we mark
-                        // Recalled=true first; syncAllPets will finish the removal if the
-                        // entity wasn't loaded in time.
+                        trulybestfriends.flushPendingPetSaves(player.getUUID());
                         nbt.putBoolean("Recalled", true);
                         net.minecraft.nbt.NbtIo.writeCompressed(nbt, nbtFile);
 
+                        int cx = Integer.MIN_VALUE;
+                        int cz = Integer.MIN_VALUE;
                         if (nbt.contains("ChunkX", 99) && nbt.contains("ChunkZ", 99)) {
-                            int cx = nbt.getInt("ChunkX");
-                            int cz = nbt.getInt("ChunkZ");
-                            level.setChunkForced(cx, cz, true);
-                            try {
-                                Entity chunkEntity = level.getEntity(packet.petUuid);
-                                if (chunkEntity instanceof LivingEntity living) {
-                                    // Force dismount before discarding to avoid stale passenger refs
-                                    living.ejectPassengers();
-                                    living.stopRiding();
-                                    living.discard();
-                                }
-                            } finally {
-                                level.setChunkForced(cx, cz, false);
+                            cx = nbt.getInt("ChunkX");
+                            cz = nbt.getInt("ChunkZ");
+                        } else if (nbt.contains("Pos", 9)) {
+                            var posList = nbt.getList("Pos", 6);
+                            if (posList.size() >= 3) {
+                                cx = net.minecraft.util.Mth.floor(posList.getDouble(0)) >> 4;
+                                cz = net.minecraft.util.Mth.floor(posList.getDouble(2)) >> 4;
                             }
+                        }
+                        if (cx != Integer.MIN_VALUE && cz != Integer.MIN_VALUE) {
+                            level.setChunkForced(cx, cz, true);
+                            trulybestfriends.queuePendingRemoval(player.getUUID(), packet.petUuid, level, cx, cz);
                         }
 
                         player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
@@ -164,6 +162,7 @@ public class RecallPetPacket {
 
             CompoundTag nbt = new CompoundTag();
             pet.saveWithoutId(nbt);
+            nbt.putFloat("MaxHealth", (float) pet.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH));
             TeleportPetToPlayerPacket.backupChestInventory(pet, nbt);
             nbt.putString("OwnerUUID", playerUuid.toString());
             nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());

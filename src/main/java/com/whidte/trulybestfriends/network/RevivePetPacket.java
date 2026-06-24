@@ -47,9 +47,9 @@ public class RevivePetPacket {
             ServerPlayer player = ctx.get().getSender();
             if (player == null) return;
             ServerLevel level = player.serverLevel();
+            trulybestfriends.flushPendingPetSaves(player.getUUID());
 
-            Path ownerDir = level.getServer().getWorldPath(LevelResource.ROOT)
-                    .resolve("trulybestfriends").resolve(player.getUUID().toString());
+            Path ownerDir = PetIOUtil.getOwnerDir(player);
             File nbtFile = ownerDir.resolve(packet.petUuid + ".nbt").toFile();
             if (!nbtFile.exists()) return;
 
@@ -67,6 +67,13 @@ public class RevivePetPacket {
                     return;
                 }
 
+                long now = System.currentTimeMillis();
+                long reviveCooldownMs = Config.reviveCooldownSeconds * 1000L;
+                if (reviveCooldownMs > 0 && nbt.contains("LastReviveTime")
+                        && now - nbt.getLong("LastReviveTime") < reviveCooldownMs) {
+                    return;
+                }
+
                 // Consume items (creative mode skips check)
                 if (!player.isCreative() && !consumeItems(player)) return;
 
@@ -81,6 +88,7 @@ public class RevivePetPacket {
                 nbt.remove("DeathTime");
                 nbt.remove("HurtTime");
                 nbt.putBoolean("NoAI", false);
+                nbt.putLong("LastReviveTime", now);
 
                 // Apply totem-of-undying status effects
                 applyTotemEffects(nbt);

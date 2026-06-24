@@ -12,10 +12,10 @@ import java.util.function.Supplier;
 /**
  * Server → client: tells the GUI to show a transient warning at the coordinate
  * display position for 3 seconds.  Used when summon/teleport fails because the
- * pet is recalled or lost.
+ * pet is recalled, lost, or the summon queue is busy.
  */
 public class PetWarningPacket {
-    /** 0 = recalled, 1 = lost */
+    /** 0 = recalled, 1 = lost, 2 = busy */
     private final int type;
     private final UUID petUuid;
 
@@ -40,6 +40,8 @@ public class PetWarningPacket {
                 Component msg;
                 if (packet.type == 0) {
                     msg = Component.translatable("trulybestfriends.teleport.recalled_warning");
+                } else if (packet.type == 2) {
+                    msg = Component.translatable("trulybestfriends.teleport.busy_warning");
                 } else {
                     msg = Component.translatable("trulybestfriends.teleport.lost_warning");
                 }
