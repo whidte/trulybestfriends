@@ -71,6 +71,27 @@ description='''${mod_description}'''
 #[features.${mod_id}]
 #openGLVersion="[3.2,)"
 
+
+# Optional soft dependencies for inventory tab integration
+[[dependencies.${mod_id}]]
+    modId="l2library"
+    mandatory=false
+    versionRange="[0.3,)"
+    ordering="NONE"
+    side="BOTH"
+
+# Optional soft dependency: Ice and Fire dragon corpse compatibility.
+# When installed, TBF revives dead IaF dragons (and other IDeadMob entities)
+# in place instead of failing on UUID conflicts. AFTER ensures IaF's classes
+# are registered before TBF's reflective lookups at init time.
+[[dependencies.${mod_id}]]
+    modId="iceandfire"
+    mandatory=false
+    versionRange="[2.1,)"
+    ordering="AFTER"
+    side="BOTH"
 [[index]]
 autoSaveInterval=15
 maxCacheEntries=1000
+
+
