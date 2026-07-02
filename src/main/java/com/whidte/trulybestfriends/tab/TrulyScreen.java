@@ -130,6 +130,15 @@ public class TrulyScreen extends Screen {
 		return nbt != null && (nbt.getBoolean("Lost") || !nbt.contains("Pos") || !nbt.contains("Dimension"));
 	}
 
+	/** 数据损坏（无 Pos 或 Dimension）的宠物：单击直接删除，无需两步确认。
+	 *  与 isSelectedPetLost() 的区别：仅检查数据完整性，不包含 Lost 标志。
+	 *  Lost=true 仅表示实体当前未加载（可能在卸载区块中），数据本身可能完好，
+	 *  不应跳过确认。 */
+	boolean isSelectedPetDataCorrupted() {
+		CompoundTag nbt = getSelectedNbt();
+		return nbt != null && (!nbt.contains("Pos") || !nbt.contains("Dimension"));
+	}
+
 	/** Create a temporary client-side LivingEntity from the selected NBT. Caller must discard when done. */
 	LivingEntity createPreviewEntity() {
 		CompoundTag nbt = getSelectedNbt();

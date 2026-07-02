@@ -41,12 +41,14 @@ class GlowButton extends AbstractWidget {
 	public void onClick(double mouseX, double mouseY) {
 		if (!screen.hasSelection()) return;
 		if (screen.isSelectedPetInactive()) {
-			// Lost pets: single click deletes immediately, no confirmation needed.
-			if (screen.isSelectedPetLost()) {
+			// 死亡且实体已消失（Lost），或数据损坏（无 Pos/Dimension）：
+			// 单击直接删除，无需确认。这类宠物无法通过放出/复活恢复（实体已不在世界）。
+			if (screen.isSelectedPetDead() || screen.isSelectedPetDataCorrupted()) {
 				trulybestfriends.CHANNEL.sendToServer(new DeletePetDataPacket(screen.getSelectedUuid()));
 				return;
 			}
-			// Recalled/dead pets: two-step Shift+click confirmation.
+			// 已收回 / 实体未加载（Lost 但存活）的宠物：两步 Shift+点击确认。
+			// 这些宠物仍可通过放出或区块加载恢复，不应一键删除。
 			boolean armed = screen.getSelectedUuid().equals(screen.deletePromptUuid);
 			if (Screen.hasShiftDown() && armed) {
 				trulybestfriends.CHANNEL.sendToServer(new DeletePetDataPacket(screen.getSelectedUuid()));
@@ -65,7 +67,7 @@ class GlowButton extends AbstractWidget {
 
 	private Component getTooltip(boolean deleteMode) {
 		if (!deleteMode) return Component.translatable("trulybestfriends.glow.tooltip");
-		if (screen.isSelectedPetLost()) {
+		if (screen.isSelectedPetDead() || screen.isSelectedPetDataCorrupted()) {
 			return Component.translatable("trulybestfriends.delete.lost");
 		}
 		if (screen.getSelectedUuid().equals(screen.deletePromptUuid)) {
