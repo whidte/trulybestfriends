@@ -252,6 +252,7 @@ public class TeleportPetToPlayerPacket {
         entity.setPos(player.getX(), player.getY(), player.getZ());
         level.addFreshEntity(entity);
         restoreChestInventory(entity, nbt);
+        com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
     }
 
     /**

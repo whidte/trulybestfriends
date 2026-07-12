@@ -36,6 +36,7 @@ public class TrulyScreen extends Screen {
 	// --- State ---
 	List<UUID> petUuids = new ArrayList<>();
 	Map<UUID, CompoundTag> petNbtCache = new LinkedHashMap<>();
+	private final Map<UUID, LivingEntity> previewEntities = new java.util.HashMap<>();
 	Map<UUID, Integer> petPriorities = new LinkedHashMap<>();
 	Map<UUID, Long> cooldowns = new java.util.HashMap<>();
 	long serverTimeOffsetMs = 0L;
@@ -139,18 +140,38 @@ public class TrulyScreen extends Screen {
 		return nbt != null && (!nbt.contains("Pos") || !nbt.contains("Dimension"));
 	}
 
-	/** Create a temporary client-side LivingEntity from the selected NBT. Caller must discard when done. */
-	LivingEntity createPreviewEntity() {
-		CompoundTag nbt = getSelectedNbt();
+	LivingEntity getPreviewEntity(UUID uuid) {
+		LivingEntity cached = previewEntities.get(uuid);
+		if (cached != null) return cached;
+
+		CompoundTag nbt = petNbtCache.get(uuid);
 		if (nbt == null || getMinecraft().level == null) return null;
 		String typeKey = nbt.getString("EntityType");
 		if (typeKey.isEmpty()) return null;
 		EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
 		if (type == null) return null;
 		Entity entity = type.create(getMinecraft().level);
-		if (entity == null) return null;
-		try { entity.load(nbt); } catch (Exception e) { return null; }
-		return entity instanceof LivingEntity le ? le : null;
+		if (!(entity instanceof LivingEntity livingEntity)) return null;
+		try {
+			livingEntity.load(nbt);
+		} catch (Exception e) {
+			livingEntity.discard();
+			return null;
+		}
+		previewEntities.put(uuid, livingEntity);
+		return livingEntity;
+	}
+
+	private void invalidatePreviewEntity(UUID uuid) {
+		LivingEntity entity = previewEntities.remove(uuid);
+		if (entity != null) discardPreviewEntity(entity);
+	}
+
+	private void clearPreviewEntities() {
+		for (LivingEntity entity : previewEntities.values()) {
+			discardPreviewEntity(entity);
+		}
+		previewEntities.clear();
 	}
 
 	// === Lifecycle ===
@@ -188,6 +209,7 @@ public class TrulyScreen extends Screen {
 
 		petUuids.clear();
 		petNbtCache.clear();
+		clearPreviewEntities();
 		petPriorities.clear();
 		selectedPetIndex = -1;
 		scrollOffset = 0;
@@ -280,8 +302,9 @@ public class TrulyScreen extends Screen {
 	public void applySyncPacket(com.whidte.trulybestfriends.network.SyncPetDataPacket packet) {
 		switch (packet.getMode()) {
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_FULL_LIST -> {
+				Map<UUID, CompoundTag> previousNbt = new LinkedHashMap<>(petNbtCache);
+				Map<UUID, CompoundTag> updatedNbt = new LinkedHashMap<>();
 				petUuids.clear();
-				petNbtCache.clear();
 				petPriorities.clear();
 				selectedPetIndex = -1;
 				UUID prevSelected = lastRequestedSelection;
@@ -289,12 +312,19 @@ public class TrulyScreen extends Screen {
 					if (raw instanceof CompoundTag entry && entry.hasUUID("UUID")) {
 						UUID uuid = entry.getUUID("UUID");
 						CompoundTag nbt = entry.getCompound("NBT");
-						petNbtCache.put(uuid, nbt);
+						updatedNbt.put(uuid, nbt);
 						int priority = nbt.contains("Priority") ? nbt.getInt("Priority") : 6;
 						petPriorities.put(uuid, Math.max(1, Math.min(6, priority)));
 						petUuids.add(uuid);
 					}
 				}
+				for (UUID uuid : new ArrayList<>(previewEntities.keySet())) {
+					if (!updatedNbt.containsKey(uuid) || !java.util.Objects.equals(updatedNbt.get(uuid), previousNbt.get(uuid))) {
+						invalidatePreviewEntity(uuid);
+					}
+				}
+				petNbtCache.clear();
+				petNbtCache.putAll(updatedNbt);
 				sortPetUuids();
 				if (prevSelected != null) restoreSelection(prevSelected);
 				if (!hasSelection() && !petUuids.isEmpty()) selectedPetIndex = 0;
@@ -305,9 +335,13 @@ public class TrulyScreen extends Screen {
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_UPDATE -> {
 				UUID uuid = packet.getPetUuid();
 				CompoundTag nbt = packet.getPetNbt();
-				CompoundTag merged = petNbtCache.getOrDefault(uuid, new CompoundTag()).copy();
+				CompoundTag oldNbt = petNbtCache.get(uuid);
+				CompoundTag merged = oldNbt != null ? oldNbt.copy() : new CompoundTag();
 				for (String key : nbt.getAllKeys()) {
 					merged.put(key, nbt.get(key));
+				}
+				if (!merged.equals(oldNbt)) {
+					invalidatePreviewEntity(uuid);
 				}
 				petNbtCache.put(uuid, merged);
 				int priority = merged.contains("Priority") ? merged.getInt("Priority") : 6;
@@ -324,14 +358,20 @@ public class TrulyScreen extends Screen {
 			}
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_DELETE -> {
 				UUID uuid = packet.getPetUuid();
+				boolean deletedSelectedPet = uuid.equals(getSelectedUuid());
+				int deletedIndex = petUuids.indexOf(uuid);
 				petUuids.remove(uuid);
 				petNbtCache.remove(uuid);
+				invalidatePreviewEntity(uuid);
 				petPriorities.remove(uuid);
 				if (uuid.equals(deletePromptUuid)) deletePromptUuid = null;
-				if (!petUuids.contains(getSelectedUuid())) {
-					selectedPetIndex = petUuids.isEmpty() ? -1 : 0;
-				}
 				sortPetUuids();
+				if (deletedSelectedPet) {
+					selectedPetIndex = petUuids.isEmpty() ? -1 : Math.min(Math.max(deletedIndex, 0), petUuids.size() - 1);
+					if (hasSelection()) adjustScaleForCurrentPet();
+				} else if (selectedPetIndex >= petUuids.size()) {
+					selectedPetIndex = petUuids.isEmpty() ? -1 : petUuids.size() - 1;
+				}
 				rebuildPetWidgets();
 				updateButtonVisibility();
 			}
@@ -368,14 +408,15 @@ public class TrulyScreen extends Screen {
 	// === Scale ===
 
 	void adjustScaleForCurrentPet() {
-		LivingEntity entity = createPreviewEntity();
+		UUID uuid = getSelectedUuid();
+		if (uuid == null) return;
+		LivingEntity entity = getPreviewEntity(uuid);
 		if (entity == null) return;
 		// Store the raw auto-computed scale as the reference for scroll-zoom
 		// bounds.  currentScale is reset to it so switching pets discards the
 		// previous pet's manual zoom.
 		this.referenceScale = computePreviewScale(entity, BASE_SCALE);
 		this.currentScale = this.referenceScale;
-		discardPreviewEntity(entity);
 	}
 
 	/**
@@ -553,7 +594,9 @@ public class TrulyScreen extends Screen {
 		tpDimKey = null;
 		coordsHovered = false;
 
-		LivingEntity entity = createPreviewEntity();
+		UUID uuid = getSelectedUuid();
+		if (uuid == null) return;
+		LivingEntity entity = getPreviewEntity(uuid);
 		if (entity == null) return;
 
 		int ex = this.leftPos + ENTITY_PREVIEW_OFFSET_X;
@@ -610,8 +653,6 @@ public class TrulyScreen extends Screen {
 		}
 
 		renderEntityInInventory(g, ex, ey, currentScale, quat, quatPitch, entity);
-
-		discardPreviewEntity(entity);
 	}
 
 	private void renderHealthBar(GuiGraphics g) {

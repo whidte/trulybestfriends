@@ -6,20 +6,25 @@ import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.NotNull;
 import org.joml.Quaternionf;
 
-import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
-import static com.whidte.trulybestfriends.tab.RenderHelper.*;
-
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+import static com.whidte.trulybestfriends.tab.RenderHelper.detectMultipartYBase;
+import static com.whidte.trulybestfriends.tab.RenderHelper.renderEntityInInventory;
+import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 
 class PetEntry extends AbstractWidget {
+	private static final Quaternionf NORMAL_QUAT = new Quaternionf().rotateZ((float) Math.PI)
+			.rotateX(DEFAULT_ROT_Y * 20.0F * ((float) Math.PI / 180F));
+	private static final Quaternionf NORMAL_QUAT_PITCH = new Quaternionf().rotateX(DEFAULT_ROT_Y * 20.0F * ((float) Math.PI / 180F));
+	private static final Quaternionf MULTIPART_QUAT_PITCH = new Quaternionf().rotateX(-DEFAULT_ROT_Y * 20.0F * ((float) Math.PI / 180F));
+	private static final Map<String, Quaternionf> MULTIPART_QUATS = new ConcurrentHashMap<>();
+
 	private final int index;
 	private final TrulyScreen screen;
 
@@ -32,8 +37,6 @@ class PetEntry extends AbstractWidget {
 	@Override
 	public void renderWidget(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
 		boolean isSelected = screen.selectedPetIndex == index;
-
-		// Draw entry background from texture (top half = unselected, bottom half = selected)
 		int vOffset = isSelected ? ENTRY_HEIGHT : 0;
 		guiGraphics.blit(PET_ENTRY, getX(), getY(), ENTRY_WIDTH, ENTRY_HEIGHT, 0, vOffset, ENTRY_WIDTH, ENTRY_HEIGHT, ENTRY_WIDTH, ENTRY_HEIGHT * 2);
 
@@ -44,51 +47,33 @@ class PetEntry extends AbstractWidget {
 		int textColor = isDead ? 0xFF5555 : (isSelected ? 0xFFFFFF : 0xA0A0A0);
 		int textY = getY() + height - 9;
 
-		// Create a temporary preview entity
-		LivingEntity pet = createPetEntryEntity(uuid);
+		LivingEntity pet = screen.getPreviewEntity(uuid);
 		if (pet != null) {
-			// Render pet preview at top center.
-			// Use the same scale logic as the main preview (IaF-style
-			// getScale() formula), but with a smaller base size so the
-			// mini preview fits inside the list entry.
 			float miniScale = TrulyScreen.computePreviewScale(pet, BASE_SCALE * (28f / 50f));
-
 			int miniX = getX() + width / 2;
 			int miniY = getY() + (textY - getY()) / 2 + 7;
-
-			// Multipart / scaled entities (IaF dragons, Ender Dragon, ...)
-			// must NOT use the rotX-driven yBodyRot formula — their model
-			// animation requires a full 360° turn before lining up again.
-			// Leave yBodyRot at 0° (matching IaF's GuiDragon) and fold the
-			// horizontal rotation into the quaternion via rotateY.
-			boolean multipart = pet.getScale() > 1.0001f
-					|| (pet.getParts() != null && pet.getParts().length > 0);
+			boolean multipart = pet.getScale() > 1.0001f || (pet.getParts() != null && pet.getParts().length > 0);
 			Quaternionf quat;
 			Quaternionf quatPitch;
 			if (multipart) {
-				float yBase = detectMultipartYBase(pet);
-				quat = new Quaternionf().rotateZ((float) Math.PI).rotateY(yBase - DEFAULT_ROT_X * 20.0F * ((float) Math.PI / 180F));
-				quatPitch = new Quaternionf().rotateX(-DEFAULT_ROT_Y * 20.0F * ((float) Math.PI / 180F));
+				String typeKey = pet.getType().builtInRegistryHolder().key().location().toString();
+				quat = MULTIPART_QUATS.computeIfAbsent(typeKey, ignored ->
+						new Quaternionf().rotateZ((float) Math.PI)
+								.rotateY(detectMultipartYBase(pet) - DEFAULT_ROT_X * 20.0F * ((float) Math.PI / 180F))
+								.mul(MULTIPART_QUAT_PITCH));
+				quatPitch = MULTIPART_QUAT_PITCH;
 			} else {
-				quat = new Quaternionf().rotateZ((float) Math.PI);
-				quatPitch = new Quaternionf().rotateX(DEFAULT_ROT_Y * 20.0F * ((float) Math.PI / 180F));
+				quat = NORMAL_QUAT;
+				quatPitch = NORMAL_QUAT_PITCH;
 			}
-			quat.mul(quatPitch);
 
 			if (!multipart) {
 				pet.yBodyRot = 180.0F + DEFAULT_ROT_X * 20.0F;
 				pet.setYRot(180.0F + DEFAULT_ROT_X * 40.0F);
-				try {
-					var xRotField = Entity.class.getDeclaredField("xRot");
-					xRotField.setAccessible(true);
-					xRotField.setFloat(pet, -DEFAULT_ROT_Y * 20.0F);
-				} catch (Exception e) {
-					pet.setXRot(-DEFAULT_ROT_Y * 20.0F);
-				}
+				pet.setXRot(-DEFAULT_ROT_Y * 20.0F);
 				pet.yHeadRot = pet.yBodyRot;
 				pet.yHeadRotO = pet.yBodyRot;
 			} else {
-				// Reset all rotation fields to 0° for a fixed canonical facing.
 				pet.yBodyRot = 0f;
 				pet.yBodyRotO = 0f;
 				pet.setYRot(0f);
@@ -98,71 +83,31 @@ class PetEntry extends AbstractWidget {
 			}
 
 			renderEntityInInventory(guiGraphics, miniX, miniY, miniScale, quat, quatPitch, pet);
-
-			// Discard immediately after render
-			discardPreviewEntity(pet);
 		}
 
-		// Draw priority icon in top-left
-		int priority = screen.petPriorities.getOrDefault(uuid, 6);
-		priority = Math.max(1, Math.min(6, priority));
+		int priority = Math.max(1, Math.min(6, screen.petPriorities.getOrDefault(uuid, 6)));
 		if (priority <= 5 || Screen.hasShiftDown()) {
 			int srcU = 198 + (priority - 1) * 8;
-			int srcV = 22;
-			guiGraphics.blit(WIDGETS_TEXTURE,
-					getX() + 1, getY() + 1,
-					srcU, srcV, 8, 8, 256, 256);
+			guiGraphics.blit(WIDGETS_TEXTURE, getX() + 1, getY() + 1, srcU, 22, 8, 8, 256, 256);
 		}
 
-		// Draw pet name text - centered horizontally, bottom-aligned
 		int textWidth = font.width(getMessage());
 		int availableWidth = width - 6;
-
 		guiGraphics.enableScissor(getX() + 3, getY(), getX() + width - 3, getY() + height);
-
 		if (textWidth <= availableWidth) {
-			int textX = getX() + (width - textWidth) / 2;
-			guiGraphics.drawString(font, getMessage(), textX, textY - 1, textColor);
+			guiGraphics.drawString(font, getMessage(), getX() + (width - textWidth) / 2, textY - 1, textColor);
 		} else {
-			long time = System.currentTimeMillis();
+			long phase = System.currentTimeMillis() % 8000;
 			int overflow = textWidth - availableWidth + 12;
-			int cycleMs = 8000;
-			long phase = time % cycleMs;
-
-			int scrollOffset;
-			if (phase < 2000) {
-				scrollOffset = 0;
-			} else if (phase < 6000) {
-				scrollOffset = (int) (overflow * (phase - 2000) / 4000f);
-			} else {
-				scrollOffset = overflow;
-			}
-
-			guiGraphics.drawString(font, getMessage(),
-					getX() + 3 - scrollOffset, textY - 1, textColor);
+			int scrollOffset = phase < 2000 ? 0 : phase < 6000 ? (int) (overflow * (phase - 2000) / 4000f) : overflow;
+			guiGraphics.drawString(font, getMessage(), getX() + 3 - scrollOffset, textY - 1, textColor);
 		}
-
 		guiGraphics.disableScissor();
-	}
-
-	private LivingEntity createPetEntryEntity(UUID uuid) {
-		if (screen.getMinecraft().level == null) return null;
-		CompoundTag nbt = screen.petNbtCache.get(uuid);
-		if (nbt == null) return null;
-		String typeKey = nbt.getString("EntityType");
-		if (typeKey.isEmpty()) return null;
-		EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
-		if (type == null) return null;
-		Entity entity = type.create(screen.getMinecraft().level);
-		if (entity == null) return null;
-		try { entity.load(nbt); } catch (Exception e) { return null; }
-		return entity instanceof LivingEntity le ? le : null;
 	}
 
 	@Override
 	public void onClick(double mouseX, double mouseY) {
 		if (Screen.hasShiftDown()) {
-			// Shift+Click: cycle priority 6→5→4→3→2→1→6
 			UUID uuid = screen.petUuids.get(index);
 			int oldPrio = screen.petPriorities.getOrDefault(uuid, 6);
 			int newPrio = oldPrio - 1;
@@ -172,9 +117,7 @@ class PetEntry extends AbstractWidget {
 			screen.sortNeeded = true;
 			return;
 		}
-		if (screen.selectedPetIndex != index) {
-			screen.deletePromptUuid = null;
-		}
+		if (screen.selectedPetIndex != index) screen.deletePromptUuid = null;
 		screen.selectedPetIndex = index;
 		screen.glowButton.visible = true;
 		screen.actionButton.visible = true;
@@ -185,13 +128,8 @@ class PetEntry extends AbstractWidget {
 	}
 
 	private void writePriorityToDisk(UUID uuid, int priority) {
-		// Optimistic local cache update so the UI re-sorts immediately.
-		// The server is the source of truth and will push back the canonical
-		// NBT via SyncPetDataPacket.update, which overwrites this cache entry.
 		CompoundTag nbt = screen.petNbtCache.get(uuid);
-		if (nbt != null) {
-			nbt.putInt("Priority", priority);
-		}
+		if (nbt != null) nbt.putInt("Priority", priority);
 		com.whidte.trulybestfriends.trulybestfriends.CHANNEL.sendToServer(
 				new com.whidte.trulybestfriends.network.SetPriorityPacket(uuid, priority));
 	}

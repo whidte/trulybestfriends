@@ -50,6 +50,7 @@ import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.entity.PartEntity;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
@@ -114,6 +115,7 @@ public class trulybestfriends {
         INSTANCE = this;
         context.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
         MinecraftForge.EVENT_BUS.register(this);
+        com.whidte.trulybestfriends.compat.CuriosCompat.register();
         context.getModEventBus().addListener(this::commonSetup);
     }
 
@@ -225,7 +227,7 @@ public class trulybestfriends {
         }
     }
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onLivingDeath(LivingDeathEvent event) {
         Entity entity = event.getEntity();
         if (!entity.level().isClientSide()
@@ -296,6 +298,7 @@ public class trulybestfriends {
         // LastDeathTime 完全不由磁盘管理——改由服务器内存 Map (petDeathTimes) 记录，
         // 在 onLivingDeath 时写入，通过网络同步注入给客户端。不写盘避免被 syncAllPets 反复刷新。
         com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket.backupChestInventory(pet, nbt);
+        com.whidte.trulybestfriends.compat.CuriosCompat.backup(pet, nbt);
         nbt.putString("OwnerUUID", ownerUUID.toString());
         nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());
         nbt.putString("Dimension", level.dimension().location().toString());
@@ -668,16 +671,30 @@ public class trulybestfriends {
     }
 
     private void collectLocalSyncCandidates(MinecraftServer server) {
+        Map<ServerLevel, Set<ChunkPos>> chunksByLevel = new HashMap<>();
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (!hasTrulyBestFriendsAdvancement(server, player)) continue;
 
+            ServerLevel level = player.serverLevel();
             ChunkPos center = player.chunkPosition();
-            AABB area = new AABB(
-                    new BlockPos((center.x - LOCAL_SYNC_CHUNK_RADIUS) << 4, levelMinY(player.serverLevel()), (center.z - LOCAL_SYNC_CHUNK_RADIUS) << 4),
-                    new BlockPos(((center.x + LOCAL_SYNC_CHUNK_RADIUS + 1) << 4) - 1, levelMaxY(player.serverLevel()), ((center.z + LOCAL_SYNC_CHUNK_RADIUS + 1) << 4) - 1));
-            ResourceKey<Level> dimension = player.serverLevel().dimension();
-            for (Entity entity : player.serverLevel().getEntities(player, area)) {
-                localSyncCandidates.add(new LocalSyncCandidate(dimension, entity.getUUID()));
+            Set<ChunkPos> chunks = chunksByLevel.computeIfAbsent(level, ignored -> new HashSet<>());
+            for (int x = center.x - LOCAL_SYNC_CHUNK_RADIUS; x <= center.x + LOCAL_SYNC_CHUNK_RADIUS; x++) {
+                for (int z = center.z - LOCAL_SYNC_CHUNK_RADIUS; z <= center.z + LOCAL_SYNC_CHUNK_RADIUS; z++) {
+                    chunks.add(new ChunkPos(x, z));
+                }
+            }
+        }
+
+        for (Map.Entry<ServerLevel, Set<ChunkPos>> entry : chunksByLevel.entrySet()) {
+            ServerLevel level = entry.getKey();
+            ResourceKey<Level> dimension = level.dimension();
+            for (ChunkPos chunk : entry.getValue()) {
+                AABB area = new AABB(
+                        new BlockPos(chunk.getMinBlockX(), levelMinY(level), chunk.getMinBlockZ()),
+                        new BlockPos(chunk.getMaxBlockX(), levelMaxY(level), chunk.getMaxBlockZ()));
+                for (Entity entity : level.getEntities(null, area)) {
+                    localSyncCandidates.add(new LocalSyncCandidate(dimension, entity.getUUID()));
+                }
             }
         }
     }

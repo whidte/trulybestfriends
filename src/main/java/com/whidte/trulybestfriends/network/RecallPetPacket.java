@@ -238,6 +238,7 @@ public class RecallPetPacket {
             pet.saveWithoutId(nbt);
             nbt.putFloat("MaxHealth", (float) pet.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH));
             TeleportPetToPlayerPacket.backupChestInventory(pet, nbt);
+            com.whidte.trulybestfriends.compat.CuriosCompat.backup(pet, nbt);
             nbt.putString("OwnerUUID", playerUuid.toString());
             nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());
             nbt.putString("Dimension", level.dimension().location().toString());
@@ -277,6 +278,7 @@ public class RecallPetPacket {
                 AABB box = entity.getBoundingBox();
                 if (level.noCollision(entity, box) && !level.containsAnyLiquid(box)) {
                     level.addFreshEntity(entity);
+                    com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
                     if (entity instanceof LivingEntity le) {
                         le.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
                     }

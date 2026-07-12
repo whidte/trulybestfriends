@@ -41,8 +41,7 @@ final class RenderHelper {
 		Lighting.setupForEntityInInventory();
 		EntityRenderDispatcher dispatcher = Minecraft.getInstance().getEntityRenderDispatcher();
 		if (cameraOrientation != null) {
-			cameraOrientation.conjugate();
-			dispatcher.overrideCameraOrientation(cameraOrientation);
+			dispatcher.overrideCameraOrientation(new Quaternionf(cameraOrientation).conjugate());
 		}
 		dispatcher.setRenderShadow(false);
 		RenderSystem.runAsFancy(() ->
