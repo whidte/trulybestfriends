@@ -378,9 +378,17 @@ public class TeleportPetToPlayerPacket {
                     continue;
                 }
                 if (pending.petLevel == player.serverLevel()) {
-                    teleportEntityToPlayer(living, player, pending.petLevel);
-                    trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
-                    pendingSummons.remove(pending);
+                    if (recreateAfterForcedLoad(living, player, pending.petLevel)) {
+                        trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
+                        pendingSummons.remove(pending);
+                    } else {
+                        pending.attempts++;
+                        if (pending.attempts >= MAX_PENDING_ATTEMPTS) {
+                            trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
+                            sendWarning(player, 1, pending.petUuid);
+                            pendingSummons.remove(pending);
+                        }
+                    }
                     continue;
                 }
                 // Chunk loaded — discard original and summon at player
@@ -414,6 +422,44 @@ public class TeleportPetToPlayerPacket {
                 }
             }
         }
+    }
+
+    /**
+     * Re-adds a pet loaded from a forced chunk so nearby clients receive a fresh
+     * tracking/spawn sequence. A coordinate-only teleport can leave the entity
+     * tracked from its old section until after that section is unloaded.
+     */
+    private static boolean recreateAfterForcedLoad(LivingEntity original, ServerPlayer player, ServerLevel level) {
+        UUID petUuid = original.getUUID();
+        if (!RecallPetPacket.savePetToDisk(player.getUUID(), original, level, false)) return false;
+
+        File nbtFile = PetIOUtil.getOwnerDir(player).resolve(petUuid + ".nbt").toFile();
+        CompoundTag snapshot;
+        try {
+            snapshot = NbtFileIO.readCompressed(nbtFile);
+        } catch (IOException e) {
+            trulybestfriends.LOGGER.error("Failed to read forced-chunk snapshot for {}: {}", petUuid, e.getMessage());
+            return false;
+        }
+
+        original.discard();
+        if (summonFromDisk(snapshot, petUuid, player, level)) return true;
+
+        trulybestfriends.LOGGER.error("Failed to re-add forced-chunk pet {}; restoring its original snapshot", petUuid);
+        if (!restoreAtStoredPosition(snapshot, petUuid, player, level)) {
+            trulybestfriends.LOGGER.error("Failed to restore pet {} after a failed forced-chunk teleport", petUuid);
+        }
+        return false;
+    }
+
+    private static boolean restoreAtStoredPosition(CompoundTag snapshot, UUID petUuid,
+                                                    ServerPlayer player, ServerLevel level) {
+        Entity restored = PetEntitySnapshot.restore(snapshot, petUuid, level);
+        if (restored == null) return false;
+        restoreChestInventory(restored, snapshot);
+        if (!level.tryAddFreshEntityWithPassengers(restored)) return false;
+        finishRestoredEntity(restored, snapshot, player, level);
+        return true;
     }
 
     /** Read NBT and summon pet from disk at player's current location. */
