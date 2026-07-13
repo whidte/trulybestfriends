@@ -3,7 +3,6 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
 
@@ -31,6 +30,7 @@ public class DeletePetDataPacket {
             if (player == null) return;
 
             if (trulybestfriends.deletePetData(player, packet.petUuid)) {
+                PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
                 SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
                 trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
             }

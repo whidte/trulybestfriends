@@ -148,7 +148,7 @@ dependencies {
 
     // L2Library, L2Tabs, and Curios are optional soft dependencies.
     compileOnly fg.deobf("curse.maven:l2library-620203:6806000")
-    compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:5.14.1+1.20.1:api")
+    compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:5.7.1+1.20.1:api")
 
     // When installed, the mod gains an inventory tab; otherwise a keybinding opens the screen.
     compileOnly files('libs/l2tabs-0.3.3.jar')
@@ -216,6 +216,36 @@ publishing {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+}
+
+tasks.register('petPersistenceSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates legacy horse-slot migration and atomic NBT replacement.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.PetPersistenceSmokeTest'
+}
+
+tasks.register('multipartRotationSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates that multipart pitch remains view-space invariant across yaw angles.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.tab.MultipartRotationSmokeTest'
+}
+
+tasks.register('petGuiNbtSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates one-pet full-NBT sync and passenger-tree filtering.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.PetGuiNbtSmokeTest'
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('petPersistenceSmokeTest')
+    dependsOn tasks.named('multipartRotationSmokeTest')
+    dependsOn tasks.named('petGuiNbtSmokeTest')
 }
 
 // Clean stale lock files from previous runClient before launching

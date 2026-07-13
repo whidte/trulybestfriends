@@ -1,11 +1,13 @@
 package com.whidte.trulybestfriends;
 
-import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.logging.LogUtils;
 import com.whidte.trulybestfriends.network.AreaRecallPacket;
 import com.whidte.trulybestfriends.network.DeletePetDataPacket;
 import com.whidte.trulybestfriends.network.GlowPetPacket;
 import com.whidte.trulybestfriends.network.PetIOUtil;
+import com.whidte.trulybestfriends.network.NbtFileIO;
+import com.whidte.trulybestfriends.network.PetEntitySnapshot;
+import com.whidte.trulybestfriends.network.PetSyncTracker;
 import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
 import com.whidte.trulybestfriends.network.RequestPetDataPacket;
@@ -14,17 +16,12 @@ import com.whidte.trulybestfriends.network.SetPriorityPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.TeleportToPetPacket;
-import com.whidte.trulybestfriends.tab.TrulyScreen;
-import net.minecraft.client.KeyMapping;
-import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.advancements.Advancement;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -38,9 +35,6 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.InputEvent;
-import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
@@ -54,10 +48,10 @@ import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -69,11 +63,9 @@ import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Mod.EventBusSubscriber(bus = Mod.EventBusSubscriber.Bus.MOD)
 @Mod(value = trulybestfriends.MODID)
 public class trulybestfriends {
     public static final String MODID = "trulybestfriends";
-    public static final String NAME = "Truly Best Friends Forever";
     public static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
 
     private static final String PETS_INDEX_FILE = "pets_index.nbt";
@@ -82,9 +74,13 @@ public class trulybestfriends {
     private static final Map<String, List<UUID>> indexCache = new ConcurrentHashMap<>();
     private static final Set<UUID> trackedPetUUIDs = ConcurrentHashMap.newKeySet();
     private static final Set<PendingRemoval> pendingRemovals = ConcurrentHashMap.newKeySet();
+    private static final Map<ForcedChunk, Integer> forcedChunkReferences = new ConcurrentHashMap<>();
+    private static final Set<ForcedChunk> chunksForcedByMod = ConcurrentHashMap.newKeySet();
     private static final Set<LocalSyncCandidate> localSyncCandidates = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, String> shoulderPetTypes = new ConcurrentHashMap<>(); // UUID -> entity type key
     private static final Map<UUID, PendingPetSave> pendingPetSaves = new ConcurrentHashMap<>();
+    private static final Set<UUID> persistedDeathSnapshots = ConcurrentHashMap.newKeySet();
+    private static final long PENDING_REMOVAL_TIMEOUT_TICKS = 100L;
 
     /** 宠物死亡时刻（内存，不持久化）。key=petUUID, value=System.currentTimeMillis()。
      *  用于复活冷却计算，避免写盘后被 syncAllPets 反复刷新导致冷却永远不结束。
@@ -98,12 +94,6 @@ public class trulybestfriends {
             PROTOCOL_VERSION::equals,
             PROTOCOL_VERSION::equals
     );
-
-	public static final KeyMapping OPEN_TAB_KEY = new KeyMapping(
-			"key.trulybestfriends.open_tab",
-			InputConstants.UNKNOWN.getValue(),
-			"key.categories.trulybestfriends"
-	);
 
     private int syncTickCounter = 0;
     private int localSyncTickCounter = 0;
@@ -130,6 +120,13 @@ public class trulybestfriends {
         INSTANCE.updatePetIndex(pet);
         INSTANCE.savePetData(owner.getUUID(), pet, level);
         flushPendingPetSaves(owner.getUUID());
+    }
+
+    /** Replace any join-time pending save with the fully restored live entity snapshot. */
+    public static boolean persistRestoredPet(UUID ownerUUID, Entity pet, ServerLevel level) {
+        return INSTANCE != null
+                && INSTANCE.savePetData(ownerUUID, pet, level)
+                && flushPendingPetSave(pet.getUUID());
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -195,6 +192,7 @@ public class trulybestfriends {
     public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             flushPendingPetSaves(player.getUUID());
+            PetSyncTracker.clearPlayer(player.getUUID());
         }
     }
 
@@ -202,6 +200,14 @@ public class trulybestfriends {
     public void onServerStopping(ServerStoppingEvent event) {
         flushPendingPetSaves();
         petDeathTimes.clear();  // 死亡时刻仅在内存，不持久化
+        persistedDeathSnapshots.clear();
+        pendingRemovals.clear();
+        PetSyncTracker.clearAll();
+        TeleportPetToPlayerPacket.clearPendingSummons();
+        chunksForcedByMod.forEach(chunk ->
+                chunk.level().setChunkForced(chunk.chunkX(), chunk.chunkZ(), false));
+        forcedChunkReferences.clear();
+        chunksForcedByMod.clear();
     }
 
     @SubscribeEvent
@@ -211,6 +217,8 @@ public class trulybestfriends {
             localSyncTickCounter++;
             saveTickCounter++;
             processLocalSyncCandidates(event.getServer());
+            processPendingRemovals(event.getServer());
+            TeleportPetToPlayerPacket.tickPendingSummons(event.getServer());
             if (localSyncTickCounter >= Config.localSyncIntervalTicks) {
                 localSyncTickCounter = 0;
                 collectLocalSyncCandidates(event.getServer());
@@ -234,14 +242,17 @@ public class trulybestfriends {
                 && trackedPetUUIDs.contains(entity.getUUID())) {
             UUID owner = getCompatOwnerUUID(entity);
             if (owner == null) return;
+            persistedDeathSnapshots.remove(entity.getUUID());
             // 记录死亡时刻到内存（不写盘），用于复活冷却计算。
             petDeathTimes.put(entity.getUUID(), System.currentTimeMillis());
             ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
             if (entityType != null && Config.isClearOnDeathEntity(entityType.toString())) {
                 clearPetDataAndCache(entity, owner, (ServerLevel) entity.level());
             } else {
-                savePetData(owner, entity, (ServerLevel) entity.level());
-                flushPendingPetSaves(owner);
+                if (savePetData(owner, entity, (ServerLevel) entity.level())
+                        && flushPendingPetSave(entity.getUUID())) {
+                    persistedDeathSnapshots.add(entity.getUUID());
+                }
             }
         }
     }
@@ -254,6 +265,7 @@ public class trulybestfriends {
     /** 复活成功后清除死亡时刻记录。 */
     public static void clearPetDeathTime(UUID petUuid) {
         petDeathTimes.remove(petUuid);
+        persistedDeathSnapshots.remove(petUuid);
     }
 
     /** 将内存中的死亡时刻注入到 NBT（仅用于网络同步给客户端，不写盘）。
@@ -270,8 +282,10 @@ public class trulybestfriends {
     @SubscribeEvent
     public void onLivingDrops(LivingDropsEvent event) {
         Entity entity = event.getEntity();
+        boolean snapshotPersisted = persistedDeathSnapshots.contains(entity.getUUID());
         ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
         if (trackedPetUUIDs.contains(entity.getUUID())
+                && snapshotPersisted
                 && entityType != null
                 && !Config.isNoReviveEntity(entityType.toString())) {
             // Ice and Fire 联动：IDeadMob 实体（龙、独眼巨人等）死亡后变尸体长期驻留，
@@ -285,24 +299,25 @@ public class trulybestfriends {
         }
     }
 
-    private void savePetData(UUID ownerUUID, Entity pet, ServerLevel level) {
+    private boolean savePetData(UUID ownerUUID, Entity pet, ServerLevel level) {
+        if (pet instanceof LivingEntity living
+                && !living.isAlive()
+                && persistedDeathSnapshots.contains(pet.getUUID())) {
+            return true;
+        }
         if (!isKnownPlayer(level.getServer(), ownerUUID)) {
             LOGGER.warn("Skipping pet save: owner UUID {} is not a known player", ownerUUID);
-            return;
+            return false;
         }
-        CompoundTag nbt = new CompoundTag();
-        pet.saveWithoutId(nbt);
-        if (pet instanceof net.minecraft.world.entity.LivingEntity living) {
-            nbt.putFloat("MaxHealth", (float) living.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH));
+        CompoundTag nbt;
+        try {
+            nbt = PetEntitySnapshot.capture(pet, ownerUUID, level);
+        } catch (RuntimeException e) {
+            LOGGER.error("Failed to capture pet snapshot for {}: {}", pet.getUUID(), e.getMessage(), e);
+            return false;
         }
         // LastDeathTime 完全不由磁盘管理——改由服务器内存 Map (petDeathTimes) 记录，
         // 在 onLivingDeath 时写入，通过网络同步注入给客户端。不写盘避免被 syncAllPets 反复刷新。
-        com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket.backupChestInventory(pet, nbt);
-        com.whidte.trulybestfriends.compat.CuriosCompat.backup(pet, nbt);
-        nbt.putString("OwnerUUID", ownerUUID.toString());
-        nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());
-        nbt.putString("Dimension", level.dimension().location().toString());
-
         Path worldPath = level.getServer().getWorldPath(LevelResource.ROOT);
         pendingPetSaves.put(pet.getUUID(), new PendingPetSave(
                 ownerUUID,
@@ -313,6 +328,7 @@ public class trulybestfriends {
         if (hasPetFileInOtherOwnerDir(PetIOUtil.getModDir(level), ownerUUID, pet.getUUID())) {
             flushPendingPetSaves(ownerUUID);
         }
+        return true;
     }
 
     public static void flushPendingPetSaves() {
@@ -326,6 +342,13 @@ public class trulybestfriends {
                 pendingPetSaves.remove(pending.petUUID(), pending);
             }
         }
+    }
+
+    private static boolean flushPendingPetSave(UUID petUUID) {
+        PendingPetSave pending = pendingPetSaves.get(petUUID);
+        if (pending == null || !writePetData(pending)) return false;
+        pendingPetSaves.remove(petUUID, pending);
+        return true;
     }
 
     private static boolean writePetData(PendingPetSave pending) {
@@ -345,29 +368,7 @@ public class trulybestfriends {
                 }
             }
 
-            CompoundTag oldNbt = null;
-            int existingPriority = 6;
-            boolean existingRecalled = false;
-            if (nbtFile.exists()) {
-                try {
-                    oldNbt = NbtIo.readCompressed(nbtFile);
-                    if (oldNbt.contains("Priority")) {
-                        existingPriority = Math.max(1, Math.min(6, oldNbt.getInt("Priority")));
-                    }
-                    existingRecalled = oldNbt.getBoolean("Recalled");
-                } catch (IOException ignored) {}
-            }
-
-            CompoundTag nbt = pending.nbt().copy();
-            nbt.putInt("Priority", existingPriority);
-            if (existingRecalled) nbt.putBoolean("Recalled", true);
-            // LastDeathTime 完全不由磁盘管理——改由服务器内存 Map (petDeathTimes) 记录，
-            // 通过 injectDeathTimeIntoNbt 在网络同步时注入给客户端。
-            // 避免写盘后被 syncAllPets 反复刷新导致复活冷却永远不结束。
-            nbt.remove("LastDeathTime");
-
-            if (oldNbt != null && oldNbt.equals(nbt)) return true;
-            NbtIo.writeCompressed(nbt, nbtFile);
+            PetIOUtil.writePetSnapshotPreservingRecall(nbtFile, pending.nbt());
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to save pet data for {}: {}", pending.petUUID(), e.getMessage());
@@ -377,7 +378,32 @@ public class trulybestfriends {
 
     private record PendingPetSave(UUID ownerUUID, UUID petUUID, Path worldPath, CompoundTag nbt) {}
 
-    private record PendingRemoval(UUID ownerUUID, UUID petUUID, ServerLevel level, int chunkX, int chunkZ) {}
+    private static final class PendingRemoval {
+        private final UUID ownerUUID;
+        private final UUID petUUID;
+        private final ServerLevel level;
+        private final int chunkX;
+        private final int chunkZ;
+        private long expiresAtTick;
+
+        private PendingRemoval(UUID ownerUUID, UUID petUUID, ServerLevel level,
+                               int chunkX, int chunkZ, long expiresAtTick) {
+            this.ownerUUID = ownerUUID;
+            this.petUUID = petUUID;
+            this.level = level;
+            this.chunkX = chunkX;
+            this.chunkZ = chunkZ;
+            this.expiresAtTick = expiresAtTick;
+        }
+
+        UUID ownerUUID() { return ownerUUID; }
+        UUID petUUID() { return petUUID; }
+        ServerLevel level() { return level; }
+        int chunkX() { return chunkX; }
+        int chunkZ() { return chunkZ; }
+    }
+
+    private record ForcedChunk(ServerLevel level, int chunkX, int chunkZ) {}
 
     private record LocalSyncCandidate(ResourceKey<Level> dimension, UUID entityUUID) {}
 
@@ -390,8 +416,52 @@ public class trulybestfriends {
         }
     }
 
-    public static void queuePendingRemoval(UUID ownerUUID, UUID petUUID, ServerLevel level, int chunkX, int chunkZ) {
-        pendingRemovals.add(new PendingRemoval(ownerUUID, petUUID, level, chunkX, chunkZ));
+    public static boolean queuePendingRemoval(UUID ownerUUID, UUID petUUID, ServerLevel level, int chunkX, int chunkZ) {
+        if (pendingRemovals.stream().anyMatch(pending ->
+                pending.ownerUUID().equals(ownerUUID) && pending.petUUID().equals(petUUID))) {
+            return true;
+        }
+        long ownerPending = pendingRemovals.stream()
+                .filter(pending -> pending.ownerUUID().equals(ownerUUID))
+                .count();
+        if (ownerPending >= Config.maxPendingSummons + 2L) return false;
+
+        pendingRemovals.add(new PendingRemoval(ownerUUID, petUUID, level, chunkX, chunkZ,
+                level.getGameTime() + PENDING_REMOVAL_TIMEOUT_TICKS));
+        retainForcedChunk(level, chunkX, chunkZ);
+        return true;
+    }
+
+    public static boolean isPendingRemoval(UUID ownerUUID, UUID petUUID) {
+        return pendingRemovals.stream().anyMatch(pending ->
+                pending.ownerUUID().equals(ownerUUID) && pending.petUUID().equals(petUUID));
+    }
+
+    public static void retainForcedChunk(ServerLevel level, int chunkX, int chunkZ) {
+        ForcedChunk key = new ForcedChunk(level, chunkX, chunkZ);
+        forcedChunkReferences.compute(key, (ignored, references) -> {
+            if (references == null) {
+                if (!level.getForcedChunks().contains(ChunkPos.asLong(chunkX, chunkZ))) {
+                    level.setChunkForced(chunkX, chunkZ, true);
+                    chunksForcedByMod.add(key);
+                }
+                return 1;
+            }
+            return references + 1;
+        });
+    }
+
+    public static void releaseForcedChunk(ServerLevel level, int chunkX, int chunkZ) {
+        ForcedChunk key = new ForcedChunk(level, chunkX, chunkZ);
+        forcedChunkReferences.computeIfPresent(key, (ignored, references) -> {
+            if (references <= 1) {
+                if (chunksForcedByMod.remove(key)) {
+                    level.setChunkForced(chunkX, chunkZ, false);
+                }
+                return null;
+            }
+            return references - 1;
+        });
     }
 
     /**
@@ -411,9 +481,11 @@ public class trulybestfriends {
         }
         // Clean in-memory caches
         pendingPetSaves.remove(petUUID);
+        removePendingRemovals(ownerUUID, petUUID);
         trackedPetUUIDs.remove(petUUID);
         shoulderPetTypes.remove(petUUID);
         petDeathTimes.remove(petUUID);
+        persistedDeathSnapshots.remove(petUUID);
         try {
             removePetFromIndex(modDir, petUUID);
         } catch (IOException e) {
@@ -429,9 +501,10 @@ public class trulybestfriends {
             Path petFile = PetIOUtil.getOwnerDir(player).resolve(petUUID + ".nbt");
             if (!Files.deleteIfExists(petFile)) return false;
             pendingPetSaves.remove(petUUID);
-            pendingRemovals.removeIf(removal -> removal.ownerUUID().equals(player.getUUID()) && removal.petUUID().equals(petUUID));
+            removePendingRemovals(player.getUUID(), petUUID);
             trackedPetUUIDs.remove(petUUID);
             petDeathTimes.remove(petUUID);
+            persistedDeathSnapshots.remove(petUUID);
             removePetFromIndex(modDir, petUUID);
             return true;
         } catch (IOException e) {
@@ -497,11 +570,15 @@ public class trulybestfriends {
         return null;
     }
 
+    public static boolean isOwnedBy(Entity entity, UUID ownerUUID) {
+        return ownerUUID != null && ownerUUID.equals(getCompatOwnerUUID(entity));
+    }
+
     private static void removePetFromIndex(Path modDir, UUID petUUID) throws IOException {
         File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
         if (!indexFile.exists()) return;
 
-        CompoundTag indexTag = NbtIo.readCompressed(indexFile);
+        CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
         String uuidStr = petUUID.toString();
         boolean changed = false;
         for (String typeKey : new ArrayList<>(indexTag.getAllKeys())) {
@@ -521,7 +598,7 @@ public class trulybestfriends {
                 if (cachedList != null) cachedList.remove(petUUID);
             }
         }
-        if (changed) NbtIo.writeCompressed(indexTag, indexFile);
+        if (changed) NbtFileIO.writeCompressed(indexTag, indexFile);
     }
 
     private static Path findPetFileInOtherOwnerDir(Path modDir, UUID currentOwnerUUID, UUID petUUID) throws IOException {
@@ -548,7 +625,7 @@ public class trulybestfriends {
 
             CompoundTag indexTag = new CompoundTag();
             if (indexFile.exists()) {
-                indexTag = NbtIo.readCompressed(indexFile);
+                indexTag = NbtFileIO.readCompressed(indexFile);
             }
 
             String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString();
@@ -566,7 +643,7 @@ public class trulybestfriends {
             if (!alreadyExists) {
                 uuidList.add(StringTag.valueOf(uuidStr));
                 indexTag.put(typeKey, uuidList);
-                NbtIo.writeCompressed(indexTag, indexFile);
+                NbtFileIO.writeCompressed(indexTag, indexFile);
 
                 indexCache.computeIfAbsent(typeKey, k -> new ArrayList<>()).add(petUUID);
             }
@@ -600,9 +677,60 @@ public class trulybestfriends {
                 .findFirst();
     }
 
-    private void removePendingRemoval(PendingRemoval pendingRemoval) {
-        pendingRemoval.level().setChunkForced(pendingRemoval.chunkX(), pendingRemoval.chunkZ(), false);
-        pendingRemovals.remove(pendingRemoval);
+    private static void removePendingRemoval(PendingRemoval pendingRemoval) {
+        if (pendingRemovals.remove(pendingRemoval)) {
+            releaseForcedChunk(pendingRemoval.level(), pendingRemoval.chunkX(), pendingRemoval.chunkZ());
+        }
+    }
+
+    private static void removePendingRemovals(UUID ownerUUID, UUID petUUID) {
+        for (PendingRemoval pending : new ArrayList<>(pendingRemovals)) {
+            if (pending.ownerUUID().equals(ownerUUID) && pending.petUUID().equals(petUUID)) {
+                removePendingRemoval(pending);
+            }
+        }
+    }
+
+    private void processPendingRemovals(MinecraftServer server) {
+        for (PendingRemoval pending : new ArrayList<>(pendingRemovals)) {
+            if (pending.level().getServer() != server) {
+                removePendingRemoval(pending);
+                continue;
+            }
+
+            Entity loaded = pending.level().getEntity(pending.petUUID());
+            if (loaded != null) {
+                if (isOwnedBy(loaded, pending.ownerUUID())
+                        && discardIfRecalled(loaded, pending.level())) {
+                    continue;
+                }
+                if (!pendingRemovals.contains(pending)) continue;
+            }
+            if (pending.level().getGameTime() < pending.expiresAtTick) continue;
+
+            File nbtFile = PetIOUtil.getOwnerDir(pending.level(), pending.ownerUUID())
+                    .resolve(pending.petUUID() + ".nbt")
+                    .toFile();
+            try {
+                if (nbtFile.exists()) {
+                    CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
+                    if (nbt.getBoolean("Recalled")) {
+                        nbt.remove("Recalled");
+                        NbtFileIO.writeCompressed(nbt, nbtFile);
+                    }
+                }
+                removePendingRemoval(pending);
+                ServerPlayer player = server.getPlayerList().getPlayer(pending.ownerUUID());
+                if (player != null) {
+                    CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                            new PetWarningPacket(3, pending.petUUID()));
+                }
+            } catch (IOException e) {
+                pending.expiresAtTick = pending.level().getGameTime() + PENDING_REMOVAL_TIMEOUT_TICKS;
+                LOGGER.error("Failed to roll back timed-out recall for {}: {}",
+                        pending.petUUID(), e.getMessage());
+            }
+        }
     }
 
     private boolean discardIfRecalled(Entity entity, ServerLevel level) {
@@ -615,14 +743,18 @@ public class trulybestfriends {
         if (!nbtFile.exists()) return false;
 
         try {
-            CompoundTag nbt = NbtIo.readCompressed(nbtFile);
+            CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
             Optional<PendingRemoval> pendingRemoval = findPendingRemoval(ownerUUID, petUUID);
             if (!nbt.getBoolean("Recalled")) {
-                pendingRemoval.ifPresent(this::removePendingRemoval);
+                pendingRemoval.ifPresent(trulybestfriends::removePendingRemoval);
+                return false;
+            }
+            if (!savePetData(ownerUUID, entity, level) || !flushPendingPetSave(petUUID)) {
+                LOGGER.error("Keeping recalled pet {} loaded because its final snapshot could not be persisted", petUUID);
                 return false;
             }
             entity.discard();
-            pendingRemoval.ifPresent(this::removePendingRemoval);
+            pendingRemoval.ifPresent(trulybestfriends::removePendingRemoval);
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to read recalled pet NBT for {}: {}", petUUID, e.getMessage());
@@ -638,7 +770,7 @@ public class trulybestfriends {
             File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
 
             if (indexFile.exists()) {
-                CompoundTag indexTag = NbtIo.readCompressed(indexFile);
+                CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
                 for (String key : indexTag.getAllKeys()) {
                     ListTag uuidList = indexTag.getList(key, Tag.TAG_STRING);
                     List<UUID> uuids = new ArrayList<>();
@@ -789,7 +921,7 @@ public class trulybestfriends {
             File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
             if (!indexFile.exists()) return;
 
-            CompoundTag indexTag = NbtIo.readCompressed(indexFile);
+            CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
             String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(newEntity.getType()).toString();
             String oldStr = oldUuid.toString();
             String newStr = newEntity.getUUID().toString();
@@ -799,7 +931,7 @@ public class trulybestfriends {
                 if (uuidList.getString(i).equals(oldStr)) {
                     uuidList.set(i, StringTag.valueOf(newStr));
                     indexTag.put(typeKey, uuidList);
-                    NbtIo.writeCompressed(indexTag, indexFile);
+                    NbtFileIO.writeCompressed(indexTag, indexFile);
 
                     // Update cache
                     List<UUID> cachedList = indexCache.get(typeKey);
@@ -823,7 +955,7 @@ public class trulybestfriends {
                 int[] counts = new int[2]; // [0]=success, [1]=failed
                 Files.list(ownerDir).filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
                     try {
-                        NbtIo.readCompressed(file.toFile());
+                        NbtFileIO.readCompressed(file.toFile());
                         counts[0]++;
                     } catch (IOException e) {
                         counts[1]++;
@@ -839,24 +971,6 @@ public class trulybestfriends {
         }
     }
 
-    @SubscribeEvent
-	public static void onClientSetup(FMLClientSetupEvent event) {
-		event.enqueueWork(() -> {
-			if (net.minecraftforge.fml.ModList.get().isLoaded("l2tabs")) {
-				try {
-					Class.forName("com.whidte.trulybestfriends.tab.L2TabsIntegration")
-						.getMethod("register")
-						.invoke(null);
-					LOGGER.info("L2Tabs detected - inventory tab registered.");
-				} catch (Exception e) {
-					LOGGER.warn("L2Tabs present but integration failed: {}", e.toString());
-				}
-			} else {
-				LOGGER.info("L2Tabs not installed - use keybinding to open pet screen.");
-			}
-		});
-	}
-
 	private int countOwnerPets(ServerLevel level, UUID ownerUUID) {
 		Path ownerDir = PetIOUtil.getOwnerDir(level, ownerUUID);
 		if (!Files.exists(ownerDir)) return 0;
@@ -864,23 +978,6 @@ public class trulybestfriends {
 			return (int) Files.list(ownerDir).filter(p -> p.toString().endsWith(".nbt")).count();
 		} catch (IOException e) {
 			return 0;
-		}
-	}
-
-	@SubscribeEvent
-	public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
-		event.register(OPEN_TAB_KEY);
-	}
-}
-
-@Mod.EventBusSubscriber(modid = trulybestfriends.MODID, value = Dist.CLIENT)
-class TrulyKeyHandler {
-	@SubscribeEvent
-	public static void onKeyInput(InputEvent.Key event) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.player == null) return;
-		if (trulybestfriends.OPEN_TAB_KEY.consumeClick()) {
-			mc.setScreen(new TrulyScreen(Component.translatable("tab.trulybestfriends.pets")));
 		}
 	}
 }

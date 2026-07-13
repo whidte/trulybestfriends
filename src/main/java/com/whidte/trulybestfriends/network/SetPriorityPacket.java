@@ -2,7 +2,6 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
@@ -51,6 +50,7 @@ public class SetPriorityPacket {
 
             File nbtFile = petDir.resolve(packet.petUuid + ".nbt").toFile();
             if (!nbtFile.exists()) {
+                PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
                 // Pet was deleted — notify client so it can remove the entry
                 SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
                 trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
@@ -58,13 +58,17 @@ public class SetPriorityPacket {
             }
 
             try {
-                CompoundTag nbt = NbtIo.readCompressed(nbtFile);
+                CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
                 nbt.putInt("Priority", priority);
-                NbtIo.writeCompressed(nbt, nbtFile);
+                NbtFileIO.writeCompressed(nbt, nbtFile);
 
                 // Push updated NBT back to client so its cache stays in sync
-                SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, nbt);
-                trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                CompoundTag replyNbt = RequestPetDataPacket.createUpdateNbt(
+                        player, packet.petUuid, nbt);
+                if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {
+                    SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
+                    trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                }
             } catch (Exception e) {
                 trulybestfriends.LOGGER.error("Failed to update priority for {}: {}", packet.petUuid, e.getMessage());
             }

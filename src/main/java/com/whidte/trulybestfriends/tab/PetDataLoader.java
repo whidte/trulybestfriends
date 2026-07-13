@@ -1,6 +1,5 @@
 package com.whidte.trulybestfriends.tab;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,12 +10,8 @@ import com.whidte.trulybestfriends.network.PetIOUtil;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.LivingEntity;
+import com.whidte.trulybestfriends.network.NbtFileIO;
 import net.minecraft.world.level.storage.LevelResource;
-import net.minecraftforge.registries.ForgeRegistries;
 
 /**
  * Handles all disk I/O for pet NBT data.
@@ -52,7 +47,7 @@ final class PetDataLoader {
 		try {
 			Files.list(petDir).filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
 				try {
-					CompoundTag nbt = NbtIo.readCompressed(file.toFile());
+					CompoundTag nbt = NbtFileIO.readCompressed(file.toFile());
 					String uuidStr = file.getFileName().toString().replace(".nbt", "");
 					UUID uuid = UUID.fromString(uuidStr);
 					cache.put(uuid, nbt);

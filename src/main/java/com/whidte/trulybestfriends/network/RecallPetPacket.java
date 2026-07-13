@@ -8,13 +8,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.phys.AABB;
 import net.minecraftforge.entity.PartEntity;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import java.io.File;
 import java.io.IOException;
@@ -59,7 +56,8 @@ public class RecallPetPacket {
                 // If the entity is no longer tracked, its data was already cleared
                 // (e.g. clearOnDeath whitelist, manual delete). Refuse recall to
                 // prevent recreating a pet that should be gone.
-                if (!trulybestfriends.isTrackedPet(packet.petUuid)) return;
+                if (!trulybestfriends.isTrackedPet(packet.petUuid)
+                        || !trulybestfriends.isOwnedBy(living, player.getUUID())) return;
 
                 if (Config.recallRange < 0 || entity.distanceTo(player) <= Config.recallRange) {
                     // RECALL: pet is alive in world → save and remove
@@ -67,9 +65,10 @@ public class RecallPetPacket {
                     // before saving, otherwise the saved NBT / passenger references become stale.
                     living.ejectPassengers();
                     living.stopRiding();
-                    savePetToDisk(player.getUUID(), living, playerLevel);
-                    living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
-                    living.discard();
+                    if (savePetToDisk(player.getUUID(), living, playerLevel)) {
+                        living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
+                        living.discard();
+                    }
                 }
                 return;
             }
@@ -81,9 +80,10 @@ public class RecallPetPacket {
             var shoulderNbt = PetIOUtil.getShoulderEntity(player, packet.petUuid);
             if (shoulderNbt != null) {
                 trulybestfriends.flushPendingPetSaves(player.getUUID());
-                PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, playerLevel);
-                PetIOUtil.clearShoulderSlot(player, packet.petUuid);
-                player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
+                if (PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, playerLevel)) {
+                    PetIOUtil.clearShoulderSlot(player, packet.petUuid);
+                    player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
+                }
                 return;
             }
 
@@ -94,7 +94,7 @@ public class RecallPetPacket {
 
             CompoundTag nbt;
             try {
-                nbt = net.minecraft.nbt.NbtIo.readCompressed(nbtFile);
+                nbt = NbtFileIO.readCompressed(nbtFile);
             } catch (IOException e) {
                 trulybestfriends.LOGGER.error("Failed to read pet NBT for recall: {}", e.getMessage());
                 return;
@@ -102,21 +102,38 @@ public class RecallPetPacket {
 
             // --- SUMMON path: pet was recalled to disk → release back into world ---
             if (nbt.getBoolean("Recalled")) {
+                if (trulybestfriends.isPendingRemoval(player.getUUID(), packet.petUuid)) {
+                    trulybestfriends.CHANNEL.send(
+                            PacketDistributor.PLAYER.with(() -> player),
+                            new PetWarningPacket(2, packet.petUuid));
+                    return;
+                }
+                CompoundTag recalledSnapshot = nbt.copy();
                 try {
                     if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) {
                         // Dead pet: just clear the stale Recalled flag, don't summon a corpse
                         nbt.remove("Recalled");
-                        net.minecraft.nbt.NbtIo.writeCompressed(nbt, nbtFile);
+                        NbtFileIO.writeCompressed(nbt, nbtFile);
                         return;
                     }
                     nbt.remove("Recalled");
-                    net.minecraft.nbt.NbtIo.writeCompressed(nbt, nbtFile);
+                    NbtFileIO.writeCompressed(nbt, nbtFile);
                 } catch (IOException e) {
                     trulybestfriends.LOGGER.error("Failed to clear Recalled flag for {}: {}", packet.petUuid, e.getMessage());
                     return;
                 }
-                summonPet(player, packet.petUuid, playerLevel, nbt);
-                player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
+                if (summonPet(player, packet.petUuid, playerLevel, nbt)) {
+                    player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT,
+                            net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
+                } else {
+                    try {
+                        NbtFileIO.writeCompressed(recalledSnapshot, nbtFile);
+                    } catch (IOException rollbackError) {
+                        trulybestfriends.LOGGER.error("Failed to roll back recalled state for {}: {}",
+                                packet.petUuid, rollbackError.getMessage(), rollbackError);
+                    }
+                    sendWarning(player, packet.petUuid);
+                }
                 return;
             }
 
@@ -140,7 +157,8 @@ public class RecallPetPacket {
             // --- Case 2: pet is alive in its stored dimension (same or different from player) ---
             Entity petEntity = petLevel.getEntity(packet.petUuid);
             if (petEntity instanceof LivingEntity living && living.isAlive()) {
-                if (!trulybestfriends.isTrackedPet(packet.petUuid)) return;
+                if (!trulybestfriends.isTrackedPet(packet.petUuid)
+                        || !trulybestfriends.isOwnedBy(living, player.getUUID())) return;
 
                 // Range check: same dimension uses real distance; cross-dimension
                 // allows recall (player explicitly chose to recall from another dimension)
@@ -150,9 +168,10 @@ public class RecallPetPacket {
 
                 living.ejectPassengers();
                 living.stopRiding();
-                savePetToDisk(player.getUUID(), living, petLevel);
-                living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
-                living.discard();
+                if (savePetToDisk(player.getUUID(), living, petLevel)) {
+                    living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
+                    living.discard();
+                }
                 return;
             }
 
@@ -195,14 +214,25 @@ public class RecallPetPacket {
             trulybestfriends.flushPendingPetSaves(player.getUUID());
             nbt.putBoolean("Recalled", true);
             try {
-                net.minecraft.nbt.NbtIo.writeCompressed(nbt, nbtFile);
+                NbtFileIO.writeCompressed(nbt, nbtFile);
             } catch (IOException e) {
                 trulybestfriends.LOGGER.error("Failed to write Recalled flag for {}: {}", packet.petUuid, e.getMessage());
                 return;
             }
 
-            petLevel.setChunkForced(cx, cz, true);
-            trulybestfriends.queuePendingRemoval(player.getUUID(), packet.petUuid, petLevel, cx, cz);
+            if (!trulybestfriends.queuePendingRemoval(player.getUUID(), packet.petUuid, petLevel, cx, cz)) {
+                nbt.remove("Recalled");
+                try {
+                    NbtFileIO.writeCompressed(nbt, nbtFile);
+                } catch (IOException rollbackError) {
+                    trulybestfriends.LOGGER.error("Failed to roll back queued recall for {}: {}",
+                            packet.petUuid, rollbackError.getMessage(), rollbackError);
+                }
+                trulybestfriends.CHANNEL.send(
+                        PacketDistributor.PLAYER.with(() -> player),
+                        new PetWarningPacket(2, packet.petUuid));
+                return;
+            }
 
             player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
         });
@@ -216,78 +246,27 @@ public class RecallPetPacket {
                 new PetWarningPacket(3, petUuid));
     }
 
-    static void savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {
+    static boolean savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {
+        return savePetToDisk(playerUuid, pet, level, true);
+    }
+
+    static boolean savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level, boolean recalled) {
         try {
             Path ownerDir = PetIOUtil.getOwnerDir(level, playerUuid);
             Files.createDirectories(ownerDir);
 
             File nbtFile = ownerDir.resolve(pet.getUUID() + ".nbt").toFile();
 
-            // Preserve Priority from existing file
-            int existingPriority = 6;
-            if (nbtFile.exists()) {
-                try {
-                    CompoundTag oldNbt = net.minecraft.nbt.NbtIo.readCompressed(nbtFile);
-                    if (oldNbt.contains("Priority")) {
-                        existingPriority = Math.max(1, Math.min(6, oldNbt.getInt("Priority")));
-                    }
-                } catch (IOException ignored) {}
-            }
-
-            CompoundTag nbt = new CompoundTag();
-            pet.saveWithoutId(nbt);
-            nbt.putFloat("MaxHealth", (float) pet.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH));
-            TeleportPetToPlayerPacket.backupChestInventory(pet, nbt);
-            com.whidte.trulybestfriends.compat.CuriosCompat.backup(pet, nbt);
-            nbt.putString("OwnerUUID", playerUuid.toString());
-            nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());
-            nbt.putString("Dimension", level.dimension().location().toString());
-            nbt.putInt("Priority", existingPriority);
-            nbt.putBoolean("Recalled", true);
-
-            net.minecraft.nbt.NbtIo.writeCompressed(nbt, nbtFile);
-        } catch (IOException e) {
-            trulybestfriends.LOGGER.error("Failed to save pet: {}", e.getMessage());
+            CompoundTag nbt = PetEntitySnapshot.capture(pet, playerUuid, level);
+            PetIOUtil.writePetSnapshot(nbtFile, nbt, recalled);
+            return true;
+        } catch (IOException | RuntimeException e) {
+            trulybestfriends.LOGGER.error("Failed to save pet {}: {}", pet.getUUID(), e.getMessage(), e);
+            return false;
         }
     }
 
-    private static void summonPet(ServerPlayer player, UUID petUuid, ServerLevel level, CompoundTag nbt) {
-        String typeKey = nbt.getString("EntityType");
-        EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
-        if (type == null) return;
-
-        Entity entity = type.create(level);
-        if (entity == null) return;
-        entity.load(nbt);
-        entity.setUUID(petUuid);
-        TeleportPetToPlayerPacket.restoreChestInventory(entity, nbt);
-
-        // Find safe position near player (wolf-style teleport)
-        float bbWidth = entity instanceof LivingEntity le ? le.getBbWidth() : 0.6f;
-        int radius = Math.max(1, (int) Math.ceil(bbWidth));
-        for (int r = radius; r <= 6; r++) {
-            for (int attempt = 0; attempt < 16; attempt++) {
-                double angle = level.random.nextDouble() * Math.PI * 2;
-                double dx = Math.cos(angle) * r;
-                double dz = Math.sin(angle) * r;
-                double x = player.getX() + dx;
-                double z = player.getZ() + dz;
-                double y = PetIOUtil.findSafeY(level, x, player.getY(), z, entity);
-
-                entity.setPos(x, y, z);
-                AABB box = entity.getBoundingBox();
-                if (level.noCollision(entity, box) && !level.containsAnyLiquid(box)) {
-                    level.addFreshEntity(entity);
-                    com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
-                    if (entity instanceof LivingEntity le) {
-                        le.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
-                    }
-                    return;
-                }
-            }
-        }
-        // Fallback: spawn right at player's feet
-        entity.setPos(player.getX(), player.getY(), player.getZ());
-        level.addFreshEntity(entity);
+    private static boolean summonPet(ServerPlayer player, UUID petUuid, ServerLevel level, CompoundTag nbt) {
+        return TeleportPetToPlayerPacket.summonFromDisk(nbt, petUuid, player, level);
     }
 }

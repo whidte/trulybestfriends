@@ -5,7 +5,6 @@ import com.whidte.trulybestfriends.compat.IafCompat;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -18,8 +17,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.storage.LevelResource;
-import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -57,7 +55,7 @@ public class RevivePetPacket {
             if (!nbtFile.exists()) return;
 
             try {
-                CompoundTag nbt = NbtIo.readCompressed(nbtFile);
+                CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
 
                 // Only revive if actually dead
                 if (!nbt.contains("Health") || nbt.getFloat("Health") > 0) return;
@@ -80,14 +78,16 @@ public class RevivePetPacket {
                     return;
                 }
 
-                // Consume items (creative mode skips check)
-                if (!player.isCreative() && !consumeItems(player)) return;
+                // Validate first; consume only after the revive has actually succeeded.
+                if (!player.isCreative() && !hasItems(player)) return;
+                CompoundTag deadSnapshot = nbt.copy();
 
                 // Ice and Fire 联动：龙等 IDeadMob 实体死亡后变成同 UUID 尸体长期驻留世界。
                 // 若尸体已加载在玩家所在维度，原地治愈（setModelDead(false)+setDeathStage(0)），
                 // 避免 summonFromDisk 因 UUID 冲突失败。详见 IafCompat。
                 if (IafCompat.isLoaded()
-                        && reviveCorpseInPlace(player.server, packet.petUuid, player, level, nbtFile)) {
+                        && reviveCorpseInPlace(player.server, packet.petUuid, player, level, nbt, nbtFile)) {
+                    if (!player.isCreative()) consumeItems(player);
                     trulybestfriends.clearPetDeathTime(packet.petUuid);
                     player.playNotifySound(net.minecraft.sounds.SoundEvents.TOTEM_USE,
                             net.minecraft.sounds.SoundSource.PLAYERS, 1.0f, 1.0f);
@@ -110,8 +110,18 @@ public class RevivePetPacket {
                 applyTotemEffects(nbt);
 
                 // Persist the revived NBT, then summon the pet directly into the world
-                NbtIo.writeCompressed(nbt, nbtFile);
-                TeleportPetToPlayerPacket.summonFromDisk(nbt, packet.petUuid, player, level);
+                NbtFileIO.writeCompressed(nbt, nbtFile);
+                if (!TeleportPetToPlayerPacket.summonFromDisk(nbt, packet.petUuid, player, level)) {
+                    try {
+                        NbtFileIO.writeCompressed(deadSnapshot, nbtFile);
+                    } catch (IOException rollbackError) {
+                        trulybestfriends.LOGGER.error("Failed to roll back revive for {}: {}",
+                                packet.petUuid, rollbackError.getMessage(), rollbackError);
+                    }
+                    return;
+                }
+                discardLoadedCopiesOutside(player.server, packet.petUuid, level);
+                if (!player.isCreative()) consumeItems(player);
                 trulybestfriends.clearPetDeathTime(packet.petUuid);
 
                 player.playNotifySound(net.minecraft.sounds.SoundEvents.TOTEM_USE,
@@ -145,35 +155,15 @@ public class RevivePetPacket {
             }
         }
 
-        // Find a safe spot (mirrors TeleportPetToPlayerPacket logic)
-        float hw = bbW / 2f;
+        float halfWidth = bbW / 2f;
         int radius = Math.max(1, (int) Math.ceil(bbW));
-        double px = player.getX(), py = player.getY(), pz = player.getZ();
-
-        double safeX = px, safeY = py, safeZ = pz;
-        boolean found = false;
-
-        outer:
-        for (int r = radius; r <= 6; r++) {
-            for (int attempt = 0; attempt < 16; attempt++) {
-                double angle = level.random.nextDouble() * Math.PI * 2;
-                double x = px + Math.cos(angle) * r;
-                double z = pz + Math.sin(angle) * r;
-                double y = PetIOUtil.findSafeY(level, x, py, z, hw, bbH);
-                AABB box = new AABB(x - hw, y, z - hw, x + hw, y + bbH, z + hw);
-                if (level.noCollision(box) && !level.containsAnyLiquid(box)) {
-                    safeX = x; safeY = y; safeZ = z;
-                    found = true;
-                    break outer;
-                }
-            }
-        }
-
-        if (!found) {
-            safeX = px;
-            safeY = PetIOUtil.findSafeY(level, px, py, pz, hw, bbH);
-            safeZ = pz;
-        }
+        Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(
+                level, player, halfWidth, bbH, radius, 6, 16);
+        double safeX = safePosition != null ? safePosition.x : player.getX();
+        double safeY = safePosition != null
+                ? safePosition.y
+                : PetIOUtil.findSafeY(level, player.getX(), player.getY(), player.getZ(), halfWidth, bbH);
+        double safeZ = safePosition != null ? safePosition.z : player.getZ();
 
         net.minecraft.nbt.ListTag pos = new net.minecraft.nbt.ListTag();
         pos.add(net.minecraft.nbt.DoubleTag.valueOf(safeX));
@@ -218,7 +208,7 @@ public class RevivePetPacket {
      */
     private static boolean reviveCorpseInPlace(MinecraftServer server, UUID petUuid,
                                                ServerPlayer player, ServerLevel playerLevel,
-                                               File nbtFile) {
+                                               CompoundTag originalNbt, File nbtFile) {
         if (!IafCompat.isLoaded()) return false;
 
         // 跨所有维度查找已加载的同 UUID 实体
@@ -234,8 +224,7 @@ public class RevivePetPacket {
 
         // 跨维度尸体：discard 后走原路径在玩家维度新建（避免 changeDimension 复杂性）
         if (corpse.level() != playerLevel) {
-            corpse.discard();
-            trulybestfriends.LOGGER.info("IaF corpse {} discarded (cross-dimension), falling back to summon", petUuid);
+            trulybestfriends.LOGGER.info("IaF corpse {} is cross-dimension; falling back to transactional summon", petUuid);
             return false;
         }
 
@@ -263,12 +252,15 @@ public class RevivePetPacket {
 
         // 5. 写回磁盘 NBT，保持盘/世界一致
         try {
-            CompoundTag saved = new CompoundTag();
-            corpse.saveWithoutId(saved);
-            saved.putString("OwnerUUID", player.getUUID().toString());
+            TeleportPetToPlayerPacket.restoreChestInventory(corpse, originalNbt);
+            com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(corpse, originalNbt);
+            CompoundTag saved = PetEntitySnapshot.capture(corpse, player.getUUID(), playerLevel);
+            if (originalNbt.contains("Priority")) {
+                saved.putInt("Priority", Math.max(1, Math.min(6, originalNbt.getInt("Priority"))));
+            }
             saved.remove("Recalled");
             saved.remove("LastDeathTime");  // 清死亡时间，避免复活冷却误判
-            NbtIo.writeCompressed(saved, nbtFile);
+            NbtFileIO.writeCompressed(saved, nbtFile);
         } catch (IOException e) {
             trulybestfriends.LOGGER.error("reviveCorpseInPlace: failed to write nbt for {}: {}", petUuid, e.getMessage());
         }
@@ -279,38 +271,23 @@ public class RevivePetPacket {
 
     /** 同维度内把实体传送到玩家旁的安全位置。 */
     private static void teleportCorpseToPlayer(LivingEntity entity, ServerPlayer player, ServerLevel level) {
-        float bbW = entity.getBbWidth();
-        float bbH = entity.getBbHeight();
-        float hw = bbW / 2f;
-        int radius = Math.max(1, (int) Math.ceil(bbW));
-
-        for (int r = radius; r <= 6; r++) {
-            for (int attempt = 0; attempt < 16; attempt++) {
-                double angle = level.random.nextDouble() * Math.PI * 2;
-                double x = player.getX() + Math.cos(angle) * r;
-                double z = player.getZ() + Math.sin(angle) * r;
-                double y = PetIOUtil.findSafeY(level, x, player.getY(), z, hw, bbH);
-                AABB box = new AABB(x - hw, y, z - hw, x + hw, y + bbH, z + hw);
-                if (level.noCollision(box) && !level.containsAnyLiquid(box)) {
-                    entity.teleportTo(x, y, z);
-                    entity.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
-                    return;
-                }
-            }
+        int radius = Math.max(1, (int) Math.ceil(entity.getBbWidth()));
+        Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(level, player, entity, radius, 6, 16);
+        if (safePosition != null) {
+            entity.teleportTo(safePosition.x, safePosition.y, safePosition.z);
+            entity.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
+            return;
         }
         // 兜底：直接传送到玩家坐标
         entity.teleportTo(player.getX(), player.getY(), player.getZ());
         entity.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
     }
 
-    private static boolean consumeItems(ServerPlayer player) {
+    private static boolean hasItems(ServerPlayer player) {
         var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
         if (item == null) return false;
 
-        int needed = Config.reviveItemCount;
-        int remaining = needed;
-
-        // Count how many we have
+        int remaining = Config.reviveItemCount;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
             if (stack.is(item)) {
@@ -318,10 +295,14 @@ public class RevivePetPacket {
                 if (remaining <= 0) break;
             }
         }
-        if (remaining > 0) return false; // not enough
+        return remaining <= 0;
+    }
 
-        // Consume
-        remaining = needed;
+    private static boolean consumeItems(ServerPlayer player) {
+        var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
+        if (item == null || !hasItems(player)) return false;
+
+        int remaining = Config.reviveItemCount;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
             if (stack.is(item)) {
@@ -332,5 +313,13 @@ public class RevivePetPacket {
             }
         }
         return true;
+    }
+
+    private static void discardLoadedCopiesOutside(MinecraftServer server, UUID petUuid, ServerLevel targetLevel) {
+        for (ServerLevel level : server.getAllLevels()) {
+            if (level == targetLevel) continue;
+            Entity duplicate = level.getEntity(petUuid);
+            if (duplicate != null) duplicate.discard();
+        }
     }
 }

@@ -2,7 +2,6 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -38,7 +37,7 @@ public class AreaRecallPacket {
             ServerPlayer player = ctx.get().getSender();
             if (player == null) return;
             ServerLevel level = player.serverLevel();
-            int range = packet.range;
+            int range = net.minecraft.util.Mth.clamp(packet.range, 1, 16);
             int recalled = 0;
 
             Path ownerDir = PetIOUtil.getOwnerDir(player);
@@ -68,7 +67,8 @@ public class AreaRecallPacket {
                     if (entity instanceof PartEntity<?>) continue;
                     if (entity instanceof LivingEntity living) {
                         // Skip untracked entities (data already cleared, e.g. clearOnDeath)
-                        if (!trulybestfriends.isTrackedPet(petUuid)) continue;
+                        if (!trulybestfriends.isTrackedPet(petUuid)
+                                || !trulybestfriends.isOwnedBy(living, player.getUUID())) continue;
                         // In world: use live state, skip dead pets
                         if (living.getHealth() <= 0) continue;
                         // In world: check range
@@ -76,15 +76,16 @@ public class AreaRecallPacket {
                             // Force dismount before discarding to avoid stale passenger refs
                             living.ejectPassengers();
                             living.stopRiding();
-                            RecallPetPacket.savePetToDisk(player.getUUID(), living, level);
-                            living.discard();
-                            recalled++;
+                            if (RecallPetPacket.savePetToDisk(player.getUUID(), living, level)) {
+                                living.discard();
+                                recalled++;
+                            }
                         }
                         continue;
                     }
 
                     // Entity not in world: must read NBT to check state and position
-                    CompoundTag nbt = NbtIo.readCompressed(nbtFile);
+                    CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
 
                     // Skip dead pets
                     if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) continue;
@@ -95,9 +96,10 @@ public class AreaRecallPacket {
                     CompoundTag shoulderNbt = PetIOUtil.getShoulderEntity(player, petUuid);
                     if (shoulderNbt != null) {
                         trulybestfriends.flushPendingPetSaves(player.getUUID());
-                        PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, level);
-                        PetIOUtil.clearShoulderSlot(player, petUuid);
-                        recalled++;
+                        if (PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, level)) {
+                            PetIOUtil.clearShoulderSlot(player, petUuid);
+                            recalled++;
+                        }
                         continue;
                     }
 
@@ -112,9 +114,17 @@ public class AreaRecallPacket {
                             double dy = posList.getDouble(1) - player.getY();
                             double dz = posList.getDouble(2) - player.getZ();
                             if (Math.sqrt(dx * dx + dy * dy + dz * dz) <= range) {
+                                int chunkX = net.minecraft.util.Mth.floor(posList.getDouble(0)) >> 4;
+                                int chunkZ = net.minecraft.util.Mth.floor(posList.getDouble(2)) >> 4;
                                 nbt.putBoolean("Recalled", true);
-                                NbtIo.writeCompressed(nbt, nbtFile);
-                                recalled++;
+                                NbtFileIO.writeCompressed(nbt, nbtFile);
+                                if (trulybestfriends.queuePendingRemoval(
+                                        player.getUUID(), petUuid, level, chunkX, chunkZ)) {
+                                    recalled++;
+                                } else {
+                                    nbt.remove("Recalled");
+                                    NbtFileIO.writeCompressed(nbt, nbtFile);
+                                }
                             }
                         }
                     }
