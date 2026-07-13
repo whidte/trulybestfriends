@@ -51,16 +51,31 @@ final class TrulyConstants {
 	static final ResourceLocation TEXTURE =
 			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/empty.png");
 	static final ResourceLocation GLOWING_ICON = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/mob_effect/glowing.png");
-	static final ResourceLocation BEACON_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/container/beacon.png");
 	static final ResourceLocation WIDGET_BUTTON = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/widget_button.png");
-	static final ResourceLocation WIDGETS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/widgets.png");
-	static final ResourceLocation ICONS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/icons.png");
-	static final ResourceLocation BARS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/bars.png");
 	static final ResourceLocation SCROLLBAR = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/scrollbar.png");
 	static final ResourceLocation SCROLLBAR_THUMB = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/scrollbar_thumb.png");
 	static final ResourceLocation PET_ENTRY = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/pet_entry.png");
+	static final ResourceLocation DELETE_ICON = ResourceLocation.withDefaultNamespace("container/beacon/cancel");
+	static final ResourceLocation BUTTON = ResourceLocation.withDefaultNamespace("widget/button");
+	static final ResourceLocation BUTTON_HIGHLIGHTED = ResourceLocation.withDefaultNamespace("widget/button_highlighted");
+	static final ResourceLocation BUTTON_DISABLED = ResourceLocation.withDefaultNamespace("widget/button_disabled");
+	static final ResourceLocation HEART_CONTAINER = ResourceLocation.withDefaultNamespace("hud/heart/container");
+	static final ResourceLocation HEART_FULL = ResourceLocation.withDefaultNamespace("hud/heart/full");
+	static final ResourceLocation HEALTH_BAR_BACKGROUND = ResourceLocation.withDefaultNamespace("boss_bar/red_background");
+	static final ResourceLocation HEALTH_BAR_PROGRESS = ResourceLocation.withDefaultNamespace("boss_bar/red_progress");
+	private static final ResourceLocation[] PRIORITY_SPRITES = {
+			ResourceLocation.withDefaultNamespace("notification/1"),
+			ResourceLocation.withDefaultNamespace("notification/2"),
+			ResourceLocation.withDefaultNamespace("notification/3"),
+			ResourceLocation.withDefaultNamespace("notification/4"),
+			ResourceLocation.withDefaultNamespace("notification/5"),
+			ResourceLocation.withDefaultNamespace("notification/more")
+	};
 
 	// --- Utility ---
+	static ResourceLocation prioritySprite(int priority) {
+		return PRIORITY_SPRITES[Math.max(1, Math.min(6, priority)) - 1];
+	}
 
 	/** Discard a preview entity from the client world. */
 	static void discardPreviewEntity(LivingEntity entity) {

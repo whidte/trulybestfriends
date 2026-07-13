@@ -1,17 +1,24 @@
 package com.whidte.trulybestfriends.network;
 
+import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
-import net.minecraftforge.network.NetworkEvent;
+
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
-public class GlowPetPacket {
+public class GlowPetPacket implements CustomPacketPayload {
+    public static final Type<GlowPetPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "glow_pet"));
+    public static final StreamCodec<FriendlyByteBuf, GlowPetPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), GlowPetPacket::decode);
+    @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     private final UUID petUuid;
 
     public GlowPetPacket(UUID petUuid) {
@@ -26,9 +33,9 @@ public class GlowPetPacket {
         return new GlowPetPacket(buf.readUUID());
     }
 
-    public static void handle(GlowPetPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(GlowPetPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
             if (player != null) {
                 ServerLevel level = player.serverLevel();
                 Entity entity = level.getEntity(packet.petUuid);
@@ -37,6 +44,6 @@ public class GlowPetPacket {
                 }
             }
         });
-        ctx.get().setPacketHandled(true);
+
     }
 }

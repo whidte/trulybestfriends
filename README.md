@@ -1,6 +1,6 @@
 # Truly Best Friends Forever
 
-> 让你的宠物永远陪伴在身边 —— 一个面向 Minecraft 1.20.1 (Forge) 的宠物管理模组。
+> 让你的宠物永远陪伴在身边 —— 一个面向 Minecraft 1.21.1 (NeoForge) 的宠物管理模组。
 
 驯服过的宠物会被自动追踪并持久化保存。即使宠物所在的区块未加载、宠物死亡、甚至存档切换维度，你都可以通过一个独立的宠物管理面板随时把它们召回身边、复活、或传送到它们的位置。
 
@@ -24,9 +24,11 @@
 
 ## 安装
 
-1. 安装 **Minecraft 1.20.1** + **Forge 47.x**（推荐 47.4.20 或以上）。
+1. 安装 **Minecraft 1.21.1** + **NeoForge 21.1.228** 或以上版本。
 2. 将以下模组 jar 放入 `.minecraft/mods/`：
    - Truly Best Friends Forever（本模组）
+   - 可选：L2 Library 3.0.8+（提供物品栏标签页；未安装时使用快捷键）
+   - 可选：Curios 9.5.1+（保存和恢复宠物饰品）
 3. 启动游戏，进入存档即可，驯服一只宠物后即开始追踪。
 
 > 服务端/客户端均需安装本模组及其依赖。本模组包含网络同步逻辑，纯客户端无法工作。
@@ -50,8 +52,8 @@
 | `reviveCooldownSeconds` | `120` | 复活冷却时间（秒，0~86400） |
 | `noReviveWhitelist` | `["touhou_little_maid:maid"]` | 保留掉落物且不可复活的实体类型列表 |
 | `autoRegisterBlacklist` | （见配置） | 不自动登记为宠物的实体类型列表，支持 `namespace:*` 通配符（默认屏蔽 Iron's Spells 的召唤物） |
-| `dimensionNames` | （见配置） | 维度显示名，格式 `维度ID\|语言码\|名称` |
 | `enableLoginLoadDiagnostics` | `false` | 登录时校验宠物 NBT 文件并打印日志（调试用） |
+| `clearOnDeathWhitelist` | （见配置） | 死亡时保留掉落物，并彻底清除追踪数据的实体类型列表 |
 
 ## 数据存储位置
 
@@ -69,7 +71,9 @@
 ## 兼容性
 
 - **理论兼容**任何遵循 `OwnableEntity`（可归属实体）接口的模组宠物。
-- 通过反射查找实体容器字段，兼容任意槽位数量的模组马匹/背包实体。
+- 使用完整实体 NBT 保存与恢复宠物；原版马匹容器使用公开 API，模组容器通过 NeoForge ItemHandler Capability 兜底，无需反射实体字段。
+- 安装 Curios 9.5.1+ 后，宠物饰品会随召回和复活流程备份、恢复，并避免死亡掉落复制。
+- 安装 L2 Library 3.0.8+ 后，宠物面板会注册到 L2Tabs 物品栏标签组。
 - 已默认将东方女仆（`touhou_little_maid:maid`）加入不可复活白名单，因其死亡逻辑与本模组复活机制冲突。
 - 已默认将 Iron's Spells 的召唤物（幽灵战马、召唤 vex / 僵尸 / 骷髅 / 北极熊 / 各类召唤武器等）加入自动登记黑名单，避免临时召唤物被误登记。
 - 若某模组宠物的死亡掉落不应被清空，请将其实体 ID 加入 `noReviveWhitelist`。
@@ -90,10 +94,10 @@
 # 产物位于 build/libs/
 ```
 
-- **MC 版本**：1.20.1
-- **Forge**：47.4.20
-- **Java**：17
-- **兼容**：L2Tabs (`libs/l2tabs-0.3.3.jar`, compileOnly)、L2Library (curse maven, implementation)
+- **MC 版本**：1.21.1
+- **NeoForge**：21.1.228
+- **Java**：21
+- **兼容**：L2 Library 3.0.8（内含 L2Tabs 3.0.5）、Curios 9.5.1、Ice and Fire（反射联动）
 
 ## 协议
 

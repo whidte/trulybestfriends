@@ -4,26 +4,28 @@ import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.entity.PartEntity;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.PacketDistributor;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.neoforge.entity.PartEntity;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
-import java.util.function.Supplier;
 
-public class RecallPetPacket {
+public class RecallPetPacket implements CustomPacketPayload {
+    public static final Type<RecallPetPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "recall_pet"));
+    public static final StreamCodec<FriendlyByteBuf, RecallPetPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), RecallPetPacket::decode);
+    @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     private final UUID petUuid;
 
     public RecallPetPacket(UUID petUuid) {
@@ -41,9 +43,9 @@ public class RecallPetPacket {
     /** Server determines action based on actual world state, not client guess.
      *  Mirrors TeleportPetToPlayerPacket's strict entity-existence checks:
      *  searches the pet's stored dimension before falling back to chunk force-load. */
-    public static void handle(RecallPetPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(RecallPetPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
             ServerLevel playerLevel = player.serverLevel();
 
@@ -67,9 +69,10 @@ public class RecallPetPacket {
                     // before saving, otherwise the saved NBT / passenger references become stale.
                     living.ejectPassengers();
                     living.stopRiding();
-                    savePetToDisk(player.getUUID(), living, playerLevel);
-                    living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
-                    living.discard();
+                    if (savePetToDisk(player.getUUID(), living, playerLevel)) {
+                        living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
+                        living.discard();
+                    }
                 }
                 return;
             }
@@ -81,9 +84,10 @@ public class RecallPetPacket {
             var shoulderNbt = PetIOUtil.getShoulderEntity(player, packet.petUuid);
             if (shoulderNbt != null) {
                 trulybestfriends.flushPendingPetSaves(player.getUUID());
-                PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, playerLevel);
-                PetIOUtil.clearShoulderSlot(player, packet.petUuid);
-                player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
+                if (PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, playerLevel)) {
+                    PetIOUtil.clearShoulderSlot(player, packet.petUuid);
+                    player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
+                }
                 return;
             }
 
@@ -94,7 +98,7 @@ public class RecallPetPacket {
 
             CompoundTag nbt;
             try {
-                nbt = net.minecraft.nbt.NbtIo.readCompressed(nbtFile);
+                nbt = NbtFileIO.readCompressed(nbtFile);
             } catch (IOException e) {
                 trulybestfriends.LOGGER.error("Failed to read pet NBT for recall: {}", e.getMessage());
                 return;
@@ -106,11 +110,11 @@ public class RecallPetPacket {
                     if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) {
                         // Dead pet: just clear the stale Recalled flag, don't summon a corpse
                         nbt.remove("Recalled");
-                        net.minecraft.nbt.NbtIo.writeCompressed(nbt, nbtFile);
+                        NbtFileIO.writeCompressed(nbt, nbtFile);
                         return;
                     }
                     nbt.remove("Recalled");
-                    net.minecraft.nbt.NbtIo.writeCompressed(nbt, nbtFile);
+                    NbtFileIO.writeCompressed(nbt, nbtFile);
                 } catch (IOException e) {
                     trulybestfriends.LOGGER.error("Failed to clear Recalled flag for {}: {}", packet.petUuid, e.getMessage());
                     return;
@@ -150,9 +154,10 @@ public class RecallPetPacket {
 
                 living.ejectPassengers();
                 living.stopRiding();
-                savePetToDisk(player.getUUID(), living, petLevel);
-                living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
-                living.discard();
+                if (savePetToDisk(player.getUUID(), living, petLevel)) {
+                    living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
+                    living.discard();
+                }
                 return;
             }
 
@@ -195,7 +200,7 @@ public class RecallPetPacket {
             trulybestfriends.flushPendingPetSaves(player.getUUID());
             nbt.putBoolean("Recalled", true);
             try {
-                net.minecraft.nbt.NbtIo.writeCompressed(nbt, nbtFile);
+                NbtFileIO.writeCompressed(nbt, nbtFile);
             } catch (IOException e) {
                 trulybestfriends.LOGGER.error("Failed to write Recalled flag for {}: {}", packet.petUuid, e.getMessage());
                 return;
@@ -206,17 +211,15 @@ public class RecallPetPacket {
 
             player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
         });
-        ctx.get().setPacketHandled(true);
+
     }
 
     /** Warn the player that the pet was not found in its loaded chunk (type 3 = recall lost). */
     private static void sendWarning(ServerPlayer player, UUID petUuid) {
-        trulybestfriends.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player),
-                new PetWarningPacket(3, petUuid));
+        PacketDistributor.sendToPlayer(player, new PetWarningPacket(3, petUuid));
     }
 
-    static void savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {
+    static boolean savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {
         try {
             Path ownerDir = PetIOUtil.getOwnerDir(level, playerUuid);
             Files.createDirectories(ownerDir);
@@ -227,39 +230,28 @@ public class RecallPetPacket {
             int existingPriority = 6;
             if (nbtFile.exists()) {
                 try {
-                    CompoundTag oldNbt = net.minecraft.nbt.NbtIo.readCompressed(nbtFile);
+                    CompoundTag oldNbt = NbtFileIO.readCompressed(nbtFile);
                     if (oldNbt.contains("Priority")) {
                         existingPriority = Math.max(1, Math.min(6, oldNbt.getInt("Priority")));
                     }
                 } catch (IOException ignored) {}
             }
 
-            CompoundTag nbt = new CompoundTag();
-            pet.saveWithoutId(nbt);
-            nbt.putFloat("MaxHealth", (float) pet.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH));
-            TeleportPetToPlayerPacket.backupChestInventory(pet, nbt);
-            com.whidte.trulybestfriends.compat.CuriosCompat.backup(pet, nbt);
-            nbt.putString("OwnerUUID", playerUuid.toString());
-            nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());
-            nbt.putString("Dimension", level.dimension().location().toString());
+            CompoundTag nbt = PetEntitySnapshot.capture(pet, playerUuid, level);
             nbt.putInt("Priority", existingPriority);
             nbt.putBoolean("Recalled", true);
 
-            net.minecraft.nbt.NbtIo.writeCompressed(nbt, nbtFile);
-        } catch (IOException e) {
-            trulybestfriends.LOGGER.error("Failed to save pet: {}", e.getMessage());
+            NbtFileIO.writeCompressed(nbt, nbtFile);
+            return true;
+        } catch (IOException | RuntimeException e) {
+            trulybestfriends.LOGGER.error("Failed to save pet {}: {}", pet.getUUID(), e.getMessage(), e);
+            return false;
         }
     }
 
     private static void summonPet(ServerPlayer player, UUID petUuid, ServerLevel level, CompoundTag nbt) {
-        String typeKey = nbt.getString("EntityType");
-        EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
-        if (type == null) return;
-
-        Entity entity = type.create(level);
+        Entity entity = PetEntitySnapshot.restore(nbt, petUuid, level);
         if (entity == null) return;
-        entity.load(nbt);
-        entity.setUUID(petUuid);
         TeleportPetToPlayerPacket.restoreChestInventory(entity, nbt);
 
         // Find safe position near player (wolf-style teleport)
@@ -277,7 +269,7 @@ public class RecallPetPacket {
                 entity.setPos(x, y, z);
                 AABB box = entity.getBoundingBox();
                 if (level.noCollision(entity, box) && !level.containsAnyLiquid(box)) {
-                    level.addFreshEntity(entity);
+                    if (!level.tryAddFreshEntityWithPassengers(entity)) return;
                     com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
                     if (entity instanceof LivingEntity le) {
                         le.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
@@ -288,6 +280,8 @@ public class RecallPetPacket {
         }
         // Fallback: spawn right at player's feet
         entity.setPos(player.getX(), player.getY(), player.getZ());
-        level.addFreshEntity(entity);
+        if (level.tryAddFreshEntityWithPassengers(entity)) {
+            com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
+        }
     }
 }

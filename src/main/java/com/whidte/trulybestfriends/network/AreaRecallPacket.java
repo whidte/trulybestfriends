@@ -2,23 +2,27 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.entity.PartEntity;
-import net.minecraftforge.network.NetworkEvent;
+import net.neoforged.neoforge.entity.PartEntity;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /** Client -> Server: recall all tracked pets within a given radius of the player. */
-public class AreaRecallPacket {
+public class AreaRecallPacket implements CustomPacketPayload {
+    public static final Type<AreaRecallPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "area_recall"));
+    public static final StreamCodec<FriendlyByteBuf, AreaRecallPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), AreaRecallPacket::decode);
+    @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     private final int range;
 
     public AreaRecallPacket(int range) {
@@ -33,9 +37,9 @@ public class AreaRecallPacket {
         return new AreaRecallPacket(buf.readVarInt());
     }
 
-    public static void handle(AreaRecallPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(AreaRecallPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
             ServerLevel level = player.serverLevel();
             int range = packet.range;
@@ -43,13 +47,13 @@ public class AreaRecallPacket {
 
             Path ownerDir = PetIOUtil.getOwnerDir(player);
             if (!Files.exists(ownerDir)) {
-                ctx.get().setPacketHandled(true);
+
                 return;
             }
 
             File[] files = ownerDir.toFile().listFiles((f, n) -> n.endsWith(".nbt"));
             if (files == null) {
-                ctx.get().setPacketHandled(true);
+
                 return;
             }
 
@@ -76,15 +80,16 @@ public class AreaRecallPacket {
                             // Force dismount before discarding to avoid stale passenger refs
                             living.ejectPassengers();
                             living.stopRiding();
-                            RecallPetPacket.savePetToDisk(player.getUUID(), living, level);
-                            living.discard();
-                            recalled++;
+                            if (RecallPetPacket.savePetToDisk(player.getUUID(), living, level)) {
+                                living.discard();
+                                recalled++;
+                            }
                         }
                         continue;
                     }
 
                     // Entity not in world: must read NBT to check state and position
-                    CompoundTag nbt = NbtIo.readCompressed(nbtFile);
+                    CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
 
                     // Skip dead pets
                     if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) continue;
@@ -95,9 +100,10 @@ public class AreaRecallPacket {
                     CompoundTag shoulderNbt = PetIOUtil.getShoulderEntity(player, petUuid);
                     if (shoulderNbt != null) {
                         trulybestfriends.flushPendingPetSaves(player.getUUID());
-                        PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, level);
-                        PetIOUtil.clearShoulderSlot(player, petUuid);
-                        recalled++;
+                        if (PetIOUtil.saveShoulderToDisk(player.getUUID(), shoulderNbt, level)) {
+                            PetIOUtil.clearShoulderSlot(player, petUuid);
+                            recalled++;
+                        }
                         continue;
                     }
 
@@ -113,7 +119,7 @@ public class AreaRecallPacket {
                             double dz = posList.getDouble(2) - player.getZ();
                             if (Math.sqrt(dx * dx + dy * dy + dz * dz) <= range) {
                                 nbt.putBoolean("Recalled", true);
-                                NbtIo.writeCompressed(nbt, nbtFile);
+                                NbtFileIO.writeCompressed(nbt, nbtFile);
                                 recalled++;
                             }
                         }
@@ -128,6 +134,6 @@ public class AreaRecallPacket {
                         net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
             }
         });
-        ctx.get().setPacketHandled(true);
+
     }
 }

@@ -1,12 +1,13 @@
 package com.whidte.trulybestfriends;
 
-import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.logging.LogUtils;
 import com.whidte.trulybestfriends.network.AreaRecallPacket;
 import com.whidte.trulybestfriends.network.DeletePetDataPacket;
 import com.whidte.trulybestfriends.network.GlowPetPacket;
 import com.whidte.trulybestfriends.network.PetIOUtil;
+import com.whidte.trulybestfriends.network.NbtFileIO;
 import com.whidte.trulybestfriends.network.PetWarningPacket;
+import com.whidte.trulybestfriends.network.PetEntitySnapshot;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
 import com.whidte.trulybestfriends.network.RequestPetDataPacket;
 import com.whidte.trulybestfriends.network.RevivePetPacket;
@@ -14,17 +15,13 @@ import com.whidte.trulybestfriends.network.SetPriorityPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.TeleportToPetPacket;
-import com.whidte.trulybestfriends.tab.TrulyScreen;
-import net.minecraft.client.KeyMapping;
-import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
-import net.minecraft.advancements.Advancement;
+import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -38,28 +35,26 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.InputEvent;
-import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.EntityJoinLevelEvent;
-import net.minecraftforge.event.entity.living.AnimalTameEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.event.entity.living.LivingDeathEvent;
-import net.minecraftforge.event.entity.living.LivingDropsEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.entity.PartEntity;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.simple.SimpleChannel;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.entity.PartEntity;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+
 
 import java.io.File;
 import java.io.IOException;
@@ -69,8 +64,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Mod.EventBusSubscriber(bus = Mod.EventBusSubscriber.Bus.MOD)
-@Mod(value = trulybestfriends.MODID)
+@Mod(trulybestfriends.MODID)
 public class trulybestfriends {
     public static final String MODID = "trulybestfriends";
     public static final String NAME = "Truly Best Friends Forever";
@@ -85,25 +79,12 @@ public class trulybestfriends {
     private static final Set<LocalSyncCandidate> localSyncCandidates = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, String> shoulderPetTypes = new ConcurrentHashMap<>(); // UUID -> entity type key
     private static final Map<UUID, PendingPetSave> pendingPetSaves = new ConcurrentHashMap<>();
+    private static final Set<UUID> persistedDeathSnapshots = ConcurrentHashMap.newKeySet();
 
     /** 宠物死亡时刻（内存，不持久化）。key=petUUID, value=System.currentTimeMillis()。
      *  用于复活冷却计算，避免写盘后被 syncAllPets 反复刷新导致冷却永远不结束。
      *  服务器重启后清空 → 重启前的死亡宠物无冷却，可立即复活（符合"不保存到磁盘"的设计）。 */
     private static final Map<UUID, Long> petDeathTimes = new ConcurrentHashMap<>();
-
-    private static final String PROTOCOL_VERSION = "1";
-    public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            ResourceLocation.fromNamespaceAndPath(MODID, "main"),
-            () -> PROTOCOL_VERSION,
-            PROTOCOL_VERSION::equals,
-            PROTOCOL_VERSION::equals
-    );
-
-	public static final KeyMapping OPEN_TAB_KEY = new KeyMapping(
-			"key.trulybestfriends.open_tab",
-			InputConstants.UNKNOWN.getValue(),
-			"key.categories.trulybestfriends"
-	);
 
     private int syncTickCounter = 0;
     private int localSyncTickCounter = 0;
@@ -111,12 +92,26 @@ public class trulybestfriends {
 
     private static trulybestfriends INSTANCE;
 
-    public trulybestfriends(FMLJavaModLoadingContext context) {
+    public trulybestfriends(IEventBus modEventBus, ModContainer modContainer) {
         INSTANCE = this;
-        context.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
-        MinecraftForge.EVENT_BUS.register(this);
+        modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+        NeoForge.EVENT_BUS.register(this);
         com.whidte.trulybestfriends.compat.CuriosCompat.register();
-        context.getModEventBus().addListener(this::commonSetup);
+        modEventBus.addListener(Config::onLoad);
+        modEventBus.addListener(this::registerPayloads);
+        if (FMLEnvironment.dist == Dist.CLIENT) {
+            registerClientIntegration(modEventBus);
+        }
+    }
+
+    private static void registerClientIntegration(IEventBus modEventBus) {
+        try {
+            Class.forName("com.whidte.trulybestfriends.client.TrulyClient")
+                    .getMethod("register", IEventBus.class)
+                    .invoke(null, modEventBus);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Client integration could not be registered", e);
+        }
     }
 
     /**
@@ -132,18 +127,19 @@ public class trulybestfriends {
         flushPendingPetSaves(owner.getUUID());
     }
 
-    private void commonSetup(final FMLCommonSetupEvent event) {
-        CHANNEL.registerMessage(0, GlowPetPacket.class, GlowPetPacket::encode, GlowPetPacket::decode, GlowPetPacket::handle);
-        CHANNEL.registerMessage(1, RecallPetPacket.class, RecallPetPacket::encode, RecallPetPacket::decode, RecallPetPacket::handle);
-        CHANNEL.registerMessage(2, TeleportToPetPacket.class, TeleportToPetPacket::encode, TeleportToPetPacket::decode, TeleportToPetPacket::handle);
-        CHANNEL.registerMessage(3, TeleportPetToPlayerPacket.class, TeleportPetToPlayerPacket::encode, TeleportPetToPlayerPacket::decode, TeleportPetToPlayerPacket::handle);
-        CHANNEL.registerMessage(4, AreaRecallPacket.class, AreaRecallPacket::encode, AreaRecallPacket::decode, AreaRecallPacket::handle);
-        CHANNEL.registerMessage(5, PetWarningPacket.class, PetWarningPacket::encode, PetWarningPacket::decode, PetWarningPacket::handle);
-        CHANNEL.registerMessage(6, RequestPetDataPacket.class, RequestPetDataPacket::encode, RequestPetDataPacket::decode, RequestPetDataPacket::handle);
-        CHANNEL.registerMessage(7, RevivePetPacket.class, RevivePetPacket::encode, RevivePetPacket::decode, RevivePetPacket::handle);
-        CHANNEL.registerMessage(8, SetPriorityPacket.class, SetPriorityPacket::encode, SetPriorityPacket::decode, SetPriorityPacket::handle);
-        CHANNEL.registerMessage(9, SyncPetDataPacket.class, SyncPetDataPacket::encode, SyncPetDataPacket::decode, SyncPetDataPacket::handle);
-        CHANNEL.registerMessage(10, DeletePetDataPacket.class, DeletePetDataPacket::encode, DeletePetDataPacket::decode, DeletePetDataPacket::handle);
+    private void registerPayloads(RegisterPayloadHandlersEvent event) {
+        PayloadRegistrar registrar = event.registrar("1");
+        registrar.playToServer(GlowPetPacket.TYPE, GlowPetPacket.STREAM_CODEC, GlowPetPacket::handle);
+        registrar.playToServer(RecallPetPacket.TYPE, RecallPetPacket.STREAM_CODEC, RecallPetPacket::handle);
+        registrar.playToServer(TeleportToPetPacket.TYPE, TeleportToPetPacket.STREAM_CODEC, TeleportToPetPacket::handle);
+        registrar.playToServer(TeleportPetToPlayerPacket.TYPE, TeleportPetToPlayerPacket.STREAM_CODEC, TeleportPetToPlayerPacket::handle);
+        registrar.playToServer(AreaRecallPacket.TYPE, AreaRecallPacket.STREAM_CODEC, AreaRecallPacket::handle);
+        registrar.playToClient(PetWarningPacket.TYPE, PetWarningPacket.STREAM_CODEC, PetWarningPacket::handle);
+        registrar.playToServer(RequestPetDataPacket.TYPE, RequestPetDataPacket.STREAM_CODEC, RequestPetDataPacket::handle);
+        registrar.playToServer(RevivePetPacket.TYPE, RevivePetPacket.STREAM_CODEC, RevivePetPacket::handle);
+        registrar.playToServer(SetPriorityPacket.TYPE, SetPriorityPacket.STREAM_CODEC, SetPriorityPacket::handle);
+        registrar.playToClient(SyncPetDataPacket.TYPE, SyncPetDataPacket.STREAM_CODEC, SyncPetDataPacket::handle);
+        registrar.playToServer(DeletePetDataPacket.TYPE, DeletePetDataPacket.STREAM_CODEC, DeletePetDataPacket::handle);
     }
 
     @SubscribeEvent
@@ -202,11 +198,11 @@ public class trulybestfriends {
     public void onServerStopping(ServerStoppingEvent event) {
         flushPendingPetSaves();
         petDeathTimes.clear();  // 死亡时刻仅在内存，不持久化
+        persistedDeathSnapshots.clear();
     }
 
     @SubscribeEvent
-    public void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase == TickEvent.Phase.END) {
+    public void onServerTick(ServerTickEvent.Post event) {
             syncTickCounter++;
             localSyncTickCounter++;
             saveTickCounter++;
@@ -224,7 +220,6 @@ public class trulybestfriends {
                 saveTickCounter = 0;
                 flushPendingPetSaves();
             }
-        }
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
@@ -234,14 +229,17 @@ public class trulybestfriends {
                 && trackedPetUUIDs.contains(entity.getUUID())) {
             UUID owner = getCompatOwnerUUID(entity);
             if (owner == null) return;
+            persistedDeathSnapshots.remove(entity.getUUID());
             // 记录死亡时刻到内存（不写盘），用于复活冷却计算。
             petDeathTimes.put(entity.getUUID(), System.currentTimeMillis());
-            ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+            ResourceLocation entityType = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
             if (entityType != null && Config.isClearOnDeathEntity(entityType.toString())) {
                 clearPetDataAndCache(entity, owner, (ServerLevel) entity.level());
             } else {
-                savePetData(owner, entity, (ServerLevel) entity.level());
-                flushPendingPetSaves(owner);
+                if (savePetData(owner, entity, (ServerLevel) entity.level())
+                        && flushPendingPetSave(entity.getUUID())) {
+                    persistedDeathSnapshots.add(entity.getUUID());
+                }
             }
         }
     }
@@ -270,8 +268,10 @@ public class trulybestfriends {
     @SubscribeEvent
     public void onLivingDrops(LivingDropsEvent event) {
         Entity entity = event.getEntity();
-        ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+        boolean snapshotPersisted = persistedDeathSnapshots.remove(entity.getUUID());
+        ResourceLocation entityType = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         if (trackedPetUUIDs.contains(entity.getUUID())
+                && snapshotPersisted
                 && entityType != null
                 && !Config.isNoReviveEntity(entityType.toString())) {
             // Ice and Fire 联动：IDeadMob 实体（龙、独眼巨人等）死亡后变尸体长期驻留，
@@ -285,24 +285,20 @@ public class trulybestfriends {
         }
     }
 
-    private void savePetData(UUID ownerUUID, Entity pet, ServerLevel level) {
+    private boolean savePetData(UUID ownerUUID, Entity pet, ServerLevel level) {
         if (!isKnownPlayer(level.getServer(), ownerUUID)) {
             LOGGER.warn("Skipping pet save: owner UUID {} is not a known player", ownerUUID);
-            return;
+            return false;
         }
-        CompoundTag nbt = new CompoundTag();
-        pet.saveWithoutId(nbt);
-        if (pet instanceof net.minecraft.world.entity.LivingEntity living) {
-            nbt.putFloat("MaxHealth", (float) living.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH));
+        CompoundTag nbt;
+        try {
+            nbt = PetEntitySnapshot.capture(pet, ownerUUID, level);
+        } catch (RuntimeException e) {
+            LOGGER.error("Failed to capture pet snapshot for {}: {}", pet.getUUID(), e.getMessage(), e);
+            return false;
         }
         // LastDeathTime 完全不由磁盘管理——改由服务器内存 Map (petDeathTimes) 记录，
         // 在 onLivingDeath 时写入，通过网络同步注入给客户端。不写盘避免被 syncAllPets 反复刷新。
-        com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket.backupChestInventory(pet, nbt);
-        com.whidte.trulybestfriends.compat.CuriosCompat.backup(pet, nbt);
-        nbt.putString("OwnerUUID", ownerUUID.toString());
-        nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString());
-        nbt.putString("Dimension", level.dimension().location().toString());
-
         Path worldPath = level.getServer().getWorldPath(LevelResource.ROOT);
         pendingPetSaves.put(pet.getUUID(), new PendingPetSave(
                 ownerUUID,
@@ -313,6 +309,7 @@ public class trulybestfriends {
         if (hasPetFileInOtherOwnerDir(PetIOUtil.getModDir(level), ownerUUID, pet.getUUID())) {
             flushPendingPetSaves(ownerUUID);
         }
+        return true;
     }
 
     public static void flushPendingPetSaves() {
@@ -326,6 +323,13 @@ public class trulybestfriends {
                 pendingPetSaves.remove(pending.petUUID(), pending);
             }
         }
+    }
+
+    private static boolean flushPendingPetSave(UUID petUUID) {
+        PendingPetSave pending = pendingPetSaves.get(petUUID);
+        if (pending == null || !writePetData(pending)) return false;
+        pendingPetSaves.remove(petUUID, pending);
+        return true;
     }
 
     private static boolean writePetData(PendingPetSave pending) {
@@ -350,7 +354,7 @@ public class trulybestfriends {
             boolean existingRecalled = false;
             if (nbtFile.exists()) {
                 try {
-                    oldNbt = NbtIo.readCompressed(nbtFile);
+                    oldNbt = NbtFileIO.readCompressed(nbtFile);
                     if (oldNbt.contains("Priority")) {
                         existingPriority = Math.max(1, Math.min(6, oldNbt.getInt("Priority")));
                     }
@@ -367,7 +371,7 @@ public class trulybestfriends {
             nbt.remove("LastDeathTime");
 
             if (oldNbt != null && oldNbt.equals(nbt)) return true;
-            NbtIo.writeCompressed(nbt, nbtFile);
+            NbtFileIO.writeCompressed(nbt, nbtFile);
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to save pet data for {}: {}", pending.petUUID(), e.getMessage());
@@ -414,6 +418,7 @@ public class trulybestfriends {
         trackedPetUUIDs.remove(petUUID);
         shoulderPetTypes.remove(petUUID);
         petDeathTimes.remove(petUUID);
+        persistedDeathSnapshots.remove(petUUID);
         try {
             removePetFromIndex(modDir, petUUID);
         } catch (IOException e) {
@@ -432,6 +437,7 @@ public class trulybestfriends {
             pendingRemovals.removeIf(removal -> removal.ownerUUID().equals(player.getUUID()) && removal.petUUID().equals(petUUID));
             trackedPetUUIDs.remove(petUUID);
             petDeathTimes.remove(petUUID);
+            persistedDeathSnapshots.remove(petUUID);
             removePetFromIndex(modDir, petUUID);
             return true;
         } catch (IOException e) {
@@ -501,7 +507,7 @@ public class trulybestfriends {
         File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
         if (!indexFile.exists()) return;
 
-        CompoundTag indexTag = NbtIo.readCompressed(indexFile);
+        CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
         String uuidStr = petUUID.toString();
         boolean changed = false;
         for (String typeKey : new ArrayList<>(indexTag.getAllKeys())) {
@@ -521,7 +527,7 @@ public class trulybestfriends {
                 if (cachedList != null) cachedList.remove(petUUID);
             }
         }
-        if (changed) NbtIo.writeCompressed(indexTag, indexFile);
+        if (changed) NbtFileIO.writeCompressed(indexTag, indexFile);
     }
 
     private static Path findPetFileInOtherOwnerDir(Path modDir, UUID currentOwnerUUID, UUID petUUID) throws IOException {
@@ -548,10 +554,10 @@ public class trulybestfriends {
 
             CompoundTag indexTag = new CompoundTag();
             if (indexFile.exists()) {
-                indexTag = NbtIo.readCompressed(indexFile);
+                indexTag = NbtFileIO.readCompressed(indexFile);
             }
 
-            String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString();
+            String typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(pet.getType()).toString();
             UUID petUUID = pet.getUUID();
             String uuidStr = petUUID.toString();
 
@@ -566,7 +572,7 @@ public class trulybestfriends {
             if (!alreadyExists) {
                 uuidList.add(StringTag.valueOf(uuidStr));
                 indexTag.put(typeKey, uuidList);
-                NbtIo.writeCompressed(indexTag, indexFile);
+                NbtFileIO.writeCompressed(indexTag, indexFile);
 
                 indexCache.computeIfAbsent(typeKey, k -> new ArrayList<>()).add(petUUID);
             }
@@ -586,7 +592,7 @@ public class trulybestfriends {
         if (trackedPetUUIDs.contains(entity.getUUID())) return false;
         if (!isKnownPlayer(level.getServer(), ownerUUID)) return false;
 
-        ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         if (entityType != null && Config.isAutoRegisterBlacklisted(entityType.toString())) return false;
 
         if (countOwnerPets(level, ownerUUID) >= Config.maxPets) return false;
@@ -615,10 +621,14 @@ public class trulybestfriends {
         if (!nbtFile.exists()) return false;
 
         try {
-            CompoundTag nbt = NbtIo.readCompressed(nbtFile);
+            CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
             Optional<PendingRemoval> pendingRemoval = findPendingRemoval(ownerUUID, petUUID);
             if (!nbt.getBoolean("Recalled")) {
                 pendingRemoval.ifPresent(this::removePendingRemoval);
+                return false;
+            }
+            if (!savePetData(ownerUUID, entity, level) || !flushPendingPetSave(petUUID)) {
+                LOGGER.error("Keeping recalled pet {} loaded because its final snapshot could not be persisted", petUUID);
                 return false;
             }
             entity.discard();
@@ -638,7 +648,7 @@ public class trulybestfriends {
             File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
 
             if (indexFile.exists()) {
-                CompoundTag indexTag = NbtIo.readCompressed(indexFile);
+                CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
                 for (String key : indexTag.getAllKeys()) {
                     ListTag uuidList = indexTag.getList(key, Tag.TAG_STRING);
                     List<UUID> uuids = new ArrayList<>();
@@ -690,8 +700,8 @@ public class trulybestfriends {
             ResourceKey<Level> dimension = level.dimension();
             for (ChunkPos chunk : entry.getValue()) {
                 AABB area = new AABB(
-                        new BlockPos(chunk.getMinBlockX(), levelMinY(level), chunk.getMinBlockZ()),
-                        new BlockPos(chunk.getMaxBlockX(), levelMaxY(level), chunk.getMaxBlockZ()));
+                        chunk.getMinBlockX(), levelMinY(level), chunk.getMinBlockZ(),
+                        chunk.getMaxBlockX() + 1, levelMaxY(level) + 1, chunk.getMaxBlockZ() + 1);
                 for (Entity entity : level.getEntities(null, area)) {
                     localSyncCandidates.add(new LocalSyncCandidate(dimension, entity.getUUID()));
                 }
@@ -728,7 +738,7 @@ public class trulybestfriends {
     }
 
     private boolean hasTrulyBestFriendsAdvancement(MinecraftServer server, ServerPlayer player) {
-        Advancement advancement = server.getAdvancements().getAdvancement(TRULY_BEST_FRIENDS_ADVANCEMENT);
+        AdvancementHolder advancement = server.getAdvancements().get(TRULY_BEST_FRIENDS_ADVANCEMENT);
         return advancement != null && player.getAdvancements().getOrStartProgress(advancement).isDone();
     }
 
@@ -771,7 +781,7 @@ public class trulybestfriends {
     private Entity findNearbyPetOfType(ServerPlayer player, String typeKey) {
         ResourceLocation rl = ResourceLocation.tryParse(typeKey);
         if (rl == null) return null;
-        EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(rl);
+        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(rl);
         if (type == null) return null;
 
         for (Entity entity : player.level().getEntities(player, player.getBoundingBox().inflate(5))) {
@@ -789,8 +799,8 @@ public class trulybestfriends {
             File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
             if (!indexFile.exists()) return;
 
-            CompoundTag indexTag = NbtIo.readCompressed(indexFile);
-            String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(newEntity.getType()).toString();
+            CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
+            String typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(newEntity.getType()).toString();
             String oldStr = oldUuid.toString();
             String newStr = newEntity.getUUID().toString();
 
@@ -799,7 +809,7 @@ public class trulybestfriends {
                 if (uuidList.getString(i).equals(oldStr)) {
                     uuidList.set(i, StringTag.valueOf(newStr));
                     indexTag.put(typeKey, uuidList);
-                    NbtIo.writeCompressed(indexTag, indexFile);
+                    NbtFileIO.writeCompressed(indexTag, indexFile);
 
                     // Update cache
                     List<UUID> cachedList = indexCache.get(typeKey);
@@ -823,7 +833,7 @@ public class trulybestfriends {
                 int[] counts = new int[2]; // [0]=success, [1]=failed
                 Files.list(ownerDir).filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
                     try {
-                        NbtIo.readCompressed(file.toFile());
+                        NbtFileIO.readCompressed(file.toFile());
                         counts[0]++;
                     } catch (IOException e) {
                         counts[1]++;
@@ -839,24 +849,6 @@ public class trulybestfriends {
         }
     }
 
-    @SubscribeEvent
-	public static void onClientSetup(FMLClientSetupEvent event) {
-		event.enqueueWork(() -> {
-			if (net.minecraftforge.fml.ModList.get().isLoaded("l2tabs")) {
-				try {
-					Class.forName("com.whidte.trulybestfriends.tab.L2TabsIntegration")
-						.getMethod("register")
-						.invoke(null);
-					LOGGER.info("L2Tabs detected - inventory tab registered.");
-				} catch (Exception e) {
-					LOGGER.warn("L2Tabs present but integration failed: {}", e.toString());
-				}
-			} else {
-				LOGGER.info("L2Tabs not installed - use keybinding to open pet screen.");
-			}
-		});
-	}
-
 	private int countOwnerPets(ServerLevel level, UUID ownerUUID) {
 		Path ownerDir = PetIOUtil.getOwnerDir(level, ownerUUID);
 		if (!Files.exists(ownerDir)) return 0;
@@ -864,23 +856,6 @@ public class trulybestfriends {
 			return (int) Files.list(ownerDir).filter(p -> p.toString().endsWith(".nbt")).count();
 		} catch (IOException e) {
 			return 0;
-		}
-	}
-
-	@SubscribeEvent
-	public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
-		event.register(OPEN_TAB_KEY);
-	}
-}
-
-@Mod.EventBusSubscriber(modid = trulybestfriends.MODID, value = Dist.CLIENT)
-class TrulyKeyHandler {
-	@SubscribeEvent
-	public static void onKeyInput(InputEvent.Key event) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.player == null) return;
-		if (trulybestfriends.OPEN_TAB_KEY.consumeClick()) {
-			mc.setScreen(new TrulyScreen(Component.translatable("tab.trulybestfriends.pets")));
 		}
 	}
 }

@@ -5,8 +5,11 @@ import com.whidte.trulybestfriends.compat.IafCompat;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtIo;
+import net.minecraft.nbt.Tag;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -20,17 +23,18 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /** Client -> Server: consume items from player inventory and revive a dead pet. */
-public class RevivePetPacket {
+public class RevivePetPacket implements CustomPacketPayload {
+    public static final Type<RevivePetPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "revive_pet"));
+    public static final StreamCodec<FriendlyByteBuf, RevivePetPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), RevivePetPacket::decode);
+    @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     private final UUID petUuid;
 
     public RevivePetPacket(UUID petUuid) {
@@ -45,9 +49,9 @@ public class RevivePetPacket {
         return new RevivePetPacket(buf.readUUID());
     }
 
-    public static void handle(RevivePetPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(RevivePetPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
             ServerLevel level = player.serverLevel();
             trulybestfriends.flushPendingPetSaves(player.getUUID());
@@ -57,7 +61,7 @@ public class RevivePetPacket {
             if (!nbtFile.exists()) return;
 
             try {
-                CompoundTag nbt = NbtIo.readCompressed(nbtFile);
+                CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
 
                 // Only revive if actually dead
                 if (!nbt.contains("Health") || nbt.getFloat("Health") > 0) return;
@@ -87,7 +91,7 @@ public class RevivePetPacket {
                 // 若尸体已加载在玩家所在维度，原地治愈（setModelDead(false)+setDeathStage(0)），
                 // 避免 summonFromDisk 因 UUID 冲突失败。详见 IafCompat。
                 if (IafCompat.isLoaded()
-                        && reviveCorpseInPlace(player.server, packet.petUuid, player, level, nbtFile)) {
+                        && reviveCorpseInPlace(player.server, packet.petUuid, player, level, nbt, nbtFile)) {
                     trulybestfriends.clearPetDeathTime(packet.petUuid);
                     player.playNotifySound(net.minecraft.sounds.SoundEvents.TOTEM_USE,
                             net.minecraft.sounds.SoundSource.PLAYERS, 1.0f, 1.0f);
@@ -110,7 +114,7 @@ public class RevivePetPacket {
                 applyTotemEffects(nbt);
 
                 // Persist the revived NBT, then summon the pet directly into the world
-                NbtIo.writeCompressed(nbt, nbtFile);
+                NbtFileIO.writeCompressed(nbt, nbtFile);
                 TeleportPetToPlayerPacket.summonFromDisk(nbt, packet.petUuid, player, level);
                 trulybestfriends.clearPetDeathTime(packet.petUuid);
 
@@ -120,7 +124,7 @@ public class RevivePetPacket {
                 trulybestfriends.LOGGER.error("Failed to revive pet: {}", e.getMessage());
             }
         });
-        ctx.get().setPacketHandled(true);
+
     }
 
     /**
@@ -134,7 +138,7 @@ public class RevivePetPacket {
         // Try to create a temp entity for accurate dimensions
         String typeKey = nbt.getString("EntityType");
         if (!typeKey.isEmpty()) {
-            EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
+            EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(ResourceLocation.tryParse(typeKey));
             if (type != null) {
                 Entity temp = type.create(level);
                 if (temp instanceof LivingEntity le) {
@@ -200,8 +204,8 @@ public class RevivePetPacket {
         nbt.put("ActiveEffects", activeEffects);
     }
 
-    private static CompoundTag saveEffect(MobEffectInstance instance) {
-        return instance.save(new CompoundTag());
+    private static Tag saveEffect(MobEffectInstance instance) {
+        return instance.save();
     }
 
     /**
@@ -218,7 +222,7 @@ public class RevivePetPacket {
      */
     private static boolean reviveCorpseInPlace(MinecraftServer server, UUID petUuid,
                                                ServerPlayer player, ServerLevel playerLevel,
-                                               File nbtFile) {
+                                               CompoundTag originalNbt, File nbtFile) {
         if (!IafCompat.isLoaded()) return false;
 
         // 跨所有维度查找已加载的同 UUID 实体
@@ -263,12 +267,13 @@ public class RevivePetPacket {
 
         // 5. 写回磁盘 NBT，保持盘/世界一致
         try {
-            CompoundTag saved = new CompoundTag();
-            corpse.saveWithoutId(saved);
-            saved.putString("OwnerUUID", player.getUUID().toString());
+            CompoundTag saved = PetEntitySnapshot.capture(corpse, player.getUUID(), playerLevel);
+            if (originalNbt.contains("Priority")) {
+                saved.putInt("Priority", Math.max(1, Math.min(6, originalNbt.getInt("Priority"))));
+            }
             saved.remove("Recalled");
             saved.remove("LastDeathTime");  // 清死亡时间，避免复活冷却误判
-            NbtIo.writeCompressed(saved, nbtFile);
+            NbtFileIO.writeCompressed(saved, nbtFile);
         } catch (IOException e) {
             trulybestfriends.LOGGER.error("reviveCorpseInPlace: failed to write nbt for {}: {}", petUuid, e.getMessage());
         }
@@ -304,7 +309,7 @@ public class RevivePetPacket {
     }
 
     private static boolean consumeItems(ServerPlayer player) {
-        var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
+        var item = BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(Config.reviveItem));
         if (item == null) return false;
 
         int needed = Config.reviveItemCount;

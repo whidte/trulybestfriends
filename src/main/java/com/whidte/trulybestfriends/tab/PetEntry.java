@@ -1,5 +1,7 @@
 package com.whidte.trulybestfriends.tab;
 
+import net.neoforged.neoforge.network.PacketDistributor;
+
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
@@ -87,8 +89,7 @@ class PetEntry extends AbstractWidget {
 
 		int priority = Math.max(1, Math.min(6, screen.petPriorities.getOrDefault(uuid, 6)));
 		if (priority <= 5 || Screen.hasShiftDown()) {
-			int srcU = 198 + (priority - 1) * 8;
-			guiGraphics.blit(WIDGETS_TEXTURE, getX() + 1, getY() + 1, srcU, 22, 8, 8, 256, 256);
+			guiGraphics.blitSprite(prioritySprite(priority), getX() + 1, getY() + 1, 8, 8);
 		}
 
 		int textWidth = font.width(getMessage());
@@ -130,7 +131,7 @@ class PetEntry extends AbstractWidget {
 	private void writePriorityToDisk(UUID uuid, int priority) {
 		CompoundTag nbt = screen.petNbtCache.get(uuid);
 		if (nbt != null) nbt.putInt("Priority", priority);
-		com.whidte.trulybestfriends.trulybestfriends.CHANNEL.sendToServer(
+		PacketDistributor.sendToServer(
 				new com.whidte.trulybestfriends.network.SetPriorityPacket(uuid, priority));
 	}
 

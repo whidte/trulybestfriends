@@ -1,5 +1,7 @@
 package com.whidte.trulybestfriends.tab;
 
+import net.neoforged.neoforge.network.PacketDistributor;
+
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.network.AreaRecallPacket;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
@@ -119,7 +121,7 @@ class ActionButton extends AbstractWidget {
 
 		// Shift-held: area recall — ignores cooldown and dead state
 		if (Screen.hasShiftDown()) {
-			trulybestfriends.CHANNEL.sendToServer(new AreaRecallPacket(screen.areaRecallRange));
+			PacketDistributor.sendToServer(new AreaRecallPacket(screen.areaRecallRange));
 			return;
 		}
 
@@ -136,7 +138,7 @@ class ActionButton extends AbstractWidget {
 		}
 
 		setLastClickTime(now);
-		trulybestfriends.CHANNEL.sendToServer(new RecallPetPacket(uuid));
+		PacketDistributor.sendToServer(new RecallPetPacket(uuid));
 
 		if (nbt != null) {
 			if (currentlyRecalled) {

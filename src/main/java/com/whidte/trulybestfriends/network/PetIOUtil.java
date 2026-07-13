@@ -104,32 +104,35 @@ public final class PetIOUtil {
     }
 
     /** Save a shoulder pet's NBT to disk under the owner's directory, marking it Recalled. */
-    public static void saveShoulderToDisk(UUID playerUuid, CompoundTag shoulderNbt, ServerLevel level) {
+    public static boolean saveShoulderToDisk(UUID playerUuid, CompoundTag shoulderNbt, ServerLevel level) {
         try {
             Path ownerDir = getOwnerDir(level, playerUuid);
             Files.createDirectories(ownerDir);
 
-            UUID uuid = shoulderNbt.getUUID("UUID");
-            String typeKey = shoulderNbt.getString("id");
-            shoulderNbt.putString("EntityType", typeKey);
-            shoulderNbt.putString("OwnerUUID", playerUuid.toString());
-            shoulderNbt.putString("Dimension", level.dimension().location().toString());
-            shoulderNbt.putBoolean("Recalled", true);
+            CompoundTag snapshot = shoulderNbt.copy();
+            UUID uuid = snapshot.getUUID("UUID");
+            String typeKey = snapshot.getString("id");
+            snapshot.putString("EntityType", typeKey);
+            snapshot.putString("OwnerUUID", playerUuid.toString());
+            snapshot.putString("Dimension", level.dimension().location().toString());
+            snapshot.putBoolean("Recalled", true);
 
             File nbtFile = ownerDir.resolve(uuid + ".nbt").toFile();
             int existingPriority = 6;
             if (nbtFile.exists()) {
                 try {
-                    CompoundTag oldNbt = NbtIo.readCompressed(nbtFile);
+                    CompoundTag oldNbt = NbtFileIO.readCompressed(nbtFile);
                     if (oldNbt.contains("Priority")) {
                         existingPriority = Math.max(1, Math.min(6, oldNbt.getInt("Priority")));
                     }
                 } catch (IOException ignored) {}
             }
-            shoulderNbt.putInt("Priority", existingPriority);
-            NbtIo.writeCompressed(shoulderNbt, nbtFile);
+            snapshot.putInt("Priority", existingPriority);
+            NbtFileIO.writeCompressed(snapshot, nbtFile);
+            return true;
         } catch (IOException e) {
             trulybestfriends.LOGGER.error("Failed to save shoulder pet: {}", e.getMessage());
+            return false;
         }
     }
 

@@ -7,11 +7,12 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.PacketDistributor;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Server → Client: pushes pet data to the client.
@@ -25,7 +26,10 @@ import java.util.function.Supplier;
  * and PetDataLoader.loadAll, fixing multiplayer correctness (client cannot read
  * server saves) and removing disk I/O contention in singleplayer.
  */
-public class SyncPetDataPacket {
+public class SyncPetDataPacket implements CustomPacketPayload {
+    public static final Type<SyncPetDataPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "sync_pet_data"));
+    public static final StreamCodec<FriendlyByteBuf, SyncPetDataPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), SyncPetDataPacket::decode);
+    @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     public static final int MODE_FULL_LIST = 0;
     public static final int MODE_UPDATE = 1;
     public static final int MODE_DELETE = 2;
@@ -126,8 +130,8 @@ public class SyncPetDataPacket {
 
     // --- Handler (client side) ---
 
-    public static void handle(SyncPetDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
+    public static void handle(SyncPetDataPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
             Minecraft mc = Minecraft.getInstance();
             if (mc.screen instanceof TrulyScreen screen) {
                 screen.applySyncPacket(packet);
@@ -136,7 +140,7 @@ public class SyncPetDataPacket {
                 TrulyScreen.cacheSyncPacket(packet);
             }
         });
-        ctx.get().setPacketHandled(true);
+
     }
 
     // --- Accessors ---

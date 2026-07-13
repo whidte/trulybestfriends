@@ -2,70 +2,68 @@ package com.whidte.trulybestfriends;
 
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.common.ForgeConfigSpec;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.config.ModConfigEvent;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.config.ModConfigEvent;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 import java.util.List;
 import java.util.Locale;
 
-@Mod.EventBusSubscriber(modid = trulybestfriends.MODID, bus = Mod.EventBusSubscriber.Bus.MOD)
 public class Config
 {
-    private static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
+    private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
-    public static final ForgeConfigSpec.IntValue SYNC_INTERVAL_TICKS = BUILDER
+    public static final ModConfigSpec.IntValue SYNC_INTERVAL_TICKS = BUILDER
             .comment("Interval in ticks for full fallback scan of all loaded owned entities and caching their latest pet data")
             .defineInRange("syncIntervalTicks", 103, 1, 1200);
 
-    public static final ForgeConfigSpec.IntValue LOCAL_SYNC_INTERVAL_TICKS = BUILDER
+    public static final ModConfigSpec.IntValue LOCAL_SYNC_INTERVAL_TICKS = BUILDER
             .comment("Interval in ticks for scanning nearby entities around players who completed the Truly Best Friends advancement")
             .defineInRange("localSyncIntervalTicks", 5, 1, 100);
 
-    public static final ForgeConfigSpec.IntValue SAVE_PET_DATA_COOLDOWN_TICKS = BUILDER
+    public static final ModConfigSpec.IntValue SAVE_PET_DATA_COOLDOWN_TICKS = BUILDER
             .comment("Interval in ticks for flushing cached pet data to disk. Player logout and server stop always flush immediately.")
             .defineInRange("savePetDataCooldownTicks", 100, 1, 1200);
 
-    public static final ForgeConfigSpec.DoubleValue RECALL_RANGE = BUILDER
+    public static final ModConfigSpec.DoubleValue RECALL_RANGE = BUILDER
             .comment("Maximum distance (blocks) for recalling a pet back into storage. Set to -1 for unlimited range")
             .defineInRange("recallRange", 16.0, -1.0, 64.0);
 
-    public static final ForgeConfigSpec.IntValue RECALL_COOLDOWN_MS = BUILDER
+    public static final ModConfigSpec.IntValue RECALL_COOLDOWN_MS = BUILDER
             .comment("Cooldown in milliseconds between recall/summon actions (min 250ms = 5 ticks to ensure entity cleanup completes)")
             .defineInRange("recallCooldownMs", 3000, 250, 30000);
 
-    public static final ForgeConfigSpec.IntValue MAX_PETS = BUILDER
+    public static final ModConfigSpec.IntValue MAX_PETS = BUILDER
             .comment("Maximum number of pets a player can have tracked at once (1-128, default 64)")
             .defineInRange("maxPets", 64, 1, 128);
 
-    public static final ForgeConfigSpec.IntValue AREA_RECALL_DEFAULT_RANGE = BUILDER
+    public static final ModConfigSpec.IntValue AREA_RECALL_DEFAULT_RANGE = BUILDER
             .comment("Default range (blocks) for area recall when holding Shift. Adjustable with scroll wheel (1-16).")
             .defineInRange("areaRecallDefaultRange", 8, 1, 16);
 
-    public static final ForgeConfigSpec.IntValue MAX_PENDING_SUMMONS = BUILDER
+    public static final ModConfigSpec.IntValue MAX_PENDING_SUMMONS = BUILDER
             .comment("Max simultaneous pending summons per player for pets in unloaded chunks. NOTE: this value will also serve as the upper limit on the number of pets summonable at once in the future formation/party mode. Effective pending cap = this value + 2 buffer (1-32, default 6).")
             .defineInRange("maxPendingSummons", 6, 1, 32);
 
-    public static final ForgeConfigSpec.ConfigValue<String> REVIVE_ITEM = BUILDER
+    public static final ModConfigSpec.ConfigValue<String> REVIVE_ITEM = BUILDER
             .comment("Item ID required to revive a dead pet (e.g. \"minecraft:totem_of_undying\").")
             .define("reviveItem", "minecraft:totem_of_undying");
 
-    public static final ForgeConfigSpec.IntValue REVIVE_ITEM_COUNT = BUILDER
+    public static final ModConfigSpec.IntValue REVIVE_ITEM_COUNT = BUILDER
             .comment("Number of revive items required to revive a dead pet.")
             .defineInRange("reviveItemCount", 1, 1, 64);
 
-    public static final ForgeConfigSpec.IntValue REVIVE_COOLDOWN_SECONDS = BUILDER
+    public static final ModConfigSpec.IntValue REVIVE_COOLDOWN_SECONDS = BUILDER
             .comment("Cooldown in seconds after reviving a pet before another revive can be used.")
             .defineInRange("reviveCooldownSeconds", 120, 0, 86400);
 
-    public static final ForgeConfigSpec.BooleanValue ENABLE_LOGIN_LOAD_DIAGNOSTICS = BUILDER
+    public static final ModConfigSpec.BooleanValue ENABLE_LOGIN_LOAD_DIAGNOSTICS = BUILDER
             .comment("If true, validates all pet .nbt files on player login and logs counts. Debug only.")
             .define("enableLoginLoadDiagnostics", false);
 
-    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> AUTO_REGISTER_BLACKLIST = BUILDER
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_REGISTER_BLACKLIST = BUILDER
             .comment("Entity types that should not be automatically registered as pets even if they are OwnableEntity.",
                     "Format: entity id such as \"minecraft:wolf\", or namespace wildcard such as \"some_mod:*\".",
                     "This only blocks future automatic registration and does not remove already tracked pets.")
@@ -82,7 +80,7 @@ public class Config
                     "irons_spellbooks:wisp"
             ), s -> s instanceof String && (((String) s).contains(":") || ((String) s).endsWith(":*")));
 
-    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> NO_REVIVE_WHITELIST = BUILDER
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> NO_REVIVE_WHITELIST = BUILDER
             .comment("Entity types that keep their death drops and cannot be revived via this mod.",
                     "Format: entity id, e.g. \"minecraft:villager\". Pets of these types will still be tracked,",
                     "but on death they drop loot normally and the revive button is disabled for them.")
@@ -93,7 +91,7 @@ public class Config
                     "modulargolems:dog_golem"
             ), s -> s instanceof String && ((String) s).contains(":"));
 
-    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> CLEAR_ON_DEATH_WHITELIST = BUILDER
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> CLEAR_ON_DEATH_WHITELIST = BUILDER
             .comment("Entity types that, on death, behave like noReviveWhitelist entities AND additionally",
                     "have their stored NBT data and in-memory cache completely cleared.",
                     "Use this for disposable or summon-only entities that should leave no trace after death.",
@@ -108,7 +106,7 @@ public class Config
             ), s -> s instanceof String && ((String) s).contains(":"));
 
 
-    static final ForgeConfigSpec SPEC = BUILDER.build();
+    static final ModConfigSpec SPEC = BUILDER.build();
 
     public static int syncIntervalTicks;
     public static int localSyncIntervalTicks;
@@ -128,7 +126,6 @@ public class Config
     /** Entity type ids that, on death, additionally clear NBT data and in-memory cache. Also treated as no-revive. */
     public static java.util.Set<String> clearOnDeathWhitelist = new java.util.HashSet<>();
 
-    @SubscribeEvent
     static void onLoad(final ModConfigEvent event)
     {
         syncIntervalTicks = SYNC_INTERVAL_TICKS.get();

@@ -3,29 +3,33 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
-import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.horse.AbstractChestedHorse;
+import net.minecraft.world.entity.animal.horse.AbstractHorse;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.PacketDistributor;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.items.IItemHandler;
+import net.neoforged.neoforge.items.IItemHandlerModifiable;
 
 import java.io.File;
 import java.io.IOException;
@@ -33,10 +37,12 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Supplier;
 
 /** Server-side: teleport a released (non-recalled) pet to the player's current position. */
-public class TeleportPetToPlayerPacket {
+public class TeleportPetToPlayerPacket implements CustomPacketPayload {
+    public static final Type<TeleportPetToPlayerPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "teleport_pet_to_player"));
+    public static final StreamCodec<FriendlyByteBuf, TeleportPetToPlayerPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), TeleportPetToPlayerPacket::decode);
+    @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     private final UUID petUuid;
 
     public TeleportPetToPlayerPacket(UUID petUuid) {
@@ -51,9 +57,9 @@ public class TeleportPetToPlayerPacket {
         return new TeleportPetToPlayerPacket(buf.readUUID());
     }
 
-    public static void handle(TeleportPetToPlayerPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(TeleportPetToPlayerPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
             ServerLevel playerLevel = player.serverLevel();
 
@@ -74,7 +80,7 @@ public class TeleportPetToPlayerPacket {
 
             CompoundTag nbt;
             try {
-                nbt = NbtIo.readCompressed(nbtFile);
+                nbt = NbtFileIO.readCompressed(nbtFile);
             } catch (IOException e) {
                 sendWarning(player, 1, packet.petUuid);
                 return;
@@ -147,7 +153,7 @@ public class TeleportPetToPlayerPacket {
                 sendWarning(player, 1, packet.petUuid);
             }
         });
-        ctx.get().setPacketHandled(true);
+
     }
 
     private static void teleportEntityToPlayer(LivingEntity entity, ServerPlayer player, ServerLevel level) {
@@ -217,14 +223,9 @@ public class TeleportPetToPlayerPacket {
     }
 
     static void summonFromDisk(CompoundTag nbt, UUID petUuid, ServerPlayer player, ServerLevel level) {
-        String typeKey = nbt.getString("EntityType");
-        EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
-        if (type == null) return;
-
-        Entity entity = type.create(level);
+        Entity entity = PetEntitySnapshot.restore(nbt, petUuid, level);
         if (entity == null) return;
-        entity.load(nbt);
-        entity.setUUID(petUuid);
+        restoreChestInventory(entity, nbt);
 
         float bbWidth = entity instanceof LivingEntity le ? le.getBbWidth() : 0.6f;
         int radius = Math.max(1, (int) Math.ceil(bbWidth));
@@ -240,8 +241,8 @@ public class TeleportPetToPlayerPacket {
                 entity.setPos(x, y, z);
                 AABB box = entity.getBoundingBox();
                 if (level.noCollision(entity, box) && !level.containsAnyLiquid(box)) {
-                    level.addFreshEntity(entity);
-                    restoreChestInventory(entity, nbt);
+                    if (!level.tryAddFreshEntityWithPassengers(entity)) return;
+                    com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
                     if (entity instanceof LivingEntity le) {
                         le.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
                     }
@@ -250,89 +251,50 @@ public class TeleportPetToPlayerPacket {
             }
         }
         entity.setPos(player.getX(), player.getY(), player.getZ());
-        level.addFreshEntity(entity);
-        restoreChestInventory(entity, nbt);
-        com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
+        if (level.tryAddFreshEntityWithPassengers(entity)) {
+            com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
+        }
     }
 
-    /**
-     * Post-spawn: restore entity inventory from our custom TBF_ChestItems NBT backup.
-     * Works with any entity that has a Container field (vanilla chested horses,
-     * modded creatures with inventories, etc.).
-     */
+    /** Restores a horse/container inventory without replacing its live container. */
     public static void restoreChestInventory(Entity entity, CompoundTag nbt) {
-        // Only intervene if our custom backup data exists in the NBT
-        if (!nbt.contains("TBF_ChestSize", 3)
-                && !nbt.contains("TBF_ChestItems", 9)
-                && !nbt.getBoolean("ChestedHorse"))
+        boolean hasContainerBackup = nbt.contains("TBF_ChestSize", 3)
+                || nbt.contains("TBF_ChestItems", 9)
+                || nbt.getBoolean("ChestedHorse");
+        boolean hasItemHandlerBackup = nbt.contains("TBF_ItemHandlerSize", 3)
+                || nbt.contains("TBF_ItemHandlerItems", 9);
+        if (!hasContainerBackup && !hasItemHandlerBackup)
             return;
 
         try {
-            // Locate the inventory Container field by traversing class hierarchy
-            java.lang.reflect.Field invField = null;
-            Class<?> clazz = entity.getClass();
-            while (clazz != null && clazz != Object.class) {
-                for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
-                    if (Container.class.isAssignableFrom(f.getType())) {
-                        invField = f;
-                        break;
-                    }
-                }
-                if (invField != null) break;
-                clazz = clazz.getSuperclass();
-            }
-            if (invField == null) return;
-            invField.setAccessible(true);
-
-            Container currentInv = (Container) invField.get(entity);
-
-            // Determine target container size: trust TBF_ChestSize from save time,
-            // or fall back to the current inventory size (vanilla's restore result).
-            int size = nbt.contains("TBF_ChestSize", 3)
-                    ? nbt.getInt("TBF_ChestSize")
-                    : (currentInv != null ? currentInv.getContainerSize() : 2);
-
-            SimpleContainer newInv = new SimpleContainer(size);
-
-            // Copy saddle (slot 0) and armor (slot 1) from current inventory
-            if (currentInv != null) {
-                int copyLimit = Math.min(currentInv.getContainerSize(), 2);
-                for (int i = 0; i < copyLimit; i++) {
-                    ItemStack stack = currentInv.getItem(i);
-                    if (!stack.isEmpty()) newInv.setItem(i, stack.copy());
-                }
+            if (entity instanceof AbstractChestedHorse chestedHorse
+                    && !chestedHorse.hasChest()
+                    && (nbt.getBoolean("ChestedHorse") || nbt.getInt("TBF_ChestSize") > 1)) {
+                chestedHorse.getSlot(AbstractHorse.CHEST_SLOT_OFFSET)
+                        .set(new ItemStack(Items.CHEST));
             }
 
-            // Fallback: read SaddleItem / ArmorItem directly from NBT
-            if (nbt.contains("SaddleItem", 10))
-                newInv.setItem(0, ItemStack.of(nbt.getCompound("SaddleItem")));
-            if (nbt.contains("ArmorItem", 10))
-                newInv.setItem(1, ItemStack.of(nbt.getCompound("ArmorItem")));
+            Container inventory = getEntityInventory(entity);
+            if (inventory == null) {
+                restoreItemHandler(entity, nbt);
+                return;
+            }
 
-            // Read items from TBF_ChestItems (our custom full-inventory backup)
+            // Vanilla chested-horse NBT uses slots relative to the chest area.
+            // Apply it even when a TBF backup exists so old malformed backups
+            // from the 1.21 migration cannot erase otherwise valid vanilla data.
+            if (nbt.contains("Items", 9)) {
+                int slotOffset = entity instanceof AbstractChestedHorse ? 1 : 0;
+                restoreContainerItems(inventory, nbt.getList("Items", 10),
+                        entity.registryAccess(), slotOffset);
+            }
+
+            // TBF backups use absolute live-container slot indices.
             if (nbt.contains("TBF_ChestItems", 9)) {
-                ListTag items = nbt.getList("TBF_ChestItems", 10);
-                for (int i = 0; i < items.size(); i++) {
-                    CompoundTag itemTag = items.getCompound(i);
-                    int slot = itemTag.getByte("Slot") & 255;
-                    if (slot < size) newInv.setItem(slot, ItemStack.of(itemTag));
-                }
-            } else if (nbt.contains("Items", 9)) {
-                // Fallback: vanilla Items list
-                ListTag items = nbt.getList("Items", 10);
-                for (int i = 0; i < items.size(); i++) {
-                    CompoundTag itemTag = items.getCompound(i);
-                    int slot = itemTag.getByte("Slot") & 255;
-                    if (slot < size) newInv.setItem(slot, ItemStack.of(itemTag));
-                }
+                restoreContainerItems(inventory, nbt.getList("TBF_ChestItems", 10),
+                        entity.registryAccess(), 0);
             }
-
-            invField.set(entity, newInv);
-
-            // Restore chested visual flag for AbstractChestedHorse subclasses
-            if (entity instanceof AbstractChestedHorse ch) {
-                ch.setChest(true);
-            }
+            inventory.setChanged();
         } catch (Exception e) {
             trulybestfriends.LOGGER.error(
                     "restoreChestInventory: failed for {}: {}",
@@ -340,44 +302,18 @@ public class TeleportPetToPlayerPacket {
         }
     }
 
-    /**
-     * Pre-save: backup the entity's Container items into TBF_ChestItems NBT.
-     * This ensures chest inventory survives the recall/summon cycle even when
-     * vanilla's saveWithoutId/load pair fails to restore it (known issue with
-     * some horse subtypes in 1.20.1).
-     */
+    /** Backs up the live inventory using stable NeoForge/public container APIs. */
     public static void backupChestInventory(Entity entity, CompoundTag nbt) {
         try {
-            Class<?> clazz = entity.getClass();
-            java.lang.reflect.Field invField = null;
-            while (clazz != null && clazz != Object.class) {
-                for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
-                    if (Container.class.isAssignableFrom(f.getType())) {
-                        invField = f;
-                        break;
-                    }
-                }
-                if (invField != null) break;
-                clazz = clazz.getSuperclass();
+            Container inventory = getEntityInventory(entity);
+            if (inventory == null) {
+                backupItemHandler(entity, nbt);
+                return;
             }
-            if (invField == null) return;
-            invField.setAccessible(true);
-            Container inv = (Container) invField.get(entity);
-            if (inv == null) return;
 
-            int size = inv.getContainerSize();
-            ListTag items = new ListTag();
-            for (int i = 0; i < size; i++) {
-                ItemStack stack = inv.getItem(i);
-                if (!stack.isEmpty()) {
-                    CompoundTag tag = new CompoundTag();
-                    tag.putByte("Slot", (byte) i);
-                    stack.save(tag);
-                    items.add(tag);
-                }
-            }
-            nbt.put("TBF_ChestSize", net.minecraft.nbt.IntTag.valueOf(size));
-            nbt.put("TBF_ChestItems", items);
+            int size = inventory.getContainerSize();
+            nbt.putInt("TBF_ChestSize", size);
+            nbt.put("TBF_ChestItems", saveContainerItems(inventory, entity.registryAccess()));
         } catch (Exception e) {
             trulybestfriends.LOGGER.error(
                     "backupChestInventory: failed for {}: {}",
@@ -385,11 +321,76 @@ public class TeleportPetToPlayerPacket {
         }
     }
 
+    static ListTag saveContainerItems(Container inventory, HolderLookup.Provider registries) {
+        ListTag items = new ListTag();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack.isEmpty()) continue;
+
+            CompoundTag tag = new CompoundTag();
+            tag.putByte("Slot", (byte) slot);
+            items.add(stack.save(registries, tag));
+        }
+        return items;
+    }
+
+    static void restoreContainerItems(Container inventory, ListTag items,
+                                      HolderLookup.Provider registries, int slotOffset) {
+        for (int i = 0; i < items.size(); i++) {
+            CompoundTag itemTag = items.getCompound(i);
+            int slot = (itemTag.getByte("Slot") & 255) + slotOffset;
+            if (slot >= inventory.getContainerSize()) continue;
+
+            ItemStack stack = ItemStack.parseOptional(registries, itemTag);
+            if (!stack.isEmpty()) inventory.setItem(slot, stack);
+        }
+    }
+
+    private static Container getEntityInventory(Entity entity) {
+        if (entity instanceof AbstractHorse horse) return horse.getInventory();
+        if (entity instanceof Container container) return container;
+        return null;
+    }
+
+    private static void backupItemHandler(Entity entity, CompoundTag nbt) {
+        IItemHandler handler = entity.getCapability(Capabilities.ItemHandler.ENTITY);
+        if (handler == null) return;
+
+        ListTag items = new ListTag();
+        for (int slot = 0; slot < handler.getSlots(); slot++) {
+            ItemStack stack = handler.getStackInSlot(slot);
+            if (stack.isEmpty()) continue;
+            CompoundTag tag = new CompoundTag();
+            tag.putInt("Slot", slot);
+            items.add(stack.save(entity.registryAccess(), tag));
+        }
+        nbt.putInt("TBF_ItemHandlerSize", handler.getSlots());
+        nbt.put("TBF_ItemHandlerItems", items);
+    }
+
+    private static void restoreItemHandler(Entity entity, CompoundTag nbt) {
+        IItemHandler handler = entity.getCapability(Capabilities.ItemHandler.ENTITY);
+        if (!(handler instanceof IItemHandlerModifiable modifiable)) return;
+
+        int savedSize = nbt.getInt("TBF_ItemHandlerSize");
+        int restorableSlots = Math.min(savedSize, handler.getSlots());
+        for (int slot = 0; slot < restorableSlots; slot++) {
+            modifiable.setStackInSlot(slot, ItemStack.EMPTY);
+        }
+
+        ListTag items = nbt.getList("TBF_ItemHandlerItems", 10);
+        for (int i = 0; i < items.size(); i++) {
+            CompoundTag itemTag = items.getCompound(i);
+            int slot = itemTag.getInt("Slot");
+            if (slot < 0 || slot >= restorableSlots) continue;
+            ItemStack stack = ItemStack.parseOptional(entity.registryAccess(), itemTag);
+            if (!stack.isEmpty()) modifiable.setStackInSlot(slot, stack);
+        }
+    }
+
     /** Send a PetWarningPacket to the player. type 0 = recalled, type 1 = lost/dead. */
     private static void sendWarning(ServerPlayer player, int type, UUID petUuid) {
-        trulybestfriends.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player),
-                new PetWarningPacket(type, petUuid));
+        PacketDistributor.sendToPlayer(player, new PetWarningPacket(type, petUuid));
     }
 
     /** Resolve the ServerLevel where the pet was last saved, using NBT Dimension field. */
@@ -478,7 +479,7 @@ public class TeleportPetToPlayerPacket {
         File nbtFile = ownerDir.resolve(petUuid + ".nbt").toFile();
         if (!nbtFile.exists()) return;
         try {
-            CompoundTag nbt = NbtIo.readCompressed(nbtFile);
+            CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
             summonFromDisk(nbt, petUuid, player, playerLevel);
         } catch (IOException ignored) {}
     }

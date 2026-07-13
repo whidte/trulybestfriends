@@ -1,5 +1,7 @@
 package com.whidte.trulybestfriends.tab;
 
+import net.neoforged.neoforge.network.PacketDistributor;
+
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
 import com.whidte.trulybestfriends.network.RevivePetPacket;
@@ -12,22 +14,17 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.jetbrains.annotations.NotNull;
 
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
-import static com.whidte.trulybestfriends.tab.RenderHelper.*;
 
 /**
  * Bottom-left button. Normal mode: summons recalled pet. Dead mode: revives dead pet (costs items).
- * Uses widgets.png texture regions scaled to 20px height via 10-param blit.
+ * Uses the current Minecraft button sprites for normal, hovered, and disabled states.
  */
 class SummonToPlayerButton extends AbstractWidget {
-    private static final int TEX_W = 256;
-    private static final int TEX_H = 256;
-    private static final int SRC_CAP = 5;
-    private static final int SRC_MID = 190;
-    private static final int SRC_H = 20;
+    private static final int BUTTON_HEIGHT = 20;
     private static final int COOLDOWN_TICKS = 5;
 
     private static final int COLOR_DISABLED = 0x555555;
@@ -39,7 +36,7 @@ class SummonToPlayerButton extends AbstractWidget {
     private long lastClickTick;
 
     public SummonToPlayerButton(int x, int y, int width, TrulyScreen screen) {
-        super(x, y, width, SRC_H, Component.empty());
+        super(x, y, width, BUTTON_HEIGHT, Component.empty());
         this.screen = screen;
     }
 
@@ -91,7 +88,7 @@ class SummonToPlayerButton extends AbstractWidget {
         var player = screen.getMinecraft().player;
         if (player == null) return false;
         if (player.isCreative()) return true;
-        var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
+        var item = BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(Config.reviveItem));
         if (item == null) return false;
         int count = 0;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
@@ -125,31 +122,10 @@ class SummonToPlayerButton extends AbstractWidget {
             this.active = !onShoulder && !cooldown;
         }
 
-        int v;
-        if (notRevivable) {
-            v = 46; // disabled — cannot be revived
-        } else if (dead && !hasItems) {
-            v = 46; // disabled style — lack items
-        } else if (dead && (cooldown || reviveCooldown)) {
-            v = 46; // cooldown
-        } else if (dead) {
-            v = isHovered() ? 86 : 66; // revive available
-        } else if (recalled && recallCooldown) {
-            v = 46; // recall cooldown active
-        } else if (onShoulder || cooldown) {
-            v = 46;
-        } else if (isHovered() && this.active) {
-            v = 86;
-        } else {
-            v = 66;
-        }
-
-        int midW = width - SRC_CAP * 2;
-        ResourceLocation tex = WIDGETS_TEXTURE;
-
-        g.blit(tex, getX(), getY(), SRC_CAP, SRC_H, 0, v, SRC_CAP, SRC_H, TEX_W, TEX_H);
-        tileBlitH(g, tex, getX() + SRC_CAP, getY(), midW, SRC_H, SRC_CAP, v, SRC_MID, SRC_H, TEX_W, TEX_H);
-        g.blit(tex, getX() + SRC_CAP + midW, getY(), SRC_CAP, SRC_H, 195, v, SRC_CAP, SRC_H, TEX_W, TEX_H);
+        ResourceLocation buttonSprite = !this.active
+                ? BUTTON_DISABLED
+                : isHovered() ? BUTTON_HIGHLIGHTED : BUTTON;
+        g.blitSprite(buttonSprite, getX(), getY(), width, height);
 
         Component label;
         if (notRevivable) {
@@ -216,7 +192,7 @@ class SummonToPlayerButton extends AbstractWidget {
                 nbt.remove("DeathTime");
                 nbt.remove("HurtTime");
             }
-            trulybestfriends.CHANNEL.sendToServer(new RevivePetPacket(screen.getSelectedUuid()));
+            PacketDistributor.sendToServer(new RevivePetPacket(screen.getSelectedUuid()));
             return;
         }
 
@@ -234,7 +210,7 @@ class SummonToPlayerButton extends AbstractWidget {
             if (nbt != null) {
                 nbt.remove("Recalled");
             }
-            trulybestfriends.CHANNEL.sendToServer(new RecallPetPacket(screen.getSelectedUuid()));
+            PacketDistributor.sendToServer(new RecallPetPacket(screen.getSelectedUuid()));
             return;
         }
 
@@ -242,7 +218,7 @@ class SummonToPlayerButton extends AbstractWidget {
         if (screen.getMinecraft().level != null) {
             lastClickTick = screen.getMinecraft().level.getGameTime();
         }
-        trulybestfriends.CHANNEL.sendToServer(new TeleportPetToPlayerPacket(screen.getSelectedUuid()));
+        PacketDistributor.sendToServer(new TeleportPetToPlayerPacket(screen.getSelectedUuid()));
     }
 
     @Override

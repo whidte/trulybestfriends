@@ -23,8 +23,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.joml.Quaternionf;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 import static com.whidte.trulybestfriends.tab.RenderHelper.*;
@@ -74,8 +75,7 @@ public class TrulyScreen extends Screen {
      *  Used by applySyncPacket(MODE_FULL_LIST) to restore the selection. */
     private UUID lastRequestedSelection;
 
-    /** L2Tabs TabManager, set via L2TabsIntegration.createTabManager() when L2Tabs is present. */
-    public dev.xkmc.l2tabs.tabs.core.TabManager tabManager;
+    public Object tabManager;
 
 	// --- Constructor ---
 	public TrulyScreen(Component title) {
@@ -148,7 +148,7 @@ public class TrulyScreen extends Screen {
 		if (nbt == null || getMinecraft().level == null) return null;
 		String typeKey = nbt.getString("EntityType");
 		if (typeKey.isEmpty()) return null;
-		EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
+		EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(ResourceLocation.tryParse(typeKey));
 		if (type == null) return null;
 		Entity entity = type.create(getMinecraft().level);
 		if (!(entity instanceof LivingEntity livingEntity)) return null;
@@ -183,7 +183,7 @@ public class TrulyScreen extends Screen {
 		this.topPos = (this.height - this.imageHeight) / 2;
 
 		// L2Tabs tab bar integration
-		if (net.minecraftforge.fml.ModList.get().isLoaded("l2tabs")) {
+		if (net.neoforged.fml.ModList.get().isLoaded("l2tabs")) {
 			try {
 				Class.forName("com.whidte.trulybestfriends.tab.L2TabsIntegration")
 					.getMethod("createTabManager", TrulyScreen.class)
@@ -239,7 +239,7 @@ public class TrulyScreen extends Screen {
 		//    applySyncPacket(). In singleplayer this overwrites the disk-loaded
 		//    data with the authoritative server version.
 		if (mc.player != null && mc.getConnection() != null) {
-			com.whidte.trulybestfriends.trulybestfriends.CHANNEL.sendToServer(
+			PacketDistributor.sendToServer(
 					com.whidte.trulybestfriends.network.RequestPetDataPacket.requestFullList());
 		}
 
@@ -293,7 +293,7 @@ public class TrulyScreen extends Screen {
 		if (selUuid == null) return;
 		Minecraft mc = getMinecraft();
 		if (mc.player == null || mc.getConnection() == null) return;
-		com.whidte.trulybestfriends.trulybestfriends.CHANNEL.sendToServer(
+		PacketDistributor.sendToServer(
 				com.whidte.trulybestfriends.network.RequestPetDataPacket.requestSelected(selUuid));
 	}
 
@@ -512,12 +512,12 @@ public class TrulyScreen extends Screen {
 		if (nbt == null) return Component.literal("???");
 		if (nbt.contains("CustomName")) {
 			try {
-				return Component.Serializer.fromJson(nbt.getString("CustomName"));
+				return Component.Serializer.fromJson(nbt.getString("CustomName"), minecraft.level.registryAccess());
 			} catch (Exception ignored) {}
 		}
 		String typeKey = nbt.getString("EntityType");
 		if (!typeKey.isEmpty()) {
-			var type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
+			var type = BuiltInRegistries.ENTITY_TYPE.get(ResourceLocation.tryParse(typeKey));
 			if (type != null) return type.getDescription();
 		}
 		return Component.literal("???");
@@ -530,7 +530,7 @@ public class TrulyScreen extends Screen {
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
 		// Draw the panel first, then layer custom widgets and overlays on top.
-		this.renderBackground(g);
+		this.renderBackground(g, mouseX, mouseY, partialTick);
 		g.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
 		renderListBackground(g);
 		for (GuiEventListener listener : this.children()) {
@@ -555,7 +555,13 @@ public class TrulyScreen extends Screen {
 
 		// L2Tabs tooltip overlay (must render after children)
 		if (tabManager != null) {
-			tabManager.onToolTipRender(g, mouseX, mouseY);
+			try {
+				tabManager.getClass()
+						.getMethod("onToolTipRender", GuiGraphics.class, int.class, int.class)
+						.invoke(tabManager, g, mouseX, mouseY);
+			} catch (ReflectiveOperationException ignored) {
+				// Optional L2Tabs versions do not all expose a tooltip hook.
+			}
 		}
 	}
 
@@ -686,34 +692,20 @@ public class TrulyScreen extends Screen {
 		int hx = this.leftPos + HEART_X;
 		int hy = this.topPos + HEART_Y;
 
-		g.blit(ICONS_TEXTURE, hx, hy, 16, 0, 9, 9, 256, 256);
-		if (currentHealth > 0) g.blit(ICONS_TEXTURE, hx, hy, 52, 0, 9, 9, 256, 256);
+		g.blitSprite(HEART_CONTAINER, hx, hy, 9, 9);
+		if (currentHealth > 0) g.blitSprite(HEART_FULL, hx, hy, 9, 9);
 
 		int bx = hx + 11;
 		int by = hy + 2;
-		int midW = BAR_MIDDLE_WIDTH;
-		int srcW = 172;
-		int total = 5 + midW + 5;
-
-		g.blit(BARS_TEXTURE, bx, by, 5, 5, 0, 20, 5, 5, 256, 256);
-		tileBlitH(g, BARS_TEXTURE, bx + 5, by, midW, 5, 5, 20, srcW, 5, 256, 256);
-		g.blit(BARS_TEXTURE, bx + 5 + midW, by, 5, 5, 177, 20, 5, 5, 256, 256);
+		int total = BAR_MIDDLE_WIDTH + 10;
+		g.blitSprite(HEALTH_BAR_BACKGROUND, bx, by, total, 5);
 
 		int filled = Math.max(0, (int) (total * healthRatio));
 		if (filled <= 0) return;
 
-		int left = Math.min(5, filled);
-		g.blit(BARS_TEXTURE, bx, by, left, 5, 0, 25, 5, 5, 256, 256);
-
-		if (filled > 5) {
-			int midFilled = Math.min(midW, filled - 5);
-			tileBlitH(g, BARS_TEXTURE, bx + 5, by, midFilled, 5, 5, 25, srcW, 5, 256, 256);
-		}
-
-		int right = filled - 5 - midW;
-		if (right > 0) {
-			g.blit(BARS_TEXTURE, bx + 5 + midW, by, right, 5, 177, 25, 5, 5, 256, 256);
-		}
+		g.enableScissor(bx, by, bx + filled, by + 5);
+		g.blitSprite(HEALTH_BAR_PROGRESS, bx, by, total, 5);
+		g.disableScissor();
 	}
 
 	private void renderPetInfo(GuiGraphics g) {
@@ -760,7 +752,7 @@ public class TrulyScreen extends Screen {
 		if (nbt != null) {
 			String typeKey = nbt.getString("EntityType");
 			if (!typeKey.isEmpty()) {
-				var entityType = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
+				var entityType = BuiltInRegistries.ENTITY_TYPE.get(ResourceLocation.tryParse(typeKey));
 				speciesName = entityType != null ? entityType.getDescription() : Component.literal(typeKey);
 			} else {
 				speciesName = Component.translatable("trulybestfriends.location.unknown");
@@ -800,7 +792,7 @@ public class TrulyScreen extends Screen {
 				}
 				return;
 			}
-			var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
+			var item = BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(Config.reviveItem));
 			if (item != null) {
 				Component prefixText = Component.translatable("trulybestfriends.revive.prefix");
 				drawString(g, prefixText, lx, ly, 0x000000);
@@ -911,9 +903,9 @@ public class TrulyScreen extends Screen {
 	// ============================
 
 	@Override
-	public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+	public boolean mouseScrolled(double mouseX, double mouseY, double horizontalDelta, double verticalDelta) {
 		if (net.minecraft.client.gui.screens.Screen.hasShiftDown()) {
-			areaRecallRange = Mth.clamp(areaRecallRange + (delta > 0 ? 1 : -1), 1, 16);
+			areaRecallRange = Mth.clamp(areaRecallRange + (verticalDelta > 0 ? 1 : -1), 1, 16);
 			return true;
 		}
 		if (hasSelection() && isOverEntityPreview(mouseX, mouseY)) {
@@ -923,17 +915,17 @@ public class TrulyScreen extends Screen {
 			// entity's auto-computed referenceScale, so a huge dragon (small
 			// referenceScale) and a tiny pet (large referenceScale) each get
 			// the same relative zoom range instead of sharing fixed numbers.
-			float factor = delta > 0 ? 1.1f : (1f / 1.1f);
+			float factor = verticalDelta > 0 ? 1.1f : (1f / 1.1f);
 			currentScale = Mth.clamp(currentScale * factor, referenceScale * 0.5f, referenceScale * 2.0f);
 			return true;
 		}
 		if (petUuids.size() > MAX_VISIBLE && isOverList(mouseX, mouseY)) {
-			if (delta > 0) scrollOffset = Math.max(0, scrollOffset - COLUMNS);
+			if (verticalDelta > 0) scrollOffset = Math.max(0, scrollOffset - COLUMNS);
 			else { scrollOffset += COLUMNS; snapScrollOffset(); }
 			rebuildPetWidgets();
 			return true;
 		}
-		return super.mouseScrolled(mouseX, mouseY, delta);
+		return super.mouseScrolled(mouseX, mouseY, horizontalDelta, verticalDelta);
 	}
 
 	@Override
@@ -944,7 +936,7 @@ public class TrulyScreen extends Screen {
 		}
 		if (button == 0 && petUuids.size() > MAX_VISIBLE && clickScrollbar(mx, my)) return true;
 		if (button == 0 && coordsHovered && tpDimKey != null && !tpDimKey.isEmpty()) {
-			trulybestfriends.CHANNEL.sendToServer(new com.whidte.trulybestfriends.network.TeleportToPetPacket(
+			PacketDistributor.sendToServer(new com.whidte.trulybestfriends.network.TeleportToPetPacket(
 					tpDimKey, tpX, tpY, tpZ));
 			return true;
 		}

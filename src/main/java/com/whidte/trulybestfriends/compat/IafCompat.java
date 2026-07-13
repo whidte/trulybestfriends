@@ -3,7 +3,7 @@ package com.whidte.trulybestfriends.compat;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.fml.ModList;
+import net.neoforged.fml.ModList;
 
 import java.lang.reflect.Method;
 

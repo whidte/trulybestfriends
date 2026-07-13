@@ -6,8 +6,11 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -16,14 +19,12 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.File;
 import java.nio.file.Path;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Client → Server: requests pet data.
@@ -37,7 +38,10 @@ import java.util.function.Supplier;
  * This packet is the replacement for client-side disk reads in PetDataLoader and
  * TrulyScreen.refreshSelectedFromDisk.
  */
-public class RequestPetDataPacket {
+public class RequestPetDataPacket implements CustomPacketPayload {
+    public static final Type<RequestPetDataPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "request_pet_data"));
+    public static final StreamCodec<FriendlyByteBuf, RequestPetDataPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), RequestPetDataPacket::decode);
+    @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     public static final int REQUEST_FULL_LIST = 0;
     public static final int REQUEST_SELECTED = 1;
 
@@ -85,9 +89,9 @@ public class RequestPetDataPacket {
                 : requestFullList();
     }
 
-    public static void handle(RequestPetDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(RequestPetDataPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
 
             Path petDir = PetIOUtil.getOwnerDir(player);
@@ -100,7 +104,7 @@ public class RequestPetDataPacket {
                     if (files != null) {
                         for (File f : files) {
                             try {
-                                CompoundTag nbt = net.minecraft.nbt.NbtIo.readCompressed(f);
+                                CompoundTag nbt = NbtFileIO.readCompressed(f);
                                 String uuidStr = f.getName().replace(".nbt", "");
                                 UUID uuid = UUID.fromString(uuidStr);
                                 // Mark pets whose entity is not currently loaded in any
@@ -122,17 +126,17 @@ public class RequestPetDataPacket {
                     }
                 }
                 SyncPetDataPacket reply = SyncPetDataPacket.fullList(list);
-                trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                PacketDistributor.sendToPlayer(player, reply);
             } else {
                 File nbtFile = petDir.resolve(packet.petUuid + ".nbt").toFile();
                 if (!nbtFile.exists()) {
                     SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
-                    trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                    PacketDistributor.sendToPlayer(player, reply);
                     return;
                 }
 
                 try {
-                    CompoundTag storedNbt = net.minecraft.nbt.NbtIo.readCompressed(nbtFile);
+                    CompoundTag storedNbt = NbtFileIO.readCompressed(nbtFile);
                     CompoundTag liveNbt = getLoadedPetNbt(player, packet.petUuid, storedNbt);
                     CompoundTag replyNbt = liveNbt != null ? liveNbt : toGuiNbt(storedNbt);
                     // Set the "Lost" flag so the client can switch the glow button
@@ -144,13 +148,13 @@ public class RequestPetDataPacket {
                     // 注入内存中的死亡时刻（不写盘），供客户端计算复活冷却
                     trulybestfriends.injectDeathTimeIntoNbt(packet.petUuid, replyNbt);
                     SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
-                    trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                    PacketDistributor.sendToPlayer(player, reply);
                 } catch (Exception e) {
                     trulybestfriends.LOGGER.error("Failed to read pet file for {}: {}", packet.petUuid, e.getMessage());
                 }
             }
         });
-        ctx.get().setPacketHandled(true);
+
     }
 
     private static CompoundTag getLoadedPetNbt(ServerPlayer player, UUID petUuid, CompoundTag storedNbt) {
@@ -207,12 +211,12 @@ public class RequestPetDataPacket {
         // Prefer live CustomName over stale disk value (pet may have been renamed
         // since the last save, or disk NBT may predate tracking).
         if (entity.hasCustomName()) {
-            nbt.putString("CustomName", Component.Serializer.toJson(entity.getCustomName()));
+            nbt.putString("CustomName", Component.Serializer.toJson(entity.getCustomName(), entity.registryAccess()));
         } else {
             nbt.remove("CustomName");
         }
         nbt.putString("OwnerUUID", storedNbt.getString("OwnerUUID"));
-        nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(entity.getType()).toString());
+        nbt.putString("EntityType", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
         nbt.putString("Dimension", level.dimension().location().toString());
 
         ListTag pos = new ListTag();

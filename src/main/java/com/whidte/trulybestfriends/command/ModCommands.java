@@ -12,10 +12,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 /**
  * Registers {@code /tbf} commands.
@@ -25,7 +25,7 @@ import net.minecraftforge.registries.ForgeRegistries;
  * Dragon cannot be tamed in vanilla, this is the only way to add one to
  * the pet tab for preview/testing of multipart-entity rendering.</p>
  */
-@Mod.EventBusSubscriber(modid = trulybestfriends.MODID)
+@EventBusSubscriber(modid = trulybestfriends.MODID)
 public class ModCommands {
 
     @SubscribeEvent
@@ -44,7 +44,7 @@ public class ModCommands {
         ServerLevel level = source.getLevel();
 
         // Look up the Ender Dragon entity type from the registry.
-        EntityType<?> dragonType = ForgeRegistries.ENTITY_TYPES.getValue(
+        EntityType<?> dragonType = BuiltInRegistries.ENTITY_TYPE.get(
                 ResourceLocation.tryParse("minecraft:ender_dragon"));
         if (dragonType == null) {
             source.sendFailure(Component.literal("Ender Dragon entity type not found."));

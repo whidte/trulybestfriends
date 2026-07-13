@@ -2,7 +2,7 @@ package com.whidte.trulybestfriends.compat;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
-import net.minecraftforge.fml.ModList;
+import net.neoforged.fml.ModList;
 
 public final class CuriosCompat {
     private static final boolean LOADED = ModList.get().isLoaded("curios");

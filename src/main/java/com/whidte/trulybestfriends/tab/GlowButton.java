@@ -1,5 +1,7 @@
 package com.whidte.trulybestfriends.tab;
 
+import net.neoforged.neoforge.network.PacketDistributor;
+
 import com.whidte.trulybestfriends.network.DeletePetDataPacket;
 import com.whidte.trulybestfriends.network.GlowPetPacket;
 import com.whidte.trulybestfriends.trulybestfriends;
@@ -27,7 +29,7 @@ class GlowButton extends AbstractWidget {
 		int frameV = isHovered() ? 20 : 0;
 		guiGraphics.blit(WIDGET_BUTTON, getX(), getY(), 0, frameV, 20, 20, 256, 256);
 		if (deleteMode) {
-			guiGraphics.blit(BEACON_TEXTURE, getX() + 1, getY() + 1, 112, 220, GLOW_BUTTON_SIZE, GLOW_BUTTON_SIZE, 256, 256);
+			guiGraphics.blitSprite(DELETE_ICON, getX() + 1, getY() + 1, GLOW_BUTTON_SIZE, GLOW_BUTTON_SIZE);
 		} else {
 			guiGraphics.blit(GLOWING_ICON, getX() + 1, getY() + 1, 0, 0, GLOW_BUTTON_SIZE, GLOW_BUTTON_SIZE, GLOW_BUTTON_SIZE, GLOW_BUTTON_SIZE);
 		}
@@ -44,14 +46,14 @@ class GlowButton extends AbstractWidget {
 			// 死亡且实体已消失（Lost），或数据损坏（无 Pos/Dimension）：
 			// 单击直接删除，无需确认。这类宠物无法通过放出/复活恢复（实体已不在世界）。
 			if (screen.isSelectedPetDead() || screen.isSelectedPetDataCorrupted()) {
-				trulybestfriends.CHANNEL.sendToServer(new DeletePetDataPacket(screen.getSelectedUuid()));
+				PacketDistributor.sendToServer(new DeletePetDataPacket(screen.getSelectedUuid()));
 				return;
 			}
 			// 已收回 / 实体未加载（Lost 但存活）的宠物：两步 Shift+点击确认。
 			// 这些宠物仍可通过放出或区块加载恢复，不应一键删除。
 			boolean armed = screen.getSelectedUuid().equals(screen.deletePromptUuid);
 			if (Screen.hasShiftDown() && armed) {
-				trulybestfriends.CHANNEL.sendToServer(new DeletePetDataPacket(screen.getSelectedUuid()));
+				PacketDistributor.sendToServer(new DeletePetDataPacket(screen.getSelectedUuid()));
 			} else if (!armed && !Screen.hasShiftDown()) {
 				screen.deletePromptUuid = screen.getSelectedUuid();
 			}
@@ -61,7 +63,7 @@ class GlowButton extends AbstractWidget {
 		long now = System.currentTimeMillis();
 		if (now - screen.lastGlowClickTime >= 3000) {
 			screen.lastGlowClickTime = now;
-			trulybestfriends.CHANNEL.sendToServer(new GlowPetPacket(screen.getSelectedUuid()));
+			PacketDistributor.sendToServer(new GlowPetPacket(screen.getSelectedUuid()));
 		}
 	}
 

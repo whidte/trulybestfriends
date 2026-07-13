@@ -4,9 +4,12 @@ import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -21,7 +24,10 @@ import java.util.function.Supplier;
  * never knew about the change). Server now owns the write and pushes the
  * updated NBT back to the client via SyncPetDataPacket.update.
  */
-public class SetPriorityPacket {
+public class SetPriorityPacket implements CustomPacketPayload {
+    public static final Type<SetPriorityPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "set_priority"));
+    public static final StreamCodec<FriendlyByteBuf, SetPriorityPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), SetPriorityPacket::decode);
+    @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     private final UUID petUuid;
     private final int priority;
 
@@ -39,9 +45,9 @@ public class SetPriorityPacket {
         return new SetPriorityPacket(buf.readUUID(), buf.readVarInt());
     }
 
-    public static void handle(SetPriorityPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(SetPriorityPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
 
             // Clamp to valid range [1, 6]
@@ -53,22 +59,22 @@ public class SetPriorityPacket {
             if (!nbtFile.exists()) {
                 // Pet was deleted — notify client so it can remove the entry
                 SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
-                trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                PacketDistributor.sendToPlayer(player, reply);
                 return;
             }
 
             try {
-                CompoundTag nbt = NbtIo.readCompressed(nbtFile);
+                CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
                 nbt.putInt("Priority", priority);
-                NbtIo.writeCompressed(nbt, nbtFile);
+                NbtFileIO.writeCompressed(nbt, nbtFile);
 
                 // Push updated NBT back to client so its cache stays in sync
                 SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, nbt);
-                trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                PacketDistributor.sendToPlayer(player, reply);
             } catch (Exception e) {
                 trulybestfriends.LOGGER.error("Failed to update priority for {}: {}", packet.petUuid, e.getMessage());
             }
         });
-        ctx.get().setPacketHandled(true);
+
     }
 }
