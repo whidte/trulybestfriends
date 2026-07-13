@@ -10,7 +10,6 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
 public class DeletePetDataPacket implements CustomPacketPayload {
     public static final Type<DeletePetDataPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "delete_pet_data"));
@@ -36,6 +35,7 @@ public class DeletePetDataPacket implements CustomPacketPayload {
             if (player == null) return;
 
             if (trulybestfriends.deletePetData(player, packet.petUuid)) {
+                PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
                 SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
                 PacketDistributor.sendToPlayer(player, reply);
             }

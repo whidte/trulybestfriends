@@ -39,7 +39,9 @@ public class GlowPetPacket implements CustomPacketPayload {
             if (player != null) {
                 ServerLevel level = player.serverLevel();
                 Entity entity = level.getEntity(packet.petUuid);
-                if (entity instanceof net.minecraft.world.entity.LivingEntity living) {
+                if (entity instanceof net.minecraft.world.entity.LivingEntity living
+                        && trulybestfriends.isTrackedPet(packet.petUuid)
+                        && trulybestfriends.isOwnedBy(living, player.getUUID())) {
                     living.addEffect(new MobEffectInstance(MobEffects.GLOWING, 100, 0, false, false));
                 }
             }

@@ -2,13 +2,13 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import java.io.File;
 import java.io.IOException;
@@ -82,6 +82,79 @@ public final class PetIOUtil {
         return yBase;
     }
 
+    public static Vec3 findSafePositionNearPlayer(ServerLevel level, ServerPlayer player, Entity entity,
+                                                   int minRadius, int maxRadius, int attemptsPerRadius) {
+        float halfWidth = entity instanceof LivingEntity living ? living.getBbWidth() / 2f : 0.3f;
+        float height = entity instanceof LivingEntity living ? living.getBbHeight() : 1.8f;
+        return findSafePositionNearPlayer(level, player, halfWidth, height,
+                minRadius, maxRadius, attemptsPerRadius, entity);
+    }
+
+    public static Vec3 findSafePositionNearPlayer(ServerLevel level, ServerPlayer player,
+                                                   float halfWidth, float height,
+                                                   int minRadius, int maxRadius, int attemptsPerRadius) {
+        return findSafePositionNearPlayer(level, player, halfWidth, height,
+                minRadius, maxRadius, attemptsPerRadius, null);
+    }
+
+    private static Vec3 findSafePositionNearPlayer(ServerLevel level, ServerPlayer player,
+                                                    float halfWidth, float height,
+                                                    int minRadius, int maxRadius, int attemptsPerRadius,
+                                                    Entity entity) {
+        for (int radius = Math.max(1, minRadius); radius <= maxRadius; radius++) {
+            for (int attempt = 0; attempt < attemptsPerRadius; attempt++) {
+                double angle = level.random.nextDouble() * Math.PI * 2;
+                double x = player.getX() + Math.cos(angle) * radius;
+                double z = player.getZ() + Math.sin(angle) * radius;
+                double y = entity != null
+                        ? findSafeY(level, x, player.getY(), z, entity)
+                        : findSafeY(level, x, player.getY(), z, halfWidth, height);
+                AABB box = new AABB(x - halfWidth, y, z - halfWidth,
+                        x + halfWidth, y + height, z + halfWidth);
+                boolean clear = entity != null
+                        ? level.noCollision(entity, box)
+                        : level.noCollision(box);
+                if (clear && !level.containsAnyLiquid(box)) return new Vec3(x, y, z);
+            }
+        }
+        return null;
+    }
+
+    public static void writePetSnapshot(File nbtFile, CompoundTag snapshot, boolean recalled) throws IOException {
+        writePetSnapshot(nbtFile, snapshot, recalled, false);
+    }
+
+    public static void writePetSnapshotPreservingRecall(File nbtFile, CompoundTag snapshot) throws IOException {
+        writePetSnapshot(nbtFile, snapshot, false, true);
+    }
+
+    private static void writePetSnapshot(File nbtFile, CompoundTag snapshot,
+                                         boolean recalled, boolean preserveRecalled) throws IOException {
+        CompoundTag oldNbt = null;
+        if (nbtFile.exists()) {
+            try {
+                oldNbt = NbtFileIO.readCompressed(nbtFile);
+            } catch (IOException ignored) {}
+        }
+
+        int priority = oldNbt != null && oldNbt.contains("Priority")
+                ? Math.max(1, Math.min(6, oldNbt.getInt("Priority")))
+                : 6;
+        boolean recalledValue = preserveRecalled && oldNbt != null
+                ? oldNbt.getBoolean("Recalled")
+                : recalled;
+
+        CompoundTag nbt = snapshot.copy();
+        nbt.putInt("Priority", priority);
+        if (recalledValue) nbt.putBoolean("Recalled", true);
+        else nbt.remove("Recalled");
+        nbt.remove("LastDeathTime");
+
+        if (oldNbt == null || !oldNbt.equals(nbt)) {
+            NbtFileIO.writeCompressed(nbt, nbtFile);
+        }
+    }
+
     // ---- Shoulder entity helpers ----
 
     /** Return the shoulder NBT matching petUuid, or null if not on either shoulder. */
@@ -118,17 +191,7 @@ public final class PetIOUtil {
             snapshot.putBoolean("Recalled", true);
 
             File nbtFile = ownerDir.resolve(uuid + ".nbt").toFile();
-            int existingPriority = 6;
-            if (nbtFile.exists()) {
-                try {
-                    CompoundTag oldNbt = NbtFileIO.readCompressed(nbtFile);
-                    if (oldNbt.contains("Priority")) {
-                        existingPriority = Math.max(1, Math.min(6, oldNbt.getInt("Priority")));
-                    }
-                } catch (IOException ignored) {}
-            }
-            snapshot.putInt("Priority", existingPriority);
-            NbtFileIO.writeCompressed(snapshot, nbtFile);
+            writePetSnapshot(nbtFile, snapshot, true);
             return true;
         } catch (IOException e) {
             trulybestfriends.LOGGER.error("Failed to save shoulder pet: {}", e.getMessage());

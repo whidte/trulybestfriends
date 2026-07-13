@@ -17,6 +17,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static com.whidte.trulybestfriends.tab.RenderHelper.detectMultipartYBase;
+import static com.whidte.trulybestfriends.tab.RenderHelper.buildMultipartPose;
+import static com.whidte.trulybestfriends.tab.RenderHelper.multipartPitchRadians;
 import static com.whidte.trulybestfriends.tab.RenderHelper.renderEntityInInventory;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 
@@ -60,9 +62,9 @@ class PetEntry extends AbstractWidget {
 			if (multipart) {
 				String typeKey = pet.getType().builtInRegistryHolder().key().location().toString();
 				quat = MULTIPART_QUATS.computeIfAbsent(typeKey, ignored ->
-						new Quaternionf().rotateZ((float) Math.PI)
-								.rotateY(detectMultipartYBase(pet) - DEFAULT_ROT_X * 20.0F * ((float) Math.PI / 180F))
-								.mul(MULTIPART_QUAT_PITCH));
+						buildMultipartPose(
+								detectMultipartYBase(pet) - DEFAULT_ROT_X * 20.0F * ((float) Math.PI / 180F),
+								multipartPitchRadians(DEFAULT_ROT_Y)));
 				quatPitch = MULTIPART_QUAT_PITCH;
 			} else {
 				quat = NORMAL_QUAT;

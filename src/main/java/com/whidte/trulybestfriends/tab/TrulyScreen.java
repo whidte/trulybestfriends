@@ -67,9 +67,14 @@ public class TrulyScreen extends Screen {
 	long warningUntil;
 	UUID warningUuid;
 
-	/** Cached sync packet received before the screen was open (e.g. server pushed
-	 *  an update while the player was in another screen). Applied on init(). */
-	private static com.whidte.trulybestfriends.network.SyncPetDataPacket pendingSyncPacket;
+	/** Full-list batches received before the screen was open. Applied in order on init(). */
+	private static final List<com.whidte.trulybestfriends.network.SyncPetDataPacket> pendingSyncPackets = new ArrayList<>();
+
+	/** Cache state from before the current batched full-list snapshot. */
+	private Map<UUID, CompoundTag> fullListPreviousNbt;
+	private Map<UUID, CompoundTag> pendingFullListNbt;
+	private Map<UUID, Integer> pendingFullListPriorities;
+	private List<UUID> pendingFullListUuids;
 
 	/** The pet UUID that was selected when saveSelectionThenReload was called.
      *  Used by applySyncPacket(MODE_FULL_LIST) to restore the selection. */
@@ -215,9 +220,12 @@ public class TrulyScreen extends Screen {
 		scrollOffset = 0;
 
 		// 1. Apply any cached full-list snapshot (arrived while screen was closed).
-		if (pendingSyncPacket != null) {
-			applySyncPacket(pendingSyncPacket);
-			pendingSyncPacket = null;
+		if (!pendingSyncPackets.isEmpty()) {
+			List<com.whidte.trulybestfriends.network.SyncPetDataPacket> packets = new ArrayList<>(pendingSyncPackets);
+			pendingSyncPackets.clear();
+			for (com.whidte.trulybestfriends.network.SyncPetDataPacket packet : packets) {
+				applySyncPacket(packet);
+			}
 			if (selectedUuid != null) restoreSelection(selectedUuid);
 		}
 
@@ -300,32 +308,46 @@ public class TrulyScreen extends Screen {
 	/** Apply a server-pushed sync packet. Called from SyncPetDataPacket.handle
 	 *  when this screen is open. */
 	public void applySyncPacket(com.whidte.trulybestfriends.network.SyncPetDataPacket packet) {
+		serverTimeOffsetMs = packet.getServerTime() - System.currentTimeMillis();
 		switch (packet.getMode()) {
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_FULL_LIST -> {
-				Map<UUID, CompoundTag> previousNbt = new LinkedHashMap<>(petNbtCache);
-				Map<UUID, CompoundTag> updatedNbt = new LinkedHashMap<>();
-				petUuids.clear();
-				petPriorities.clear();
-				selectedPetIndex = -1;
-				UUID prevSelected = lastRequestedSelection;
+				if (packet.isFirstBatch() || pendingFullListNbt == null) {
+					fullListPreviousNbt = new LinkedHashMap<>(petNbtCache);
+					pendingFullListNbt = new LinkedHashMap<>();
+					pendingFullListPriorities = new LinkedHashMap<>();
+					pendingFullListUuids = new ArrayList<>();
+				}
 				for (Tag raw : packet.getFullList()) {
 					if (raw instanceof CompoundTag entry && entry.hasUUID("UUID")) {
 						UUID uuid = entry.getUUID("UUID");
 						CompoundTag nbt = entry.getCompound("NBT");
-						updatedNbt.put(uuid, nbt);
+						pendingFullListNbt.put(uuid, nbt);
 						int priority = nbt.contains("Priority") ? nbt.getInt("Priority") : 6;
-						petPriorities.put(uuid, Math.max(1, Math.min(6, priority)));
-						petUuids.add(uuid);
+						pendingFullListPriorities.put(uuid, Math.max(1, Math.min(6, priority)));
+						if (!pendingFullListUuids.contains(uuid)) pendingFullListUuids.add(uuid);
 					}
 				}
+				if (!packet.isLastBatch()) break;
+
+				Map<UUID, CompoundTag> previousNbt = fullListPreviousNbt;
 				for (UUID uuid : new ArrayList<>(previewEntities.keySet())) {
-					if (!updatedNbt.containsKey(uuid) || !java.util.Objects.equals(updatedNbt.get(uuid), previousNbt.get(uuid))) {
+					if (!pendingFullListNbt.containsKey(uuid)
+							|| !java.util.Objects.equals(pendingFullListNbt.get(uuid), previousNbt.get(uuid))) {
 						invalidatePreviewEntity(uuid);
 					}
 				}
+				petUuids.clear();
+				petUuids.addAll(pendingFullListUuids);
 				petNbtCache.clear();
-				petNbtCache.putAll(updatedNbt);
+				petNbtCache.putAll(pendingFullListNbt);
+				petPriorities.clear();
+				petPriorities.putAll(pendingFullListPriorities);
+				fullListPreviousNbt = null;
+				pendingFullListNbt = null;
+				pendingFullListPriorities = null;
+				pendingFullListUuids = null;
 				sortPetUuids();
+				UUID prevSelected = lastRequestedSelection;
 				if (prevSelected != null) restoreSelection(prevSelected);
 				if (!hasSelection() && !petUuids.isEmpty()) selectedPetIndex = 0;
 				rebuildPetWidgets();
@@ -384,7 +406,9 @@ public class TrulyScreen extends Screen {
 		// Only full-list snapshots are worth caching for the next screen open;
 		// updates/deletes for a closed screen are stale and can be dropped.
 		if (packet.getMode() == com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_FULL_LIST) {
-			pendingSyncPacket = packet;
+			if (packet.isFirstBatch()) pendingSyncPackets.clear();
+			else if (pendingSyncPackets.isEmpty()) return;
+			pendingSyncPackets.add(packet);
 		}
 	}
 
@@ -631,13 +655,15 @@ public class TrulyScreen extends Screen {
 			// Standard models (head at -Z) need 0; non-standard (head at +Z,
 			// e.g. Ice & Fire dragons) need PI to face the camera.
 			float yBase = detectMultipartYBase(entity);
-			quat = new Quaternionf().rotateZ((float) Math.PI).rotateY(yBase - rotX * 20f * ((float) Math.PI / 180f));
-			quatPitch = new Quaternionf().rotateX(-rotY * 20f * ((float) Math.PI / 180f));
+			float pitch = multipartPitchRadians(rotY);
+			quat = buildMultipartPose(
+					yBase - rotX * 20f * ((float) Math.PI / 180f), pitch);
+			quatPitch = new Quaternionf().rotateX(pitch);
 		} else {
 			quat = new Quaternionf().rotateZ((float) Math.PI);
 			quatPitch = new Quaternionf().rotateX(rotY * 20f * ((float) Math.PI / 180f));
+			quat.mul(quatPitch);
 		}
-		quat.mul(quatPitch);
 
 		if (!multipart) {
 			entity.yBodyRot = 180f + rotX * 20f;

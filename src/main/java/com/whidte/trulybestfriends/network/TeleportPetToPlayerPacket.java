@@ -23,7 +23,6 @@ import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.pathfinder.Path;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -66,6 +65,8 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             // Case 1: pet is alive in player's current dimension — teleport it directly
             Entity entity = playerLevel.getEntity(packet.petUuid);
             if (entity instanceof LivingEntity living && living.isAlive()) {
+                if (!trulybestfriends.isTrackedPet(packet.petUuid)
+                        || !trulybestfriends.isOwnedBy(living, player.getUUID())) return;
                 teleportEntityToPlayer(living, player, playerLevel);
                 return;
             }
@@ -107,8 +108,23 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             // find and discard original, then summon from disk at player's location
             Entity petEntity = petLevel.getEntity(packet.petUuid);
             if (petEntity instanceof LivingEntity living && living.isAlive()) {
-                living.discard();
-                summonFromDisk(nbt, packet.petUuid, player, playerLevel);
+                if (!trulybestfriends.isTrackedPet(packet.petUuid)
+                        || !trulybestfriends.isOwnedBy(living, player.getUUID())) return;
+                if (!RecallPetPacket.savePetToDisk(player.getUUID(), living, petLevel, false)) {
+                    sendWarning(player, 1, packet.petUuid);
+                    return;
+                }
+                try {
+                    CompoundTag freshSnapshot = NbtFileIO.readCompressed(nbtFile);
+                    if (summonFromDisk(freshSnapshot, packet.petUuid, player, playerLevel)) {
+                        living.discard();
+                    } else {
+                        sendWarning(player, 1, packet.petUuid);
+                    }
+                } catch (IOException e) {
+                    trulybestfriends.LOGGER.error("Failed to reload pet snapshot {}: {}",
+                            packet.petUuid, e.getMessage());
+                }
                 return;
             }
 
@@ -145,8 +161,15 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                     sendWarning(player, 2, packet.petUuid);
                     return;
                 }
+                boolean alreadyPending = pendingSummons.stream().anyMatch(pending ->
+                        pending.playerUuid.equals(player.getUUID())
+                                && pending.petUuid.equals(packet.petUuid));
+                if (alreadyPending) {
+                    sendWarning(player, 2, packet.petUuid);
+                    return;
+                }
                 trulybestfriends.flushPendingPetSaves(player.getUUID());
-                petLevel.setChunkForced(cx, cz, true);
+                trulybestfriends.retainForcedChunk(petLevel, cx, cz);
                 pendingSummons.add(new PendingSummon(
                         packet.petUuid, player.getUUID(), cx, cz, petLevel));
             } else {
@@ -175,23 +198,12 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         }
 
         // Fallback: teleport directly
-        float bbWidth = entity.getBbWidth();
-        int radius = Math.max(1, (int) Math.ceil(bbWidth));
-        for (int r = radius; r <= 6; r++) {
-            for (int attempt = 0; attempt < 16; attempt++) {
-                double angle = level.random.nextDouble() * Math.PI * 2;
-                double x = player.getX() + Math.cos(angle) * r;
-                double z = player.getZ() + Math.sin(angle) * r;
-                double y = PetIOUtil.findSafeY(level, x, player.getY(), z, entity);
-
-                entity.setPos(x, y, z);
-                AABB box = entity.getBoundingBox();
-                if (level.noCollision(entity, box) && !level.containsAnyLiquid(box)) {
-                    entity.teleportTo(x, y, z);
-                    entity.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
-                    return;
-                }
-            }
+        int radius = Math.max(1, (int) Math.ceil(entity.getBbWidth()));
+        Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(level, player, entity, radius, 6, 16);
+        if (safePosition != null) {
+            entity.teleportTo(safePosition.x, safePosition.y, safePosition.z);
+            entity.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
+            return;
         }
         entity.teleportTo(player.getX(), player.getY(), player.getZ());
         entity.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
@@ -202,57 +214,42 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
      * Searches in expanding rings around the player's position.
      */
     private static BlockPos findSafeBlockNearPlayer(ServerLevel level, ServerPlayer player, Entity entity) {
-        float hw = entity instanceof LivingEntity le ? le.getBbWidth() / 2f : 0.3f;
-        float h = entity instanceof LivingEntity le ? le.getBbHeight() : 1.8f;
-        Vec3 playerPos = player.position();
-
-        for (int r = 1; r <= 4; r++) {
-            for (int attempt = 0; attempt < 12; attempt++) {
-                double angle = level.random.nextDouble() * Math.PI * 2;
-                double x = playerPos.x + Math.cos(angle) * r;
-                double z = playerPos.z + Math.sin(angle) * r;
-                double y = PetIOUtil.findSafeY(level, x, playerPos.y, z, entity);
-
-                AABB box = new AABB(x - hw, y, z - hw, x + hw, y + h, z + hw);
-                if (level.noCollision(entity, box) && !level.containsAnyLiquid(box)) {
-                    return BlockPos.containing(x, y, z);
-                }
-            }
-        }
-        return null;
+        Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(level, player, entity, 1, 4, 12);
+        return safePosition != null ? BlockPos.containing(safePosition) : null;
     }
 
-    static void summonFromDisk(CompoundTag nbt, UUID petUuid, ServerPlayer player, ServerLevel level) {
+    static boolean summonFromDisk(CompoundTag nbt, UUID petUuid, ServerPlayer player, ServerLevel level) {
         Entity entity = PetEntitySnapshot.restore(nbt, petUuid, level);
-        if (entity == null) return;
+        if (entity == null) return false;
         restoreChestInventory(entity, nbt);
 
-        float bbWidth = entity instanceof LivingEntity le ? le.getBbWidth() : 0.6f;
+        float bbWidth = entity instanceof LivingEntity living ? living.getBbWidth() : 0.6f;
         int radius = Math.max(1, (int) Math.ceil(bbWidth));
-        for (int r = radius; r <= 6; r++) {
-            for (int attempt = 0; attempt < 16; attempt++) {
-                double angle = level.random.nextDouble() * Math.PI * 2;
-                double dx = Math.cos(angle) * r;
-                double dz = Math.sin(angle) * r;
-                double x = player.getX() + dx;
-                double z = player.getZ() + dz;
-                double y = PetIOUtil.findSafeY(level, x, player.getY(), z, entity);
-
-                entity.setPos(x, y, z);
-                AABB box = entity.getBoundingBox();
-                if (level.noCollision(entity, box) && !level.containsAnyLiquid(box)) {
-                    if (!level.tryAddFreshEntityWithPassengers(entity)) return;
-                    com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
-                    if (entity instanceof LivingEntity le) {
-                        le.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
-                    }
-                    return;
-                }
+        Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(level, player, entity, radius, 6, 16);
+        if (safePosition != null) {
+            entity.setPos(safePosition.x, safePosition.y, safePosition.z);
+            if (!level.tryAddFreshEntityWithPassengers(entity)) return false;
+            finishRestoredEntity(entity, nbt, player, level);
+            if (entity instanceof LivingEntity living) {
+                living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
             }
+            return true;
         }
         entity.setPos(player.getX(), player.getY(), player.getZ());
         if (level.tryAddFreshEntityWithPassengers(entity)) {
-            com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
+            finishRestoredEntity(entity, nbt, player, level);
+            return true;
+        }
+        return false;
+    }
+
+    private static void finishRestoredEntity(Entity entity, CompoundTag nbt,
+                                               ServerPlayer player, ServerLevel level) {
+        // Capabilities may only be exposed after the entity joins the world.
+        restoreChestInventory(entity, nbt);
+        com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
+        if (!trulybestfriends.persistRestoredPet(player.getUUID(), entity, level)) {
+            trulybestfriends.LOGGER.error("Failed to persist restored container snapshot for {}", entity.getUUID());
         }
     }
 
@@ -280,19 +277,18 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                 return;
             }
 
-            // Vanilla chested-horse NBT uses slots relative to the chest area.
-            // Apply it even when a TBF backup exists so old malformed backups
-            // from the 1.21 migration cannot erase otherwise valid vanilla data.
-            if (nbt.contains("Items", 9)) {
-                int slotOffset = entity instanceof AbstractChestedHorse ? 1 : 0;
-                restoreContainerItems(inventory, nbt.getList("Items", 10),
-                        entity.registryAccess(), slotOffset);
-            }
-
             // TBF backups use absolute live-container slot indices.
             if (nbt.contains("TBF_ChestItems", 9)) {
                 restoreContainerItems(inventory, nbt.getList("TBF_ChestItems", 10),
                         entity.registryAccess(), 0);
+            }
+
+            // Vanilla 1.21 horse NBT uses slots relative to the chest area and
+            // remains authoritative when a stale legacy backup is also present.
+            if (nbt.contains("Items", 9)) {
+                int slotOffset = entity instanceof AbstractChestedHorse ? 1 : 0;
+                restoreContainerItems(inventory, nbt.getList("Items", 10),
+                        entity.registryAccess(), slotOffset);
             }
             inventory.setChanged();
         } catch (Exception e) {
@@ -409,7 +405,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     // ---- Pending summon queue for pets in unloaded chunks ----
 
     private static final List<PendingSummon> pendingSummons = new CopyOnWriteArrayList<>();
-    private static final int MAX_PENDING_ATTEMPTS = 10; // ~0.5s at 20 TPS
+    private static final int MAX_PENDING_ATTEMPTS = 100; // ~5s at 20 TPS
     /** Max simultaneous pending summons per player. = Config.maxPendingSummons + 2 buffer. */
     private static int maxPendingPerPlayer() {
         return Config.maxPendingSummons + 2;
@@ -448,23 +444,50 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
 
             if (player == null) {
                 // Player logged out — clean up forced chunk and cancel
-                pending.petLevel.setChunkForced(pending.chunkX, pending.chunkZ, false);
+                trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
                 pendingSummons.remove(pending);
                 continue;
             }
 
             Entity entity = pending.petLevel.getEntity(pending.petUuid);
             if (entity instanceof LivingEntity living && living.isAlive()) {
+                if (!trulybestfriends.isOwnedBy(living, player.getUUID())) {
+                    trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
+                    pendingSummons.remove(pending);
+                    continue;
+                }
+                if (pending.petLevel == player.serverLevel()) {
+                    teleportEntityToPlayer(living, player, pending.petLevel);
+                    trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
+                    pendingSummons.remove(pending);
+                    continue;
+                }
                 // Chunk loaded — discard original and summon at player
-                trulybestfriends.flushPendingPetSaves(player.getUUID());
-                living.discard();
-                pending.petLevel.setChunkForced(pending.chunkX, pending.chunkZ, false);
-                completeSummon(player, pending.petUuid);
-                pendingSummons.remove(pending);
+                if (RecallPetPacket.savePetToDisk(player.getUUID(), living, pending.petLevel, false)) {
+                    if (completeSummon(player, pending.petUuid)) {
+                        living.discard();
+                        trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
+                        pendingSummons.remove(pending);
+                    } else {
+                        pending.attempts++;
+                        if (pending.attempts >= MAX_PENDING_ATTEMPTS) {
+                            trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
+                            sendWarning(player, 1, pending.petUuid);
+                            pendingSummons.remove(pending);
+                        }
+                    }
+                } else {
+                    pending.attempts++;
+                    if (pending.attempts >= MAX_PENDING_ATTEMPTS) {
+                        trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
+                        sendWarning(player, 1, pending.petUuid);
+                        pendingSummons.remove(pending);
+                    }
+                }
             } else {
                 pending.attempts++;
                 if (pending.attempts >= MAX_PENDING_ATTEMPTS) {
-                    pending.petLevel.setChunkForced(pending.chunkX, pending.chunkZ, false);
+                    trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
                     sendWarning(player, 1, pending.petUuid);
                     pendingSummons.remove(pending);
                 }
@@ -473,14 +496,21 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     }
 
     /** Read NBT and summon pet from disk at player's current location. */
-    private static void completeSummon(ServerPlayer player, UUID petUuid) {
+    private static boolean completeSummon(ServerPlayer player, UUID petUuid) {
         ServerLevel playerLevel = player.serverLevel();
         java.nio.file.Path ownerDir = PetIOUtil.getOwnerDir(player);
         File nbtFile = ownerDir.resolve(petUuid + ".nbt").toFile();
-        if (!nbtFile.exists()) return;
+        if (!nbtFile.exists()) return false;
         try {
             CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
-            summonFromDisk(nbt, petUuid, player, playerLevel);
-        } catch (IOException ignored) {}
+            return summonFromDisk(nbt, petUuid, player, playerLevel);
+        } catch (IOException e) {
+            trulybestfriends.LOGGER.error("Failed to complete summon for {}: {}", petUuid, e.getMessage());
+            return false;
+        }
+    }
+
+    public static void clearPendingSummons() {
+        pendingSummons.clear();
     }
 }

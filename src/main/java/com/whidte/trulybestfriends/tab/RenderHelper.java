@@ -53,6 +53,22 @@ final class RenderHelper {
 		Lighting.setupFor3DItems();
 	}
 
+	/**
+	 * Builds a multipart preview pose with pitch in view space.  Pitch must be
+	 * composed before yaw so vertical dragging keeps the same screen-space axis
+	 * at every horizontal viewing angle.
+	 */
+	static Quaternionf buildMultipartPose(float yawRadians, float pitchRadians) {
+		return new Quaternionf()
+				.rotateZ((float) Math.PI)
+				.rotateX(pitchRadians)
+				.rotateY(yawRadians);
+	}
+
+	static float multipartPitchRadians(float verticalRotation) {
+		return verticalRotation * 20.0f * ((float) Math.PI / 180.0f);
+	}
+
 	// ------------------------------------------------------------------
 	//  Multipart entity Y-facing auto-detection
 	// ------------------------------------------------------------------

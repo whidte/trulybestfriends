@@ -50,6 +50,11 @@ neoForge {
 
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
+sourceSets.test {
+    compileClasspath += sourceSets.main.compileClasspath
+    runtimeClasspath += sourceSets.main.runtimeClasspath
+}
+
 repositories {
     mavenCentral()
     maven { url = 'https://neoforged.forgecdn.net/releases' }
@@ -94,6 +99,11 @@ tasks.named('processResources', ProcessResources).configure {
 }
 
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+tasks.withType(JavaExec).configureEach {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
 
 tasks.register('configDimensionSmokeTest', JavaExec) {
     group = 'verification'
@@ -114,4 +124,31 @@ tasks.register('reviveCooldownSmokeTest', JavaExec) {
 tasks.named('check') {
     dependsOn tasks.named('configDimensionSmokeTest')
     dependsOn tasks.named('reviveCooldownSmokeTest')
+    dependsOn tasks.named('petPersistenceSmokeTest')
+    dependsOn tasks.named('multipartRotationSmokeTest')
+    dependsOn tasks.named('petGuiNbtSmokeTest')
+}
+
+tasks.register('petPersistenceSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates legacy horse-slot migration and atomic NBT replacement.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.PetPersistenceSmokeTest'
+}
+
+tasks.register('multipartRotationSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates that multipart pitch remains view-space invariant across yaw angles.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.tab.MultipartRotationSmokeTest'
+}
+
+tasks.register('petGuiNbtSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates one-pet full-NBT sync and passenger-tree filtering.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.PetGuiNbtSmokeTest'
 }

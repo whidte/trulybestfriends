@@ -42,7 +42,7 @@ public class AreaRecallPacket implements CustomPacketPayload {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
             ServerLevel level = player.serverLevel();
-            int range = packet.range;
+            int range = net.minecraft.util.Mth.clamp(packet.range, 1, 16);
             int recalled = 0;
 
             Path ownerDir = PetIOUtil.getOwnerDir(player);
@@ -72,7 +72,8 @@ public class AreaRecallPacket implements CustomPacketPayload {
                     if (entity instanceof PartEntity<?>) continue;
                     if (entity instanceof LivingEntity living) {
                         // Skip untracked entities (data already cleared, e.g. clearOnDeath)
-                        if (!trulybestfriends.isTrackedPet(petUuid)) continue;
+                        if (!trulybestfriends.isTrackedPet(petUuid)
+                                || !trulybestfriends.isOwnedBy(living, player.getUUID())) continue;
                         // In world: use live state, skip dead pets
                         if (living.getHealth() <= 0) continue;
                         // In world: check range
@@ -118,9 +119,17 @@ public class AreaRecallPacket implements CustomPacketPayload {
                             double dy = posList.getDouble(1) - player.getY();
                             double dz = posList.getDouble(2) - player.getZ();
                             if (Math.sqrt(dx * dx + dy * dy + dz * dz) <= range) {
+                                int chunkX = net.minecraft.util.Mth.floor(posList.getDouble(0)) >> 4;
+                                int chunkZ = net.minecraft.util.Mth.floor(posList.getDouble(2)) >> 4;
                                 nbt.putBoolean("Recalled", true);
                                 NbtFileIO.writeCompressed(nbt, nbtFile);
-                                recalled++;
+                                if (trulybestfriends.queuePendingRemoval(
+                                        player.getUUID(), petUuid, level, chunkX, chunkZ)) {
+                                    recalled++;
+                                } else {
+                                    nbt.remove("Recalled");
+                                    NbtFileIO.writeCompressed(nbt, nbtFile);
+                                }
                             }
                         }
                     }

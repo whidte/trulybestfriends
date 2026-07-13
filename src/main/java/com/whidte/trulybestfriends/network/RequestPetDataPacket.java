@@ -1,6 +1,7 @@
 package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
+import com.whidte.trulybestfriends.Config;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
@@ -24,6 +25,8 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -44,20 +47,6 @@ public class RequestPetDataPacket implements CustomPacketPayload {
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     public static final int REQUEST_FULL_LIST = 0;
     public static final int REQUEST_SELECTED = 1;
-
-    private static final String[] GUI_SYNC_NBT_FIELDS = {
-            "CustomName",
-            "OwnerUUID",
-            "EntityType",
-            "Health",
-            "MaxHealth",
-            "Attributes",
-            "Pos",
-            "Dimension",
-            "Recalled",
-            "Priority",
-            "LastDeathTime"
-    };
 
     private final int mode;
     private final UUID petUuid;  // only for REQUEST_SELECTED
@@ -99,37 +88,43 @@ public class RequestPetDataPacket implements CustomPacketPayload {
             if (packet.mode == REQUEST_FULL_LIST) {
                 trulybestfriends.flushPendingPetSaves(player.getUUID());
                 ListTag list = new ListTag();
+                Map<UUID, CompoundTag> sentSnapshot = new HashMap<>();
                 if (petDir.toFile().exists()) {
                     File[] files = petDir.toFile().listFiles((d, n) -> n.endsWith(".nbt"));
                     if (files != null) {
+                        int limit = Math.max(1, Config.maxPets);
                         for (File f : files) {
+                            if (list.size() >= limit) break;
                             try {
-                                CompoundTag nbt = NbtFileIO.readCompressed(f);
+                                CompoundTag storedNbt = NbtFileIO.readCompressed(f);
                                 String uuidStr = f.getName().replace(".nbt", "");
                                 UUID uuid = UUID.fromString(uuidStr);
+                                CompoundTag replyNbt = toClientNbt(storedNbt);
                                 // Mark pets whose entity is not currently loaded in any
                                 // level as "Lost" so the client can switch the glow
                                 // button into delete mode.
-                                if (!isPetLoaded(player, uuid)) {
-                                    nbt.putBoolean("Lost", true);
-                                }
+                                replyNbt.putBoolean("Lost", !isPetLoaded(player, uuid));
                                 // 注入内存中的死亡时刻（不写盘），供客户端计算复活冷却
-                                trulybestfriends.injectDeathTimeIntoNbt(uuid, nbt);
+                                trulybestfriends.injectDeathTimeIntoNbt(uuid, replyNbt);
                                 CompoundTag entry = new CompoundTag();
                                 entry.putUUID("UUID", uuid);
-                                entry.put("NBT", nbt);
+                                entry.put("NBT", replyNbt);
                                 list.add(entry);
+                                sentSnapshot.put(uuid, replyNbt);
                             } catch (Exception e) {
                                 trulybestfriends.LOGGER.error("Failed to read pet file: {}", f, e);
                             }
                         }
                     }
                 }
-                SyncPetDataPacket reply = SyncPetDataPacket.fullList(list);
-                PacketDistributor.sendToPlayer(player, reply);
+                PetSyncTracker.replaceFullSnapshot(player.getUUID(), sentSnapshot);
+                for (SyncPetDataPacket reply : SyncPetDataPacket.fullListBatches(list)) {
+                    PacketDistributor.sendToPlayer(player, reply);
+                }
             } else {
                 File nbtFile = petDir.resolve(packet.petUuid + ".nbt").toFile();
                 if (!nbtFile.exists()) {
+                    PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
                     SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
                     PacketDistributor.sendToPlayer(player, reply);
                     return;
@@ -138,7 +133,7 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                 try {
                     CompoundTag storedNbt = NbtFileIO.readCompressed(nbtFile);
                     CompoundTag liveNbt = getLoadedPetNbt(player, packet.petUuid, storedNbt);
-                    CompoundTag replyNbt = liveNbt != null ? liveNbt : toGuiNbt(storedNbt);
+                    CompoundTag replyNbt = liveNbt != null ? liveNbt : toClientNbt(storedNbt);
                     // Set the "Lost" flag so the client can switch the glow button
                     // into delete mode when the entity is not loaded.  Explicitly
                     // setting false when loaded clears any stale "Lost" flag from
@@ -147,8 +142,10 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                     replyNbt.putBoolean("Lost", liveNbt == null);
                     // 注入内存中的死亡时刻（不写盘），供客户端计算复活冷却
                     trulybestfriends.injectDeathTimeIntoNbt(packet.petUuid, replyNbt);
-                    SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
-                    PacketDistributor.sendToPlayer(player, reply);
+                    if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {
+                        SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
+                        PacketDistributor.sendToPlayer(player, reply);
+                    }
                 } catch (Exception e) {
                     trulybestfriends.LOGGER.error("Failed to read pet file for {}: {}", packet.petUuid, e.getMessage());
                 }
@@ -168,6 +165,15 @@ public class RequestPetDataPacket implements CustomPacketPayload {
             if (nbt != null) return nbt;
         }
         return null;
+    }
+
+    static CompoundTag createUpdateNbt(ServerPlayer player, UUID petUuid, CompoundTag storedNbt) {
+        CompoundTag liveNbt = getLoadedPetNbt(player, petUuid, storedNbt);
+        CompoundTag replyNbt = liveNbt != null ? liveNbt : toClientNbt(storedNbt);
+        // Explicit false clears a stale Lost flag in the client's merged cache.
+        replyNbt.putBoolean("Lost", liveNbt == null);
+        trulybestfriends.injectDeathTimeIntoNbt(petUuid, replyNbt);
+        return replyNbt;
     }
 
     /** Checks whether a pet entity is currently loaded and owned by the player
@@ -200,14 +206,13 @@ public class RequestPetDataPacket implements CustomPacketPayload {
             return null;
         }
 
-        CompoundTag nbt = toGuiNbt(entity, level, storedNbt);
+        CompoundTag nbt = toClientNbt(entity, level, storedNbt);
         preserveStoredUiFields(storedNbt, nbt);
         return nbt;
     }
 
-    private static CompoundTag toGuiNbt(Entity entity, ServerLevel level, CompoundTag storedNbt) {
-        CompoundTag nbt = new CompoundTag();
-        copyGuiSyncFields(storedNbt, nbt);
+    private static CompoundTag toClientNbt(Entity entity, ServerLevel level, CompoundTag storedNbt) {
+        CompoundTag nbt = toClientNbt(storedNbt);
         // Prefer live CustomName over stale disk value (pet may have been renamed
         // since the last save, or disk NBT may predate tracking).
         if (entity.hasCustomName()) {
@@ -238,22 +243,12 @@ public class RequestPetDataPacket implements CustomPacketPayload {
         return nbt;
     }
 
-    private static CompoundTag toGuiNbt(CompoundTag source) {
-        CompoundTag nbt = new CompoundTag();
-        copyGuiSyncFields(source, nbt);
+    static CompoundTag toClientNbt(CompoundTag source) {
+        CompoundTag nbt = source.copy();
+        // Passenger entity trees can recursively contain complete entities and
+        // are not needed to render or manage the tracked pet itself.
+        nbt.remove("Passengers");
         return nbt;
-    }
-
-    private static void copyGuiSyncFields(CompoundTag source, CompoundTag target) {
-        for (String key : GUI_SYNC_NBT_FIELDS) {
-            copyIfPresent(source, target, key);
-        }
-    }
-
-    private static void copyIfPresent(CompoundTag source, CompoundTag target, String key) {
-        if (source.contains(key)) {
-            target.put(key, source.get(key).copy());
-        }
     }
 
     private static void preserveStoredUiFields(CompoundTag storedNbt, CompoundTag nbt) {
