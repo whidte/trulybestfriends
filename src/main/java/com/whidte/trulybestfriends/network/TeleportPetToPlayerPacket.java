@@ -18,14 +18,12 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.IItemHandlerModifiable;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -66,7 +64,7 @@ public class TeleportPetToPlayerPacket {
             java.nio.file.Path ownerDir = PetIOUtil.getOwnerDir(player);
             File nbtFile = ownerDir.resolve(packet.petUuid + ".nbt").toFile();
             if (!nbtFile.exists()) {
-                sendWarning(player, 1, packet.petUuid); // lost / no data
+                PetWarningPacket.send(player, 1, packet.petUuid); // lost / no data
                 return;
             }
 
@@ -74,24 +72,24 @@ public class TeleportPetToPlayerPacket {
             try {
                 nbt = NbtFileIO.readCompressed(nbtFile);
             } catch (IOException e) {
-                sendWarning(player, 1, packet.petUuid);
+                PetWarningPacket.send(player, 1, packet.petUuid);
                 return;
             }
 
             // Filter: recalled or dead pets should not be summoned
             if (nbt.getBoolean("Recalled")) {
-                sendWarning(player, 0, packet.petUuid); // recalled
+                PetWarningPacket.send(player, 0, packet.petUuid); // recalled
                 return;
             }
             if (nbt.contains("Health", 5) && nbt.getFloat("Health") <= 0) {
-                sendWarning(player, 1, packet.petUuid); // dead
+                PetWarningPacket.send(player, 1, packet.petUuid); // dead
                 return;
             }
 
             // Resolve pet's dimension from NBT (no need to scan all dimensions)
             ServerLevel petLevel = resolvePetLevel(player.server, nbt);
             if (petLevel == null) {
-                sendWarning(player, 1, packet.petUuid); // unknown dimension
+                PetWarningPacket.send(player, 1, packet.petUuid); // unknown dimension
                 return;
             }
 
@@ -102,7 +100,7 @@ public class TeleportPetToPlayerPacket {
                 if (!trulybestfriends.isTrackedPet(packet.petUuid)
                         || !trulybestfriends.isOwnedBy(living, player.getUUID())) return;
                 if (!RecallPetPacket.savePetToDisk(player.getUUID(), living, petLevel, false)) {
-                    sendWarning(player, 1, packet.petUuid);
+                    PetWarningPacket.send(player, 1, packet.petUuid);
                     return;
                 }
                 try {
@@ -110,7 +108,7 @@ public class TeleportPetToPlayerPacket {
                     if (summonFromDisk(freshSnapshot, packet.petUuid, player, playerLevel)) {
                         living.discard();
                     } else {
-                        sendWarning(player, 1, packet.petUuid);
+                        PetWarningPacket.send(player, 1, packet.petUuid);
                     }
                 } catch (IOException e) {
                     trulybestfriends.LOGGER.error("Failed to reload pet snapshot {}: {}",
@@ -140,7 +138,7 @@ public class TeleportPetToPlayerPacket {
                 // If the chunk is already loaded but the entity wasn't found,
                 // it truly doesn't exist — don't waste time in the pending queue.
                 if (petLevel.hasChunk(cx, cz)) {
-                    sendWarning(player, 1, packet.petUuid);
+                    PetWarningPacket.send(player, 1, packet.petUuid);
                     return;
                 }
 
@@ -149,14 +147,14 @@ public class TeleportPetToPlayerPacket {
                         .filter(p -> p.playerUuid.equals(player.getUUID()))
                         .count();
                 if (playerPending >= maxPendingPerPlayer()) {
-                    sendWarning(player, 2, packet.petUuid);
+                    PetWarningPacket.send(player, 2, packet.petUuid);
                     return;
                 }
                 boolean alreadyPending = pendingSummons.stream().anyMatch(pending ->
                         pending.playerUuid.equals(player.getUUID())
                                 && pending.petUuid.equals(packet.petUuid));
                 if (alreadyPending) {
-                    sendWarning(player, 2, packet.petUuid);
+                    PetWarningPacket.send(player, 2, packet.petUuid);
                     return;
                 }
                 trulybestfriends.flushPendingPetSaves(player.getUUID());
@@ -164,7 +162,7 @@ public class TeleportPetToPlayerPacket {
                 pendingSummons.add(new PendingSummon(
                         packet.petUuid, player.getUUID(), cx, cz, petLevel));
             } else {
-                sendWarning(player, 1, packet.petUuid);
+                PetWarningPacket.send(player, 1, packet.petUuid);
             }
         });
         ctx.get().setPacketHandled(true);
@@ -303,13 +301,6 @@ public class TeleportPetToPlayerPacket {
         }
     }
 
-    /** Send a PetWarningPacket to the player. type 0 = recalled, type 1 = lost/dead. */
-    private static void sendWarning(ServerPlayer player, int type, UUID petUuid) {
-        trulybestfriends.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player),
-                new PetWarningPacket(type, petUuid));
-    }
-
     /** Resolve the ServerLevel where the pet was last saved, using NBT Dimension field. */
     private static ServerLevel resolvePetLevel(MinecraftServer server, CompoundTag nbt) {
         if (!nbt.contains("Dimension", 8)) return null;
@@ -358,70 +349,53 @@ public class TeleportPetToPlayerPacket {
     public static void tickPendingSummons(MinecraftServer server) {
         if (pendingSummons.isEmpty()) return;
 
-        Iterator<PendingSummon> it = pendingSummons.iterator();
-        while (it.hasNext()) {
-            PendingSummon pending = it.next();
+        for (PendingSummon pending : pendingSummons) {
             ServerPlayer player = server.getPlayerList().getPlayer(pending.playerUuid);
 
             if (player == null) {
                 // Player logged out — clean up forced chunk and cancel
-                trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
-                pendingSummons.remove(pending);
+                finishPendingSummon(pending);
                 continue;
             }
 
             Entity entity = pending.petLevel.getEntity(pending.petUuid);
-            if (entity instanceof LivingEntity living && living.isAlive()) {
-                if (!trulybestfriends.isOwnedBy(living, player.getUUID())) {
-                    trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
-                    pendingSummons.remove(pending);
-                    continue;
-                }
-                if (pending.petLevel == player.serverLevel()) {
-                    if (recreateAfterForcedLoad(living, player, pending.petLevel)) {
-                        trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
-                        pendingSummons.remove(pending);
-                    } else {
-                        pending.attempts++;
-                        if (pending.attempts >= MAX_PENDING_ATTEMPTS) {
-                            trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
-                            sendWarning(player, 1, pending.petUuid);
-                            pendingSummons.remove(pending);
-                        }
-                    }
-                    continue;
-                }
-                // Chunk loaded — discard original and summon at player
-                if (RecallPetPacket.savePetToDisk(player.getUUID(), living, pending.petLevel, false)) {
-                    if (completeSummon(player, pending.petUuid)) {
-                        living.discard();
-                        trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
-                        pendingSummons.remove(pending);
-                    } else {
-                        pending.attempts++;
-                        if (pending.attempts >= MAX_PENDING_ATTEMPTS) {
-                            trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
-                            sendWarning(player, 1, pending.petUuid);
-                            pendingSummons.remove(pending);
-                        }
-                    }
-                } else {
-                    pending.attempts++;
-                    if (pending.attempts >= MAX_PENDING_ATTEMPTS) {
-                        trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
-                        sendWarning(player, 1, pending.petUuid);
-                        pendingSummons.remove(pending);
-                    }
-                }
+            if (!(entity instanceof LivingEntity living) || !living.isAlive()) {
+                failPendingSummon(pending, player);
+                continue;
+            }
+            if (!trulybestfriends.isOwnedBy(living, player.getUUID())) {
+                finishPendingSummon(pending);
+                continue;
+            }
+            if (pending.petLevel == player.serverLevel()) {
+                if (recreateAfterForcedLoad(living, player, pending.petLevel)) finishPendingSummon(pending);
+                else failPendingSummon(pending, player);
+                continue;
+            }
+            // Chunk loaded — discard original and summon at player
+            if (RecallPetPacket.savePetToDisk(player.getUUID(), living, pending.petLevel, false)
+                    && completeSummon(player, pending.petUuid)) {
+                living.discard();
+                finishPendingSummon(pending);
             } else {
-                pending.attempts++;
-                if (pending.attempts >= MAX_PENDING_ATTEMPTS) {
-                    trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
-                    sendWarning(player, 1, pending.petUuid);
-                    pendingSummons.remove(pending);
-                }
+                failPendingSummon(pending, player);
             }
         }
+    }
+
+    private static void failPendingSummon(PendingSummon pending, ServerPlayer player) {
+        if (++pending.attempts < MAX_PENDING_ATTEMPTS) return;
+        finishPendingSummon(pending, player);
+    }
+
+    private static void finishPendingSummon(PendingSummon pending) {
+        finishPendingSummon(pending, null);
+    }
+
+    private static void finishPendingSummon(PendingSummon pending, ServerPlayer warningRecipient) {
+        trulybestfriends.releaseForcedChunk(pending.petLevel, pending.chunkX, pending.chunkZ);
+        if (warningRecipient != null) PetWarningPacket.send(warningRecipient, 1, pending.petUuid);
+        pendingSummons.remove(pending);
     }
 
     /**

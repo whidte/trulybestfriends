@@ -232,19 +232,14 @@ final class RenderHelper {
 			drawString(g, font, text, x, y, color);
 			return;
 		}
-		long time = System.currentTimeMillis();
-		int overflow = textWidth - maxWidth + 12;
-		int cycleMs = 8000;
-		long phase = time % cycleMs;
-
-		int scrollOffset;
-		if (phase < 2000) {
-			scrollOffset = 0;
-		} else if (phase < 6000) {
-			scrollOffset = (int) (overflow * (phase - 2000) / 4000f);
-		} else {
-			scrollOffset = overflow;
-		}
+		int scrollOffset = scrollingOffset(textWidth - maxWidth + 12);
 		drawString(g, font, text, x - scrollOffset, y, color);
+	}
+
+	static int scrollingOffset(int overflow) {
+		long phase = System.currentTimeMillis() % 8000;
+		return phase < 2000 ? 0
+				: phase < 6000 ? (int) (overflow * (phase - 2000) / 4000f)
+				: overflow;
 	}
 }

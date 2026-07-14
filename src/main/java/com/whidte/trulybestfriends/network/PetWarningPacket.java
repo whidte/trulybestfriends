@@ -1,10 +1,13 @@
 package com.whidte.trulybestfriends.network;
 
+import com.whidte.trulybestfriends.trulybestfriends;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.PacketDistributor;
 
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -33,20 +36,21 @@ public class PetWarningPacket {
         return new PetWarningPacket(buf.readVarInt(), buf.readUUID());
     }
 
+    public static void send(ServerPlayer player, int type, UUID petUuid) {
+        trulybestfriends.CHANNEL.send(
+                PacketDistributor.PLAYER.with(() -> player), new PetWarningPacket(type, petUuid));
+    }
+
     public static void handle(PetWarningPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             Minecraft mc = Minecraft.getInstance();
             if (mc.screen instanceof TrulyScreen screen) {
-                Component msg;
-                if (packet.type == 0) {
-                    msg = Component.translatable("trulybestfriends.teleport.recalled_warning");
-                } else if (packet.type == 2) {
-                    msg = Component.translatable("trulybestfriends.teleport.busy_warning");
-                } else if (packet.type == 3) {
-                    msg = Component.translatable("trulybestfriends.recall.lost_warning");
-                } else {
-                    msg = Component.translatable("trulybestfriends.teleport.lost_warning");
-                }
+                Component msg = Component.translatable(switch (packet.type) {
+                    case 0 -> "trulybestfriends.teleport.recalled_warning";
+                    case 2 -> "trulybestfriends.teleport.busy_warning";
+                    case 3 -> "trulybestfriends.recall.lost_warning";
+                    default -> "trulybestfriends.teleport.lost_warning";
+                });
                 screen.showWarning(msg, packet.petUuid);
             }
         });

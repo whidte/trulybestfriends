@@ -52,7 +52,6 @@ import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -734,8 +733,7 @@ public class trulybestfriends {
                 removePendingRemoval(pending);
                 ServerPlayer player = server.getPlayerList().getPlayer(pending.ownerUUID());
                 if (player != null) {
-                    CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                            new PetWarningPacket(3, pending.petUUID()));
+                    PetWarningPacket.send(player, 3, pending.petUUID());
                 }
             } catch (IOException e) {
                 pending.expiresAtTick = pending.level().getGameTime() + PENDING_REMOVAL_TIMEOUT_TICKS;

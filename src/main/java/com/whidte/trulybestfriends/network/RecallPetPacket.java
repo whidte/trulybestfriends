@@ -11,7 +11,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.entity.PartEntity;
 import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.PacketDistributor;
 
 import java.io.File;
 import java.io.IOException;
@@ -103,9 +102,7 @@ public class RecallPetPacket {
             // --- SUMMON path: pet was recalled to disk → release back into world ---
             if (nbt.getBoolean("Recalled")) {
                 if (trulybestfriends.isPendingRemoval(player.getUUID(), packet.petUuid)) {
-                    trulybestfriends.CHANNEL.send(
-                            PacketDistributor.PLAYER.with(() -> player),
-                            new PetWarningPacket(2, packet.petUuid));
+                    PetWarningPacket.send(player, 2, packet.petUuid);
                     return;
                 }
                 CompoundTag recalledSnapshot = nbt.copy();
@@ -132,7 +129,7 @@ public class RecallPetPacket {
                         trulybestfriends.LOGGER.error("Failed to roll back recalled state for {}: {}",
                                 packet.petUuid, rollbackError.getMessage(), rollbackError);
                     }
-                    sendWarning(player, packet.petUuid);
+                    PetWarningPacket.send(player, 3, packet.petUuid);
                 }
                 return;
             }
@@ -195,7 +192,7 @@ public class RecallPetPacket {
             // entry intact — player can use the delete mode to clean it up manually.
             if (petLevel.hasChunk(cx, cz)) {
                 trulybestfriends.LOGGER.debug("Recall: pet {} not found in loaded chunk {},{}", packet.petUuid, cx, cz);
-                sendWarning(player, packet.petUuid);
+                PetWarningPacket.send(player, 3, packet.petUuid);
                 return;
             }
 
@@ -228,22 +225,13 @@ public class RecallPetPacket {
                     trulybestfriends.LOGGER.error("Failed to roll back queued recall for {}: {}",
                             packet.petUuid, rollbackError.getMessage(), rollbackError);
                 }
-                trulybestfriends.CHANNEL.send(
-                        PacketDistributor.PLAYER.with(() -> player),
-                        new PetWarningPacket(2, packet.petUuid));
+                PetWarningPacket.send(player, 2, packet.petUuid);
                 return;
             }
 
             player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
         });
         ctx.get().setPacketHandled(true);
-    }
-
-    /** Warn the player that the pet was not found in its loaded chunk (type 3 = recall lost). */
-    private static void sendWarning(ServerPlayer player, UUID petUuid) {
-        trulybestfriends.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player),
-                new PetWarningPacket(3, petUuid));
     }
 
     static boolean savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {
