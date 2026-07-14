@@ -39,6 +39,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.AnimalTameEvent;
+import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
@@ -199,6 +200,7 @@ public class trulybestfriends {
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         flushPendingPetSaves();
+        ReviveProtection.clear(event.getServer());
         petDeathTimes.clear();  // 死亡时刻仅在内存，不持久化
         persistedDeathSnapshots.clear();
         pendingRemovals.clear();
@@ -219,6 +221,7 @@ public class trulybestfriends {
             processLocalSyncCandidates(event.getServer());
             processPendingRemovals(event.getServer());
             TeleportPetToPlayerPacket.tickPendingSummons(event.getServer());
+            ReviveProtection.tick(event.getServer());
             if (localSyncTickCounter >= Config.localSyncIntervalTicks) {
                 localSyncTickCounter = 0;
                 collectLocalSyncCandidates(event.getServer());
@@ -236,8 +239,17 @@ public class trulybestfriends {
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
+	public void onLivingIncomingDamage(LivingAttackEvent event) {
+        if (!event.getEntity().level().isClientSide()
+                && ReviveProtection.blocksDamage(event.getEntity())) {
+            event.setCanceled(true);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onLivingDeath(LivingDeathEvent event) {
         Entity entity = event.getEntity();
+        if (!entity.level().isClientSide()) ReviveProtection.remove(entity.getUUID());
         if (!entity.level().isClientSide()
                 && trackedPetUUIDs.contains(entity.getUUID())) {
             UUID owner = getCompatOwnerUUID(entity);

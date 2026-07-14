@@ -16,7 +16,8 @@ public final class PetPersistenceSmokeTest {
         testValidVanillaItemsWin();
         testAtomicNbtReplacement();
         testSnapshotFieldPreservation();
-        System.out.println("PetPersistenceSmokeTest: 5/5 passed");
+        testTotemEffectNbtKey();
+        System.out.println("PetPersistenceSmokeTest: 6/6 passed");
     }
 
     private static void testLegacyHorseSlots() {
@@ -128,6 +129,22 @@ public final class PetPersistenceSmokeTest {
             Files.deleteIfExists(target.toPath());
             Files.deleteIfExists(directory);
         }
+    }
+
+    private static void testTotemEffectNbtKey() {
+        CompoundTag nbt = new CompoundTag();
+        ListTag legacyEffects = new ListTag();
+        legacyEffects.add(new CompoundTag());
+        nbt.put("ActiveEffects", legacyEffects);
+        ListTag totemEffects = new ListTag();
+        totemEffects.add(new CompoundTag());
+        totemEffects.add(new CompoundTag());
+        totemEffects.add(new CompoundTag());
+
+        RevivePetPacket.replaceActiveEffects(nbt, totemEffects);
+
+        require(nbt.getList("ActiveEffects", 10).size() == 3,
+                "existing effects were not replaced by the 1.20.1 totem effects");
     }
 
     private static CompoundTag itemAt(int slot, String marker) {

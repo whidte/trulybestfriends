@@ -1,6 +1,7 @@
 package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.Config;
+import com.whidte.trulybestfriends.ReviveProtection;
 import com.whidte.trulybestfriends.compat.IafCompat;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
@@ -29,6 +30,8 @@ import java.util.function.Supplier;
 
 /** Client -> Server: consume items from player inventory and revive a dead pet. */
 public class RevivePetPacket {
+    private static final byte TOTEM_ACTIVATION_EVENT = 35;
+    private static final int REVIVE_INVULNERABILITY_TICKS = 20;
     private final UUID petUuid;
 
     public RevivePetPacket(UUID petUuid) {
@@ -89,8 +92,7 @@ public class RevivePetPacket {
                         && reviveCorpseInPlace(player.server, packet.petUuid, player, level, nbt, nbtFile)) {
                     if (!player.isCreative()) consumeItems(player);
                     trulybestfriends.clearPetDeathTime(packet.petUuid);
-                    player.playNotifySound(net.minecraft.sounds.SoundEvents.TOTEM_USE,
-                            net.minecraft.sounds.SoundSource.PLAYERS, 1.0f, 1.0f);
+                    completeRevive(level, packet.petUuid);
                     return;
                 }
 
@@ -123,9 +125,7 @@ public class RevivePetPacket {
                 discardLoadedCopiesOutside(player.server, packet.petUuid, level);
                 if (!player.isCreative()) consumeItems(player);
                 trulybestfriends.clearPetDeathTime(packet.petUuid);
-
-                player.playNotifySound(net.minecraft.sounds.SoundEvents.TOTEM_USE,
-                        net.minecraft.sounds.SoundSource.PLAYERS, 1.0f, 1.0f);
+                completeRevive(level, packet.petUuid);
             } catch (IOException e) {
                 trulybestfriends.LOGGER.error("Failed to revive pet: {}", e.getMessage());
             }
@@ -173,21 +173,42 @@ public class RevivePetPacket {
     }
 
     /** Write the vanilla totem-of-undying status effects into the pet's NBT. */
-    private static void applyTotemEffects(CompoundTag nbt) {
+    static void applyTotemEffects(CompoundTag nbt) {
         // Mirror LivingEntity#checkTotemDeathProtection effects:
         //   Regeneration II,  45s (900 ticks)
         //   Absorption II,     5s (100 ticks)
         //   Fire Resistance,  40s (800 ticks)
-        ListTag activeEffects = nbt.getList("ActiveEffects", 10);
-
-        // Clear existing effects (vanilla totem removes all cureable effects)
-        activeEffects.clear();
+        ListTag activeEffects = new ListTag();
 
         activeEffects.add(saveEffect(new MobEffectInstance(MobEffects.REGENERATION, 900, 1)));
         activeEffects.add(saveEffect(new MobEffectInstance(MobEffects.ABSORPTION, 100, 1)));
         activeEffects.add(saveEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 800, 0)));
 
+        replaceActiveEffects(nbt, activeEffects);
+    }
+
+    static void replaceActiveEffects(CompoundTag nbt, ListTag activeEffects) {
+        nbt.remove("ActiveEffects");
         nbt.put("ActiveEffects", activeEffects);
+    }
+
+    private static void completeRevive(ServerLevel level, UUID petUuid) {
+        Entity revived = level.getEntity(petUuid);
+        if (revived instanceof LivingEntity living) {
+            applyFreshTotemEffects(living);
+            ReviveProtection.grant(living, REVIVE_INVULNERABILITY_TICKS);
+            level.broadcastEntityEvent(living, TOTEM_ACTIVATION_EVENT);
+        } else {
+            trulybestfriends.LOGGER.warn("Revived pet {} was not available for post-revive protection", petUuid);
+        }
+    }
+
+    /** Clear all pre-death effects and grant a fresh set of totem effects. */
+    private static void applyFreshTotemEffects(LivingEntity living) {
+        living.removeAllEffects();
+        living.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 900, 1));
+        living.addEffect(new MobEffectInstance(MobEffects.ABSORPTION, 100, 1));
+        living.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 800, 0));
     }
 
     private static CompoundTag saveEffect(MobEffectInstance instance) {
@@ -242,10 +263,8 @@ public class RevivePetPacket {
         corpse.hurtTime = 0;
         if (corpse instanceof Mob mob) mob.setNoAi(false);
 
-        // 3. 图腾效果（直接加到实体，区别于原路径对 nbt 操作）
-        corpse.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 900, 1));
-        corpse.addEffect(new MobEffectInstance(MobEffects.ABSORPTION, 100, 1));
-        corpse.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 800, 0));
+        // 3. 清除死亡前效果并施加新图腾效果；completeRevive 会统一登记 20 tick 绝对免伤
+        applyFreshTotemEffects(corpse);
 
         // 4. 传送到玩家旁（同维度，直接 teleportTo）
         teleportCorpseToPlayer(corpse, player, playerLevel);
