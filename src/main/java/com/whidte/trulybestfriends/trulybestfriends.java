@@ -11,6 +11,7 @@ import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.PetEntitySnapshot;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
 import com.whidte.trulybestfriends.network.RequestPetDataPacket;
+import com.whidte.trulybestfriends.network.SableSubLevelSyncPacket;
 import com.whidte.trulybestfriends.network.RevivePetPacket;
 import com.whidte.trulybestfriends.network.SetPriorityPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
@@ -149,6 +150,7 @@ public class trulybestfriends {
         registrar.playToServer(RequestPetDataPacket.TYPE, RequestPetDataPacket.STREAM_CODEC, RequestPetDataPacket::handle);
         registrar.playToServer(RevivePetPacket.TYPE, RevivePetPacket.STREAM_CODEC, RevivePetPacket::handle);
         registrar.playToServer(SetPriorityPacket.TYPE, SetPriorityPacket.STREAM_CODEC, SetPriorityPacket::handle);
+        registrar.playToClient(SableSubLevelSyncPacket.TYPE, SableSubLevelSyncPacket.STREAM_CODEC, SableSubLevelSyncPacket::handle);
         registrar.playToClient(SyncPetDataPacket.TYPE, SyncPetDataPacket.STREAM_CODEC, SyncPetDataPacket::handle);
         registrar.playToServer(DeletePetDataPacket.TYPE, DeletePetDataPacket.STREAM_CODEC, DeletePetDataPacket::handle);
     }

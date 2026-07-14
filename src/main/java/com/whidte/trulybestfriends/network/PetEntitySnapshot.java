@@ -1,6 +1,7 @@
 package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.compat.CuriosCompat;
+import com.whidte.trulybestfriends.compat.SableCompat;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -31,6 +32,7 @@ public final class PetEntitySnapshot {
         nbt.putString("OwnerUUID", ownerUUID.toString());
         nbt.putString("EntityType", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
         nbt.putString("Dimension", level.dimension().location().toString());
+        SableCompat.captureSubLevelInfo(nbt, level, entity.position());
         return nbt;
     }
 

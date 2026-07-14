@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.whidte.trulybestfriends.Config;
+import com.whidte.trulybestfriends.compat.SableCompat;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -69,6 +70,7 @@ public class TrulyScreen extends Screen {
 	private String searchQuery = "";
 	String tpDimKey;
 	int tpX, tpY, tpZ;
+	UUID tpSubLevelId;
 	boolean coordsHovered;
 	int areaRecallRange = Config.areaRecallDefaultRange;
 	Component warningText;
@@ -387,6 +389,7 @@ public class TrulyScreen extends Screen {
 
 	private void rebuildFilteredPetUuids(UUID preferredSelection, boolean revealSelection) {
 		int previousScrollOffset = scrollOffset;
+		int previousSelectedIndex = selectedPetIndex;
 		petUuids.clear();
 		String activeSpeciesFilter = searchMode ? "" : speciesFilter;
 		String activeSearchQuery = searchMode ? searchQuery : "";
@@ -408,7 +411,8 @@ public class TrulyScreen extends Screen {
 		} else {
 			scrollOffset = previousScrollOffset;
 			snapScrollOffset();
-			if (selectedPetIndex < scrollOffset || selectedPetIndex >= scrollOffset + MAX_VISIBLE) {
+			if (selectedPetIndex != previousSelectedIndex
+					&& (selectedPetIndex < scrollOffset || selectedPetIndex >= scrollOffset + MAX_VISIBLE)) {
 				scrollOffset = (selectedPetIndex / COLUMNS) * COLUMNS;
 				snapScrollOffset();
 			}
@@ -786,6 +790,7 @@ public class TrulyScreen extends Screen {
 
 	private void renderPetPreview(GuiGraphics g) {
 		tpDimKey = null;
+		tpSubLevelId = null;
 		coordsHovered = false;
 
 		UUID uuid = getSelectedUuid();
@@ -981,6 +986,7 @@ public class TrulyScreen extends Screen {
 		if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) {
 			coordsHovered = false;
 			tpDimKey = null;
+			tpSubLevelId = null;
 			// Whitelisted entity types cannot be revived: show warning instead of item icon
 			if (nbt.contains("EntityType") && Config.isNoReviveEntity(nbt.getString("EntityType"))) {
 				Component warning = Component.translatable("trulybestfriends.revive.not_revivable")
@@ -1013,6 +1019,7 @@ public class TrulyScreen extends Screen {
 		if (uuid != null && isPetOnShoulder(uuid)) {
 			coordsHovered = false;
 			tpDimKey = null;
+			tpSubLevelId = null;
 			drawString(g, Component.translatable("trulybestfriends.shoulder.on_shoulder"),
 					this.leftPos + HEART_X, this.topPos + LOCATION_Y, 0x000000);
 			return;
@@ -1033,6 +1040,7 @@ public class TrulyScreen extends Screen {
 		if (isRecalled) {
 			coordsHovered = false;
 			tpDimKey = null;
+			tpSubLevelId = null;
 			drawString(g, Component.translatable("trulybestfriends.coords.recalled"), lx, ly, 0xAA5555);
 		} else {
 			Component dimText;
@@ -1077,6 +1085,7 @@ public class TrulyScreen extends Screen {
 
 		tpDimKey = dimKey;
 		tpX = x; tpY = y; tpZ = z;
+		tpSubLevelId = SableCompat.readSubLevelId(nbt);
 
 		if (coordsHovered) {
 			g.renderTooltip(font(), Component.translatable("trulybestfriends.teleport.hint"), mouseX, mouseY);
@@ -1143,7 +1152,7 @@ public class TrulyScreen extends Screen {
 		if (button == 0 && petUuids.size() > MAX_VISIBLE && clickScrollbar(mx, my)) return true;
 		if (button == 0 && coordsHovered && tpDimKey != null && !tpDimKey.isEmpty()) {
 			PacketDistributor.sendToServer(new com.whidte.trulybestfriends.network.TeleportToPetPacket(
-					tpDimKey, tpX, tpY, tpZ));
+					tpDimKey, tpX, tpY, tpZ, tpSubLevelId));
 			return true;
 		}
 		return super.mouseClicked(mx, my, button);

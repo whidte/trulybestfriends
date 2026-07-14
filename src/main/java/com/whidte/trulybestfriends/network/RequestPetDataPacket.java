@@ -1,6 +1,7 @@
 package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
+import com.whidte.trulybestfriends.compat.SableCompat;
 import com.whidte.trulybestfriends.Config;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -229,6 +230,10 @@ public class RequestPetDataPacket implements CustomPacketPayload {
         pos.add(DoubleTag.valueOf(entity.getY()));
         pos.add(DoubleTag.valueOf(entity.getZ()));
         nbt.put("Pos", pos);
+
+        // Refresh SubLevel info from the live entity's current position.
+        // If the pet moved out of a SubLevel, this clears the stale UUID.
+        SableCompat.captureSubLevelInfo(nbt, level, entity.position());
 
         if (entity instanceof LivingEntity living) {
             nbt.putFloat("Health", living.getHealth());
