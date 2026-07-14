@@ -127,6 +127,8 @@ tasks.named('check') {
     dependsOn tasks.named('petPersistenceSmokeTest')
     dependsOn tasks.named('multipartRotationSmokeTest')
     dependsOn tasks.named('petGuiNbtSmokeTest')
+    dependsOn tasks.named('petListFilterSmokeTest')
+    dependsOn tasks.named('reviveProtectionSmokeTest')
 }
 
 tasks.register('petPersistenceSmokeTest', JavaExec) {
@@ -151,4 +153,20 @@ tasks.register('petGuiNbtSmokeTest', JavaExec) {
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.network.PetGuiNbtSmokeTest'
+}
+
+tasks.register('petListFilterSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates combined species and pet-name filtering.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.tab.PetListFilterSmokeTest'
+}
+
+tasks.register('reviveProtectionSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates the exact 20-tick post-revive protection window.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.ReviveProtectionSmokeTest'
 }

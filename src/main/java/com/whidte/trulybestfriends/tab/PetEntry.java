@@ -38,11 +38,17 @@ class PetEntry extends AbstractWidget {
 		this.screen = screen;
 	}
 
+	boolean isSelected() {
+		return screen.selectedPetIndex == index;
+	}
+
 	@Override
 	public void renderWidget(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-		boolean isSelected = screen.selectedPetIndex == index;
+		boolean isSelected = isSelected();
 		int vOffset = isSelected ? ENTRY_HEIGHT : 0;
-		guiGraphics.blit(PET_ENTRY, getX(), getY(), ENTRY_WIDTH, ENTRY_HEIGHT, 0, vOffset, ENTRY_WIDTH, ENTRY_HEIGHT, ENTRY_WIDTH, ENTRY_HEIGHT * 2);
+		guiGraphics.blit(PET_ENTRY, getX(), getY(), ENTRY_WIDTH, ENTRY_HEIGHT,
+				0, vOffset, ENTRY_TEXTURE_WIDTH, ENTRY_HEIGHT,
+				ENTRY_TEXTURE_WIDTH, ENTRY_HEIGHT * 2);
 
 		var font = screen.getMinecraft().font;
 		UUID uuid = screen.petUuids.get(index);
@@ -86,7 +92,12 @@ class PetEntry extends AbstractWidget {
 				pet.yHeadRotO = 0f;
 			}
 
-			renderEntityInInventory(guiGraphics, miniX, miniY, miniScale, quat, quatPitch, pet);
+			guiGraphics.enableScissor(getX() + 1, getY() + 1, getX() + width - 1, textY - 1);
+			try {
+				renderEntityInInventory(guiGraphics, miniX, miniY, miniScale, quat, quatPitch, pet);
+			} finally {
+				guiGraphics.disableScissor();
+			}
 		}
 
 		int priority = Math.max(1, Math.min(6, screen.petPriorities.getOrDefault(uuid, 6)));

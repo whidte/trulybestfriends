@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -11,6 +12,7 @@ import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
@@ -59,6 +61,12 @@ public class TrulyScreen extends Screen {
 	GlowButton glowButton;
 	ActionButton actionButton;
 	SummonToPlayerButton summonToPlayerButton;
+	private SpeciesDropdown speciesFilterButton;
+	private EditBox searchBox;
+	private SearchModeButton searchModeButton;
+	private boolean searchMode;
+	private String speciesFilter = "";
+	private String searchQuery = "";
 	String tpDimKey;
 	int tpX, tpY, tpZ;
 	boolean coordsHovered;
@@ -74,7 +82,6 @@ public class TrulyScreen extends Screen {
 	private Map<UUID, CompoundTag> fullListPreviousNbt;
 	private Map<UUID, CompoundTag> pendingFullListNbt;
 	private Map<UUID, Integer> pendingFullListPriorities;
-	private List<UUID> pendingFullListUuids;
 
 	/** The pet UUID that was selected when saveSelectionThenReload was called.
      *  Used by applySyncPacket(MODE_FULL_LIST) to restore the selection. */
@@ -184,6 +191,9 @@ public class TrulyScreen extends Screen {
 	@Override
 	public void init() {
 		super.init();
+		speciesFilterButton = null;
+		searchBox = null;
+		searchModeButton = null;
 		this.leftPos = (this.width - this.imageWidth) / 2;
 		this.topPos = (this.height - this.imageHeight) / 2;
 
@@ -200,6 +210,7 @@ public class TrulyScreen extends Screen {
 
 		saveSelectionThenReload();
 		addButtons();
+		addListControls();
 	}
 
 	@Override
@@ -226,7 +237,6 @@ public class TrulyScreen extends Screen {
 			for (com.whidte.trulybestfriends.network.SyncPetDataPacket packet : packets) {
 				applySyncPacket(packet);
 			}
-			if (selectedUuid != null) restoreSelection(selectedUuid);
 		}
 
 		// 2. Singleplayer: also load from disk for instant feedback (server is
@@ -234,12 +244,9 @@ public class TrulyScreen extends Screen {
 		Minecraft mc = getMinecraft();
 		if (mc.hasSingleplayerServer() && mc.getSingleplayerServer() != null && petNbtCache.isEmpty()) {
 			PetDataLoader.loadAll(mc, petNbtCache, petPriorities);
-			petUuids.addAll(petNbtCache.keySet());
-			sortPetUuids();
-			if (selectedUuid != null) restoreSelection(selectedUuid);
-			if (!hasSelection() && !petUuids.isEmpty()) selectedPetIndex = 0;
 		}
 
+		rebuildFilteredPetUuids(selectedUuid, true);
 		rebuildPetWidgets();
 
 		// 3. Always ask the server for a fresh full-list snapshot (works for both
@@ -253,15 +260,6 @@ public class TrulyScreen extends Screen {
 
 		if (hasSelection()) {
 			adjustScaleForCurrentPet();
-		}
-	}
-
-	private void restoreSelection(UUID uuid) {
-		selectedPetIndex = petUuids.indexOf(uuid);
-		if (selectedPetIndex >= 0) {
-			scrollOffset = (selectedPetIndex / COLUMNS) * COLUMNS;
-			snapScrollOffset();
-			rebuildPetWidgets();
 		}
 	}
 
@@ -279,6 +277,151 @@ public class TrulyScreen extends Screen {
 				this.leftPos + SUMMON_TO_PLAYER_X, this.topPos + SUMMON_TO_PLAYER_Y, SUMMON_TO_PLAYER_W, this);
 		summonToPlayerButton.visible = has;
 		this.addRenderableWidget(summonToPlayerButton);
+	}
+
+	private void addListControls() {
+		searchBox = new EditBox(
+				font(),
+				this.leftPos + LIST_MODE_CONTROL_OFFSET_X,
+				this.topPos + LIST_CONTROLS_OFFSET_Y,
+				LIST_MODE_CONTROL_WIDTH,
+				LIST_CONTROL_HEIGHT,
+				Component.translatable("trulybestfriends.search.name"));
+		searchBox.setHint(Component.translatable("trulybestfriends.search.hint"));
+		searchBox.setMaxLength(64);
+		searchBox.setValue(searchQuery);
+		searchBox.setResponder(value -> {
+			searchQuery = value;
+			applyPetFilters();
+		});
+		searchBox.setVisible(searchMode);
+		this.addRenderableWidget(searchBox);
+		refreshSpeciesFilterButton();
+
+		searchModeButton = new SearchModeButton(
+				this.leftPos + SEARCH_TOGGLE_OFFSET_X,
+				this.topPos + LIST_CONTROLS_OFFSET_Y,
+				this);
+		this.addRenderableWidget(searchModeButton);
+	}
+
+	private void refreshSpeciesFilterButton() {
+		if (searchBox == null) return;
+		if (speciesFilterButton != null) removeWidget(speciesFilterButton);
+
+		List<String> species = getAvailableSpeciesFilters();
+		speciesFilterButton = new SpeciesDropdown(
+				this.leftPos + LIST_MODE_CONTROL_OFFSET_X,
+				this.topPos + LIST_CONTROLS_OFFSET_Y,
+				LIST_MODE_CONTROL_WIDTH,
+				LIST_CONTROL_HEIGHT,
+				this,
+				species,
+				speciesFilter,
+				this::getSpeciesFilterLabel,
+				value -> {
+					speciesFilter = value;
+					applyPetFilters();
+				});
+		speciesFilterButton.visible = !searchMode;
+		this.addRenderableWidget(speciesFilterButton);
+	}
+
+	void toggleListControlMode() {
+		searchMode = !searchMode;
+		if (searchBox != null) {
+			searchBox.setVisible(searchMode);
+			if (!searchMode) searchBox.setFocused(false);
+		}
+		if (speciesFilterButton != null) {
+			speciesFilterButton.visible = !searchMode;
+			if (searchMode) speciesFilterButton.collapse();
+		}
+		applyPetFilters();
+	}
+
+	Component listControlToggleLabel() {
+		return Component.translatable(searchMode
+				? "trulybestfriends.filter.toggle"
+				: "trulybestfriends.search.toggle");
+	}
+
+	private List<String> getAvailableSpeciesFilters() {
+		List<String> result = new ArrayList<>();
+		result.add("");
+		for (CompoundTag nbt : petNbtCache.values()) {
+			String key = nbt.getString("EntityType");
+			if (!key.isEmpty() && !result.contains(key)) result.add(key);
+		}
+		if (!speciesFilter.isEmpty() && !result.contains(speciesFilter)) result.add(speciesFilter);
+		result.subList(1, result.size()).sort(Comparator.comparing(
+				key -> getSpeciesFilterLabel(key).getString(), String.CASE_INSENSITIVE_ORDER));
+		return result;
+	}
+
+	private Component getSpeciesFilterLabel(String key) {
+		if (key == null || key.isEmpty()) {
+			return Component.translatable("trulybestfriends.filter.all");
+		}
+		ResourceLocation resource = ResourceLocation.tryParse(key);
+		EntityType<?> type = resource != null ? BuiltInRegistries.ENTITY_TYPE.get(resource) : null;
+		return type != null ? type.getDescription() : Component.literal(key);
+	}
+
+	private void normalizeSpeciesFilter() {
+		if (speciesFilter.isEmpty()) return;
+		boolean available = petNbtCache.values().stream()
+				.anyMatch(nbt -> speciesFilter.equals(nbt.getString("EntityType")));
+		if (!available) speciesFilter = "";
+	}
+
+	private void applyPetFilters() {
+		UUID previousSelection = getSelectedUuid();
+		rebuildFilteredPetUuids(previousSelection, true);
+		if (!java.util.Objects.equals(previousSelection, getSelectedUuid())) deletePromptUuid = null;
+		rebuildPetWidgets();
+		updateButtonVisibility();
+		if (hasSelection()) adjustScaleForCurrentPet();
+	}
+
+	private void rebuildFilteredPetUuids(UUID preferredSelection, boolean revealSelection) {
+		int previousScrollOffset = scrollOffset;
+		petUuids.clear();
+		String activeSpeciesFilter = searchMode ? "" : speciesFilter;
+		String activeSearchQuery = searchMode ? searchQuery : "";
+		for (Map.Entry<UUID, CompoundTag> entry : petNbtCache.entrySet()) {
+			String displayName = getPetDisplayName(entry.getKey()).getString();
+			if (matchesPetFilter(entry.getValue(), activeSpeciesFilter, activeSearchQuery, displayName)) {
+				petUuids.add(entry.getKey());
+			}
+		}
+		sortPetUuids();
+
+		selectedPetIndex = preferredSelection != null ? petUuids.indexOf(preferredSelection) : -1;
+		if (selectedPetIndex < 0) {
+			selectedPetIndex = petUuids.isEmpty() ? -1 : 0;
+			scrollOffset = 0;
+		} else if (revealSelection) {
+			scrollOffset = (selectedPetIndex / COLUMNS) * COLUMNS;
+			snapScrollOffset();
+		} else {
+			scrollOffset = previousScrollOffset;
+			snapScrollOffset();
+			if (selectedPetIndex < scrollOffset || selectedPetIndex >= scrollOffset + MAX_VISIBLE) {
+				scrollOffset = (selectedPetIndex / COLUMNS) * COLUMNS;
+				snapScrollOffset();
+			}
+		}
+	}
+
+	static boolean matchesPetFilter(CompoundTag nbt, String speciesFilter,
+	                                String searchQuery, String displayName) {
+		if (nbt == null) return false;
+		if (speciesFilter != null && !speciesFilter.isEmpty()
+				&& !speciesFilter.equals(nbt.getString("EntityType"))) return false;
+		String query = searchQuery == null ? "" : searchQuery.trim().toLowerCase(Locale.ROOT);
+		return query.isEmpty() || (displayName != null
+				&& displayName.toLowerCase(Locale.ROOT).contains(query));
 	}
 
 	// === Real-time refresh ===
@@ -315,7 +458,6 @@ public class TrulyScreen extends Screen {
 					fullListPreviousNbt = new LinkedHashMap<>(petNbtCache);
 					pendingFullListNbt = new LinkedHashMap<>();
 					pendingFullListPriorities = new LinkedHashMap<>();
-					pendingFullListUuids = new ArrayList<>();
 				}
 				for (Tag raw : packet.getFullList()) {
 					if (raw instanceof CompoundTag entry && entry.hasUUID("UUID")) {
@@ -324,7 +466,6 @@ public class TrulyScreen extends Screen {
 						pendingFullListNbt.put(uuid, nbt);
 						int priority = nbt.contains("Priority") ? nbt.getInt("Priority") : 6;
 						pendingFullListPriorities.put(uuid, Math.max(1, Math.min(6, priority)));
-						if (!pendingFullListUuids.contains(uuid)) pendingFullListUuids.add(uuid);
 					}
 				}
 				if (!packet.isLastBatch()) break;
@@ -336,8 +477,8 @@ public class TrulyScreen extends Screen {
 						invalidatePreviewEntity(uuid);
 					}
 				}
-				petUuids.clear();
-				petUuids.addAll(pendingFullListUuids);
+				UUID prevSelected = getSelectedUuid();
+				if (prevSelected == null) prevSelected = lastRequestedSelection;
 				petNbtCache.clear();
 				petNbtCache.putAll(pendingFullListNbt);
 				petPriorities.clear();
@@ -345,19 +486,19 @@ public class TrulyScreen extends Screen {
 				fullListPreviousNbt = null;
 				pendingFullListNbt = null;
 				pendingFullListPriorities = null;
-				pendingFullListUuids = null;
-				sortPetUuids();
-				UUID prevSelected = lastRequestedSelection;
-				if (prevSelected != null) restoreSelection(prevSelected);
-				if (!hasSelection() && !petUuids.isEmpty()) selectedPetIndex = 0;
+				normalizeSpeciesFilter();
+				rebuildFilteredPetUuids(prevSelected, true);
 				rebuildPetWidgets();
+				refreshSpeciesFilterButton();
 				updateButtonVisibility();
 				if (hasSelection()) adjustScaleForCurrentPet();
 			}
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_UPDATE -> {
 				UUID uuid = packet.getPetUuid();
+				UUID previousSelection = getSelectedUuid();
 				CompoundTag nbt = packet.getPetNbt();
 				CompoundTag oldNbt = petNbtCache.get(uuid);
+				String oldSpecies = oldNbt != null ? oldNbt.getString("EntityType") : "";
 				CompoundTag merged = oldNbt != null ? oldNbt.copy() : new CompoundTag();
 				for (String key : nbt.getAllKeys()) {
 					merged.put(key, nbt.get(key));
@@ -368,33 +509,34 @@ public class TrulyScreen extends Screen {
 				petNbtCache.put(uuid, merged);
 				int priority = merged.contains("Priority") ? merged.getInt("Priority") : 6;
 				priority = Math.max(1, Math.min(6, priority));
-				Integer old = petPriorities.put(uuid, priority);
-				if (!petUuids.contains(uuid)) {
-					petUuids.add(uuid);
-					sortPetUuids();
-					rebuildPetWidgets();
-				} else if (old == null || old != priority) {
-					sortPetUuids();
-					rebuildPetWidgets();
+				petPriorities.put(uuid, priority);
+				rebuildFilteredPetUuids(previousSelection, false);
+				rebuildPetWidgets();
+				if (!oldSpecies.equals(merged.getString("EntityType"))) refreshSpeciesFilterButton();
+				updateButtonVisibility();
+				if (!java.util.Objects.equals(previousSelection, getSelectedUuid()) && hasSelection()) {
+					adjustScaleForCurrentPet();
 				}
 			}
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_DELETE -> {
 				UUID uuid = packet.getPetUuid();
-				boolean deletedSelectedPet = uuid.equals(getSelectedUuid());
+				UUID previousSelection = getSelectedUuid();
+				boolean deletedSelectedPet = uuid.equals(previousSelection);
 				int deletedIndex = petUuids.indexOf(uuid);
-				petUuids.remove(uuid);
 				petNbtCache.remove(uuid);
 				invalidatePreviewEntity(uuid);
 				petPriorities.remove(uuid);
 				if (uuid.equals(deletePromptUuid)) deletePromptUuid = null;
-				sortPetUuids();
+				normalizeSpeciesFilter();
+				rebuildFilteredPetUuids(deletedSelectedPet ? null : previousSelection, false);
 				if (deletedSelectedPet) {
 					selectedPetIndex = petUuids.isEmpty() ? -1 : Math.min(Math.max(deletedIndex, 0), petUuids.size() - 1);
+					scrollOffset = selectedPetIndex < 0 ? 0 : (selectedPetIndex / COLUMNS) * COLUMNS;
+					snapScrollOffset();
 					if (hasSelection()) adjustScaleForCurrentPet();
-				} else if (selectedPetIndex >= petUuids.size()) {
-					selectedPetIndex = petUuids.isEmpty() ? -1 : petUuids.size() - 1;
 				}
 				rebuildPetWidgets();
+				refreshSpeciesFilterButton();
 				updateButtonVisibility();
 			}
 		}
@@ -515,7 +657,7 @@ public class TrulyScreen extends Screen {
 			UUID uuid = petUuids.get(i);
 			Component name = getPetDisplayName(uuid);
 			this.addRenderableWidget(new PetEntry(
-					listX + col * (ENTRY_WIDTH + ENTRY_GAP_X), listY + row * ENTRY_HEIGHT,
+					listX + col * (ENTRY_WIDTH + ENTRY_GAP_X), listY + row * ENTRY_ROW_STEP,
 					ENTRY_WIDTH, ENTRY_HEIGHT, name, i, this));
 		}
 	}
@@ -557,11 +699,18 @@ public class TrulyScreen extends Screen {
 		this.renderBackground(g, mouseX, mouseY, partialTick);
 		g.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
 		renderListBackground(g);
+		PetEntry selectedEntry = null;
+		SpeciesDropdown speciesDropdown = null;
 		for (GuiEventListener listener : this.children()) {
-			if (listener instanceof net.minecraft.client.gui.components.Renderable renderable) {
+			if (listener instanceof SpeciesDropdown dropdown) {
+				speciesDropdown = dropdown;
+			} else if (listener instanceof PetEntry entry && entry.isSelected()) {
+				selectedEntry = entry;
+			} else if (listener instanceof net.minecraft.client.gui.components.Renderable renderable) {
 				renderable.render(g, mouseX, mouseY, partialTick);
 			}
 		}
+		if (selectedEntry != null) selectedEntry.render(g, mouseX, mouseY, partialTick);
 
 		if (sortNeeded && !net.minecraft.client.gui.screens.Screen.hasShiftDown()) {
 			sortNeeded = false;
@@ -572,9 +721,28 @@ public class TrulyScreen extends Screen {
 
 		if (hasSelection()) {
 			renderPetPreview(g);
-			renderHealthBar(g);
-			renderPetInfo(g);
-			renderPetLocation(g, mouseX, mouseY);
+			g.pose().pushPose();
+			g.pose().translate(0.0, 0.0, PET_INFO_OVERLAY_Z);
+			try {
+				renderHealthBar(g);
+				renderPetInfo(g);
+				renderPetLocation(g, mouseX, mouseY);
+				g.flush();
+			} finally {
+				g.pose().popPose();
+			}
+		}
+
+		// Keep the expanded dropdown above pet entries and the pet-list scrollbar.
+		if (speciesDropdown != null) {
+			g.pose().pushPose();
+			g.pose().translate(0.0, 0.0, SPECIES_DROPDOWN_OVERLAY_Z);
+			try {
+				speciesDropdown.render(g, mouseX, mouseY, partialTick);
+				g.flush();
+			} finally {
+				g.pose().popPose();
+			}
 		}
 
 		// L2Tabs tooltip overlay (must render after children)
@@ -594,6 +762,9 @@ public class TrulyScreen extends Screen {
 		int y = this.topPos + LIST_PANEL_OFFSET_Y;
 		int right = this.leftPos + this.imageWidth - SCROLLBAR_RIGHT_OFFSET;
 		g.fill(x, y, right, y + LIST_PANEL_HEIGHT, 0x20000000);
+
+		int controlsY = this.topPos + LIST_CONTROLS_OFFSET_Y;
+		g.fill(x, controlsY, x + LIST_PANEL_WIDTH, controlsY + LIST_CONTROL_HEIGHT, 0x20000000);
 	}
 
 	private void renderScrollBar(GuiGraphics g) {
@@ -724,14 +895,36 @@ public class TrulyScreen extends Screen {
 		int bx = hx + 11;
 		int by = hy + 2;
 		int total = BAR_MIDDLE_WIDTH + 10;
-		g.blitSprite(HEALTH_BAR_BACKGROUND, bx, by, total, 5);
+		renderThreePartHealthBar(g, HEALTH_BAR_BACKGROUND, bx, by, total);
 
 		int filled = Math.max(0, (int) (total * healthRatio));
-		if (filled <= 0) return;
+		renderThreePartHealthBar(g, HEALTH_BAR_PROGRESS, bx, by, filled);
+	}
 
-		g.enableScissor(bx, by, bx + filled, by + 5);
-		g.blitSprite(HEALTH_BAR_PROGRESS, bx, by, total, 5);
-		g.disableScissor();
+	private static void renderThreePartHealthBar(GuiGraphics g, ResourceLocation sprite,
+	                                             int x, int y, int visibleWidth) {
+		final int capWidth = 5;
+		final int spriteWidth = 182;
+		final int spriteHeight = 5;
+		int width = Mth.clamp(visibleWidth, 0, BAR_MIDDLE_WIDTH + capWidth * 2);
+
+		int leftWidth = Math.min(capWidth, width);
+		if (leftWidth > 0) {
+			g.blitSprite(sprite, spriteWidth, spriteHeight, 0, 0,
+					x, y, leftWidth, spriteHeight);
+		}
+
+		int middleWidth = Math.min(BAR_MIDDLE_WIDTH, Math.max(0, width - capWidth));
+		if (middleWidth > 0) {
+			g.blitSprite(sprite, spriteWidth, spriteHeight, capWidth, 0,
+					x + capWidth, y, middleWidth, spriteHeight);
+		}
+
+		int rightWidth = Math.max(0, width - capWidth - BAR_MIDDLE_WIDTH);
+		if (rightWidth > 0) {
+			g.blitSprite(sprite, spriteWidth, spriteHeight, spriteWidth - capWidth, 0,
+					x + capWidth + BAR_MIDDLE_WIDTH, y, rightWidth, spriteHeight);
+		}
 	}
 
 	private void renderPetInfo(GuiGraphics g) {
@@ -930,6 +1123,10 @@ public class TrulyScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double horizontalDelta, double verticalDelta) {
+		if (speciesFilterButton != null
+				&& speciesFilterButton.mouseScrolled(mouseX, mouseY, horizontalDelta, verticalDelta)) {
+			return true;
+		}
 		if (net.minecraft.client.gui.screens.Screen.hasShiftDown()) {
 			areaRecallRange = Mth.clamp(areaRecallRange + (verticalDelta > 0 ? 1 : -1), 1, 16);
 			return true;
@@ -956,6 +1153,7 @@ public class TrulyScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(double mx, double my, int button) {
+		if (speciesFilterButton != null && speciesFilterButton.mouseClicked(mx, my, button)) return true;
 		if (button == 0 && hasSelection() && isOverEntityPreview(mx, my)) {
 			isDraggingEntity = true;
 			return true;
@@ -971,6 +1169,7 @@ public class TrulyScreen extends Screen {
 
 	@Override
 	public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+		if (speciesFilterButton != null && speciesFilterButton.mouseDragged(mx, my, button, dx, dy)) return true;
 		if (isDraggingScrollbar) {
 			dragScrollbar(my);
 			return true;
@@ -986,6 +1185,7 @@ public class TrulyScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(double mx, double my, int button) {
+		if (speciesFilterButton != null && speciesFilterButton.mouseReleased(mx, my, button)) return true;
 		if (button == 0) {
 			if (isDraggingEntity) { isDraggingEntity = false; return true; }
 			if (isDraggingScrollbar) { isDraggingScrollbar = false; return true; }
