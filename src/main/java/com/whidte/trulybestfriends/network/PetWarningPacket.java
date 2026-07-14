@@ -8,6 +8,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
@@ -40,20 +42,20 @@ public class PetWarningPacket implements CustomPacketPayload {
         return new PetWarningPacket(buf.readVarInt(), buf.readUUID());
     }
 
+    public static void send(ServerPlayer player, int type, UUID petUuid) {
+        PacketDistributor.sendToPlayer(player, new PetWarningPacket(type, petUuid));
+    }
+
     public static void handle(PetWarningPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             Minecraft mc = Minecraft.getInstance();
             if (mc.screen instanceof TrulyScreen screen) {
-                Component msg;
-                if (packet.type == 0) {
-                    msg = Component.translatable("trulybestfriends.teleport.recalled_warning");
-                } else if (packet.type == 2) {
-                    msg = Component.translatable("trulybestfriends.teleport.busy_warning");
-                } else if (packet.type == 3) {
-                    msg = Component.translatable("trulybestfriends.recall.lost_warning");
-                } else {
-                    msg = Component.translatable("trulybestfriends.teleport.lost_warning");
-                }
+                Component msg = Component.translatable(switch (packet.type) {
+                    case 0 -> "trulybestfriends.teleport.recalled_warning";
+                    case 2 -> "trulybestfriends.teleport.busy_warning";
+                    case 3 -> "trulybestfriends.recall.lost_warning";
+                    default -> "trulybestfriends.teleport.lost_warning";
+                });
                 screen.showWarning(msg, packet.petUuid);
             }
         });

@@ -158,9 +158,7 @@ public class TrulyScreen extends Screen {
 
 		CompoundTag nbt = petNbtCache.get(uuid);
 		if (nbt == null || getMinecraft().level == null) return null;
-		String typeKey = nbt.getString("EntityType");
-		if (typeKey.isEmpty()) return null;
-		EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(ResourceLocation.tryParse(typeKey));
+		EntityType<?> type = getEntityType(nbt.getString("EntityType"));
 		if (type == null) return null;
 		Entity entity = type.create(getMinecraft().level);
 		if (!(entity instanceof LivingEntity livingEntity)) return null;
@@ -264,19 +262,13 @@ public class TrulyScreen extends Screen {
 	}
 
 	private void addButtons() {
-		boolean has = hasSelection();
-		glowButton = new GlowButton(this.leftPos + GLOW_X, this.topPos + GLOW_Y, this);
-		glowButton.visible = has;
-		this.addRenderableWidget(glowButton);
-
-		actionButton = new ActionButton(this.leftPos + ACTION_X, this.topPos + ACTION_Y, this);
-		actionButton.visible = has;
-		this.addRenderableWidget(actionButton);
-
-		summonToPlayerButton = new SummonToPlayerButton(
-				this.leftPos + SUMMON_TO_PLAYER_X, this.topPos + SUMMON_TO_PLAYER_Y, SUMMON_TO_PLAYER_W, this);
-		summonToPlayerButton.visible = has;
-		this.addRenderableWidget(summonToPlayerButton);
+		glowButton = this.addRenderableWidget(
+				new GlowButton(this.leftPos + GLOW_X, this.topPos + GLOW_Y, this));
+		actionButton = this.addRenderableWidget(
+				new ActionButton(this.leftPos + ACTION_X, this.topPos + ACTION_Y, this));
+		summonToPlayerButton = this.addRenderableWidget(new SummonToPlayerButton(
+				this.leftPos + SUMMON_TO_PLAYER_X, this.topPos + SUMMON_TO_PLAYER_Y, SUMMON_TO_PLAYER_W, this));
+		updateButtonVisibility();
 	}
 
 	private void addListControls() {
@@ -363,9 +355,13 @@ public class TrulyScreen extends Screen {
 		if (key == null || key.isEmpty()) {
 			return Component.translatable("trulybestfriends.filter.all");
 		}
-		ResourceLocation resource = ResourceLocation.tryParse(key);
-		EntityType<?> type = resource != null ? BuiltInRegistries.ENTITY_TYPE.get(resource) : null;
+		EntityType<?> type = getEntityType(key);
 		return type != null ? type.getDescription() : Component.literal(key);
+	}
+
+	private static EntityType<?> getEntityType(String key) {
+		ResourceLocation resource = ResourceLocation.tryParse(key);
+		return resource != null ? BuiltInRegistries.ENTITY_TYPE.get(resource) : null;
 	}
 
 	private void normalizeSpeciesFilter() {
@@ -379,9 +375,14 @@ public class TrulyScreen extends Screen {
 		UUID previousSelection = getSelectedUuid();
 		rebuildFilteredPetUuids(previousSelection, true);
 		if (!java.util.Objects.equals(previousSelection, getSelectedUuid())) deletePromptUuid = null;
+		finishPetListUpdate(false, true);
+	}
+
+	private void finishPetListUpdate(boolean refreshSpecies, boolean adjustScale) {
 		rebuildPetWidgets();
+		if (refreshSpecies) refreshSpeciesFilterButton();
 		updateButtonVisibility();
-		if (hasSelection()) adjustScaleForCurrentPet();
+		if (adjustScale && hasSelection()) adjustScaleForCurrentPet();
 	}
 
 	private void rebuildFilteredPetUuids(UUID preferredSelection, boolean revealSelection) {
@@ -488,10 +489,7 @@ public class TrulyScreen extends Screen {
 				pendingFullListPriorities = null;
 				normalizeSpeciesFilter();
 				rebuildFilteredPetUuids(prevSelected, true);
-				rebuildPetWidgets();
-				refreshSpeciesFilterButton();
-				updateButtonVisibility();
-				if (hasSelection()) adjustScaleForCurrentPet();
+				finishPetListUpdate(true, true);
 			}
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_UPDATE -> {
 				UUID uuid = packet.getPetUuid();
@@ -511,12 +509,9 @@ public class TrulyScreen extends Screen {
 				priority = Math.max(1, Math.min(6, priority));
 				petPriorities.put(uuid, priority);
 				rebuildFilteredPetUuids(previousSelection, false);
-				rebuildPetWidgets();
-				if (!oldSpecies.equals(merged.getString("EntityType"))) refreshSpeciesFilterButton();
-				updateButtonVisibility();
-				if (!java.util.Objects.equals(previousSelection, getSelectedUuid()) && hasSelection()) {
-					adjustScaleForCurrentPet();
-				}
+				finishPetListUpdate(
+						!oldSpecies.equals(merged.getString("EntityType")),
+						!java.util.Objects.equals(previousSelection, getSelectedUuid()));
 			}
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_DELETE -> {
 				UUID uuid = packet.getPetUuid();
@@ -535,9 +530,7 @@ public class TrulyScreen extends Screen {
 					snapScrollOffset();
 					if (hasSelection()) adjustScaleForCurrentPet();
 				}
-				rebuildPetWidgets();
-				refreshSpeciesFilterButton();
-				updateButtonVisibility();
+				finishPetListUpdate(true, false);
 			}
 		}
 	}
@@ -683,7 +676,7 @@ public class TrulyScreen extends Screen {
 		}
 		String typeKey = nbt.getString("EntityType");
 		if (!typeKey.isEmpty()) {
-			var type = BuiltInRegistries.ENTITY_TYPE.get(ResourceLocation.tryParse(typeKey));
+			var type = getEntityType(typeKey);
 			if (type != null) return type.getDescription();
 		}
 		return Component.literal("???");
@@ -947,18 +940,7 @@ public class TrulyScreen extends Screen {
 			drawString(g, nameSuffix, nameSuffixX, nameY, 0x000000);
 		} else {
 			// Scroll the name within [nameSuffixX, nameSuffixX + 50]
-			long t = System.currentTimeMillis();
-			int overflow = nameSuffixW - nameSuffixMaxW + 12;
-			int cycle = 8000;
-			long phase = t % cycle;
-			int scroll;
-			if (phase < 2000) {
-				scroll = 0;
-			} else if (phase < 6000) {
-				scroll = (int) (overflow * (phase - 2000) / 4000f);
-			} else {
-				scroll = overflow;
-			}
+			int scroll = RenderHelper.scrollingOffset(nameSuffixW - nameSuffixMaxW + 12);
 			g.flush();
 			g.enableScissor(nameSuffixX, nameY, nameSuffixX + nameSuffixMaxW, nameY + 10);
 			drawString(g, nameSuffix, nameSuffixX - scroll, nameY, 0x000000);
@@ -971,7 +953,7 @@ public class TrulyScreen extends Screen {
 		if (nbt != null) {
 			String typeKey = nbt.getString("EntityType");
 			if (!typeKey.isEmpty()) {
-				var entityType = BuiltInRegistries.ENTITY_TYPE.get(ResourceLocation.tryParse(typeKey));
+				var entityType = getEntityType(typeKey);
 				speciesName = entityType != null ? entityType.getDescription() : Component.literal(typeKey);
 			} else {
 				speciesName = Component.translatable("trulybestfriends.location.unknown");

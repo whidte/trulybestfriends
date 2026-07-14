@@ -55,7 +55,7 @@ final class SpeciesDropdown extends AbstractWidget {
     protected void renderWidget(@NotNull GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         ResourceLocation sprite = isHeaderHovered(mouseX, mouseY) ? BUTTON_HIGHLIGHTED : BUTTON;
         graphics.blitSprite(sprite, getX(), getY(), width, height);
-        renderLabel(graphics, getMessage(), getX() + 3, getY() + 2, width - 13, 0xFFFFFF);
+        renderLabel(graphics, getMessage(), getX() + 3, getY() + 2, width - 13);
         renderArrow(graphics);
 
         if (expanded) renderOptions(graphics, mouseX, mouseY);
@@ -64,14 +64,11 @@ final class SpeciesDropdown extends AbstractWidget {
     private void renderArrow(GuiGraphics graphics) {
         int centerX = getX() + width - 6;
         int top = getY() + 4;
-        if (expanded) {
-            graphics.fill(centerX - 2, top + 2, centerX + 3, top + 3, 0xFFFFFFFF);
-            graphics.fill(centerX - 1, top + 1, centerX + 2, top + 2, 0xFFFFFFFF);
-            graphics.fill(centerX, top, centerX + 1, top + 1, 0xFFFFFFFF);
-        } else {
-            graphics.fill(centerX - 2, top, centerX + 3, top + 1, 0xFFFFFFFF);
-            graphics.fill(centerX - 1, top + 1, centerX + 2, top + 2, 0xFFFFFFFF);
-            graphics.fill(centerX, top + 2, centerX + 1, top + 3, 0xFFFFFFFF);
+        int startY = top + (expanded ? 2 : 0);
+        int direction = expanded ? -1 : 1;
+        for (int halfWidth = 2, row = 0; halfWidth >= 0; halfWidth--, row++) {
+            int y = startY + row * direction;
+            graphics.fill(centerX - halfWidth, y, centerX + halfWidth + 1, y + 1, 0xFFFFFFFF);
         }
     }
 
@@ -79,10 +76,7 @@ final class SpeciesDropdown extends AbstractWidget {
         int popupY = popupY();
         int popupHeight = popupHeight();
         graphics.fill(getX(), popupY, getX() + width, popupY + popupHeight, 0xF0101010);
-        graphics.fill(getX(), popupY, getX() + width, popupY + 1, 0xFF808080);
-        graphics.fill(getX(), popupY + popupHeight - 1, getX() + width, popupY + popupHeight, 0xFF808080);
-        graphics.fill(getX(), popupY, getX() + 1, popupY + popupHeight, 0xFF808080);
-        graphics.fill(getX() + width - 1, popupY, getX() + width, popupY + popupHeight, 0xFF808080);
+        graphics.renderOutline(getX(), popupY, width, popupHeight, 0xFF808080);
 
         int rows = visibleOptionCount(options.size());
         int textWidth = width - (isScrollable() ? SCROLLBAR_WIDTH + 5 : 5);
@@ -97,15 +91,15 @@ final class SpeciesDropdown extends AbstractWidget {
             if (isOptionHovered(mouseX, mouseY, rowY)) {
                 graphics.fill(getX() + 1, rowY, getX() + width - 1, rowY + OPTION_HEIGHT, 0x60FFFFFF);
             }
-            renderLabel(graphics, labelProvider.apply(value), getX() + 3, rowY + 1, textWidth, 0xFFFFFF);
+            renderLabel(graphics, labelProvider.apply(value), getX() + 3, rowY + 1, textWidth);
         }
 
         if (isScrollable()) renderScrollbar(graphics);
     }
 
-    private void renderLabel(GuiGraphics graphics, Component label, int x, int y, int maxWidth, int color) {
+    private void renderLabel(GuiGraphics graphics, Component label, int x, int y, int maxWidth) {
         graphics.enableScissor(x, y, x + Math.max(0, maxWidth), y + screen.font().lineHeight);
-        graphics.drawString(screen.font(), label, x, y, color, false);
+        graphics.drawString(screen.font(), label, x, y, 0xFFFFFF, false);
         graphics.disableScissor();
     }
 
@@ -154,7 +148,7 @@ final class SpeciesDropdown extends AbstractWidget {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalDelta, double verticalDelta) {
         if (!expanded || !isOverPopup(mouseX, mouseY) || !isScrollable()) return false;
-        scrollOffset = Mth.clamp(scrollOffset + (verticalDelta > 0 ? -1 : 1), 0, maxScrollOffset(options.size()));
+        setScrollOffset(scrollOffset + (verticalDelta > 0 ? -1 : 1));
         return true;
     }
 
@@ -182,7 +176,7 @@ final class SpeciesDropdown extends AbstractWidget {
         int visibleRows = visibleOptionCount(options.size());
         if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
         if (selectedIndex >= scrollOffset + visibleRows) scrollOffset = selectedIndex - visibleRows + 1;
-        scrollOffset = Mth.clamp(scrollOffset, 0, maxScrollOffset(options.size()));
+        setScrollOffset(scrollOffset);
     }
 
     private void setScrollFromMouse(double mouseY) {
@@ -192,8 +186,7 @@ final class SpeciesDropdown extends AbstractWidget {
         int travel = trackHeight - thumbHeight;
         if (travel <= 0) return;
         double ratio = (mouseY - trackY - thumbHeight / 2.0) / travel;
-        scrollOffset = Mth.clamp((int) Math.round(ratio * maxScrollOffset(options.size())),
-                0, maxScrollOffset(options.size()));
+        setScrollOffset((int) Math.round(ratio * maxScrollOffset(options.size())));
     }
 
     private int scrollbarThumbHeight(int trackHeight) {
@@ -202,18 +195,19 @@ final class SpeciesDropdown extends AbstractWidget {
 
     private int scrollbarThumbY(int trackY, int trackHeight, int thumbHeight) {
         int maxScroll = maxScrollOffset(options.size());
-        if (maxScroll == 0) return trackY;
         return trackY + (trackHeight - thumbHeight) * scrollOffset / maxScroll;
     }
 
+    private void setScrollOffset(int value) {
+        scrollOffset = Mth.clamp(value, 0, maxScrollOffset(options.size()));
+    }
+
     private boolean isHeaderHovered(double mouseX, double mouseY) {
-        return mouseX >= getX() && mouseX < getX() + width
-                && mouseY >= getY() && mouseY < getY() + height;
+        return contains(mouseX, mouseY, getX(), getY(), width, height);
     }
 
     private boolean isOverPopup(double mouseX, double mouseY) {
-        return mouseX >= getX() && mouseX < getX() + width
-                && mouseY >= popupY() && mouseY < popupY() + popupHeight();
+        return contains(mouseX, mouseY, getX(), popupY(), width, popupHeight());
     }
 
     private boolean isOverScrollbar(double mouseX) {
@@ -222,8 +216,11 @@ final class SpeciesDropdown extends AbstractWidget {
 
     private boolean isOptionHovered(double mouseX, double mouseY, int rowY) {
         int right = getX() + width - (isScrollable() ? SCROLLBAR_WIDTH + 1 : 1);
-        return mouseX >= getX() + 1 && mouseX < right
-                && mouseY >= rowY && mouseY < rowY + OPTION_HEIGHT;
+        return contains(mouseX, mouseY, getX() + 1, rowY, right - getX() - 1, OPTION_HEIGHT);
+    }
+
+    private static boolean contains(double mouseX, double mouseY, int x, int y, int width, int height) {
+        return mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
     }
 
     private boolean isScrollable() {

@@ -111,9 +111,7 @@ class PetEntry extends AbstractWidget {
 		if (textWidth <= availableWidth) {
 			guiGraphics.drawString(font, getMessage(), getX() + (width - textWidth) / 2, textY - 1, textColor);
 		} else {
-			long phase = System.currentTimeMillis() % 8000;
-			int overflow = textWidth - availableWidth + 12;
-			int scrollOffset = phase < 2000 ? 0 : phase < 6000 ? (int) (overflow * (phase - 2000) / 4000f) : overflow;
+			int scrollOffset = RenderHelper.scrollingOffset(textWidth - availableWidth + 12);
 			guiGraphics.drawString(font, getMessage(), getX() + 3 - scrollOffset, textY - 1, textColor);
 		}
 		guiGraphics.disableScissor();

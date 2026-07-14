@@ -55,7 +55,6 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 
@@ -742,7 +741,7 @@ public class trulybestfriends {
                 removePendingRemoval(pending);
                 ServerPlayer player = server.getPlayerList().getPlayer(pending.ownerUUID());
                 if (player != null) {
-                    PacketDistributor.sendToPlayer(player, new PetWarningPacket(3, pending.petUUID()));
+                    PetWarningPacket.send(player, 3, pending.petUUID());
                 }
             } catch (IOException e) {
                 pending.expiresAtTick = pending.level().getGameTime() + PENDING_REMOVAL_TIMEOUT_TICKS;
