@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.whidte.trulybestfriends.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "trulybestfriends.refmap.json",
+  "mixins": [
+    "EntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

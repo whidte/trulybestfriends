@@ -192,6 +192,7 @@ public final class PetIOUtil {
 
             File nbtFile = ownerDir.resolve(uuid + ".nbt").toFile();
             writePetSnapshot(nbtFile, snapshot, true);
+            trulybestfriends.updatePetRecalledState(level, uuid, true);
             return true;
         } catch (IOException e) {
             trulybestfriends.LOGGER.error("Failed to save shoulder pet: {}", e.getMessage());

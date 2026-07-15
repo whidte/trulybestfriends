@@ -15,6 +15,11 @@ plugins {
 }
 apply plugin: 'org.spongepowered.mixin'
 
+mixin {
+    add sourceSets.main, "${mod_id}.refmap.json"
+    config "${mod_id}.mixins.json"
+}
+
 version = mod_version
 group = mod_group_id
 
@@ -126,6 +131,8 @@ repositories {
     // ForgeGradle automatically adds the Forge maven and Maven Central for you
 
     maven { url = "https://maven.theillusivec4.top/" }
+    maven { url = "https://maven.ftb.dev/releases" }
+    maven { url = "https://maven.architectury.dev/" }
 
     flatDir {
         dir 'libs'
@@ -145,10 +152,12 @@ dependencies {
     // If the group id is "net.minecraft" and the artifact id is one of ["client", "server", "joined"],
     // then special handling is done to allow a setup of a vanilla dependency without the use of an external repository.
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
     // L2Library, L2Tabs, and Curios are optional soft dependencies.
     compileOnly fg.deobf("curse.maven:l2library-620203:6806000")
     compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:5.7.1+1.20.1:api")
+    compileOnly fg.deobf("dev.ftb.mods:ftb-teams-forge:2001.3.1")
 
     // When installed, the mod gains an inventory tab; otherwise a keybinding opens the screen.
     compileOnly files('libs/l2tabs-0.3.3.jar')
