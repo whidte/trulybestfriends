@@ -123,12 +123,14 @@ public class AreaRecallPacket implements CustomPacketPayload {
                                 int chunkZ = net.minecraft.util.Mth.floor(posList.getDouble(2)) >> 4;
                                 nbt.putBoolean("Recalled", true);
                                 NbtFileIO.writeCompressed(nbt, nbtFile);
+                                trulybestfriends.updatePetRecalledState(level, petUuid, true);
                                 if (trulybestfriends.queuePendingRemoval(
                                         player.getUUID(), petUuid, level, chunkX, chunkZ)) {
                                     recalled++;
                                 } else {
                                     nbt.remove("Recalled");
                                     NbtFileIO.writeCompressed(nbt, nbtFile);
+                                    trulybestfriends.updatePetRecalledState(level, petUuid, false);
                                 }
                             }
                         }

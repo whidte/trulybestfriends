@@ -24,8 +24,9 @@ public class Config
             ), s -> s instanceof String && !((String) s).isEmpty());
 
     public static final ModConfigSpec.IntValue SYNC_INTERVAL_TICKS = BUILDER
-            .comment("Interval in ticks for full fallback scan of all loaded owned entities and caching their latest pet data")
-            .defineInRange("syncIntervalTicks", 103, 1, 1200);
+            .comment("Interval in ticks for full fallback scan of all loaded owned entities and caching their latest pet data.",
+                    "Set to 0 to disable the full scan.")
+            .defineInRange("syncIntervalTicks", 103, 0, 1200);
 
     public static final ModConfigSpec.IntValue LOCAL_SYNC_INTERVAL_TICKS = BUILDER
             .comment("Interval in ticks for scanning nearby entities around players who completed the Truly Best Friends advancement")

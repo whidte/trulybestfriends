@@ -115,10 +115,12 @@ public class RecallPetPacket implements CustomPacketPayload {
                         // Dead pet: just clear the stale Recalled flag, don't summon a corpse
                         nbt.remove("Recalled");
                         NbtFileIO.writeCompressed(nbt, nbtFile);
+                        trulybestfriends.updatePetRecalledState(playerLevel, packet.petUuid, false);
                         return;
                     }
                     nbt.remove("Recalled");
                     NbtFileIO.writeCompressed(nbt, nbtFile);
+                    trulybestfriends.updatePetRecalledState(playerLevel, packet.petUuid, false);
                 } catch (IOException e) {
                     trulybestfriends.LOGGER.error("Failed to clear Recalled flag for {}: {}", packet.petUuid, e.getMessage());
                     return;
@@ -129,6 +131,7 @@ public class RecallPetPacket implements CustomPacketPayload {
                 } else {
                     try {
                         NbtFileIO.writeCompressed(recalledSnapshot, nbtFile);
+                        trulybestfriends.updatePetRecalledState(playerLevel, packet.petUuid, true);
                     } catch (IOException rollbackError) {
                         trulybestfriends.LOGGER.error("Failed to roll back recalled state for {}: {}",
                                 packet.petUuid, rollbackError.getMessage(), rollbackError);
@@ -216,6 +219,7 @@ public class RecallPetPacket implements CustomPacketPayload {
             nbt.putBoolean("Recalled", true);
             try {
                 NbtFileIO.writeCompressed(nbt, nbtFile);
+                trulybestfriends.updatePetRecalledState(petLevel, packet.petUuid, true);
             } catch (IOException e) {
                 trulybestfriends.LOGGER.error("Failed to write Recalled flag for {}: {}", packet.petUuid, e.getMessage());
                 return;
@@ -225,6 +229,7 @@ public class RecallPetPacket implements CustomPacketPayload {
                 nbt.remove("Recalled");
                 try {
                     NbtFileIO.writeCompressed(nbt, nbtFile);
+                    trulybestfriends.updatePetRecalledState(petLevel, packet.petUuid, false);
                 } catch (IOException rollbackError) {
                     trulybestfriends.LOGGER.error("Failed to roll back queued recall for {}: {}",
                             packet.petUuid, rollbackError.getMessage(), rollbackError);
@@ -251,6 +256,7 @@ public class RecallPetPacket implements CustomPacketPayload {
 
             CompoundTag nbt = PetEntitySnapshot.capture(pet, playerUuid, level);
             PetIOUtil.writePetSnapshot(nbtFile, nbt, recalled);
+            trulybestfriends.updatePetRecalledState(level, pet.getUUID(), recalled);
             return true;
         } catch (IOException | RuntimeException e) {
             trulybestfriends.LOGGER.error("Failed to save pet {}: {}", pet.getUUID(), e.getMessage(), e);

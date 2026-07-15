@@ -119,9 +119,12 @@ public class RevivePetPacket implements CustomPacketPayload {
 
                 // Persist the revived NBT, then summon the pet directly into the world
                 NbtFileIO.writeCompressed(nbt, nbtFile);
+                trulybestfriends.updatePetRecalledState(level, packet.petUuid, false);
                 if (!TeleportPetToPlayerPacket.summonFromDisk(nbt, packet.petUuid, player, level)) {
                     try {
                         NbtFileIO.writeCompressed(deadSnapshot, nbtFile);
+                        trulybestfriends.updatePetRecalledState(
+                                level, packet.petUuid, deadSnapshot.getBoolean("Recalled"));
                     } catch (IOException rollbackError) {
                         trulybestfriends.LOGGER.error("Failed to roll back revive for {}: {}",
                                 packet.petUuid, rollbackError.getMessage(), rollbackError);
@@ -285,6 +288,7 @@ public class RevivePetPacket implements CustomPacketPayload {
             saved.remove("Recalled");
             saved.remove("LastDeathTime");  // 清死亡时间，避免复活冷却误判
             NbtFileIO.writeCompressed(saved, nbtFile);
+            trulybestfriends.updatePetRecalledState(playerLevel, petUuid, false);
         } catch (IOException e) {
             trulybestfriends.LOGGER.error("reviveCorpseInPlace: failed to write nbt for {}: {}", petUuid, e.getMessage());
         }

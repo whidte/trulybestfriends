@@ -10,6 +10,9 @@ displayName="${mod_name}"
 authors="${mod_authors}"
 description='''${mod_description}'''
 
+[[mixins]]
+config="trulybestfriends.mixins.json"
+
 [[dependencies.${mod_id}]]
 modId="neoforge"
 type="required"
@@ -42,6 +45,13 @@ side="BOTH"
 modId="curios"
 type="optional"
 versionRange="[9.5.1,)"
+ordering="AFTER"
+side="BOTH"
+
+[[dependencies.${mod_id}]]
+modId="ftbteams"
+type="optional"
+versionRange="[2101.1.2,)"
 ordering="AFTER"
 side="BOTH"
 
