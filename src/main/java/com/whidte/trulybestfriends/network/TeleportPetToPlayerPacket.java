@@ -234,10 +234,9 @@ public class TeleportPetToPlayerPacket {
 
     private static void finishRestoredEntity(Entity entity, CompoundTag nbt,
                                                ServerPlayer player, ServerLevel level) {
-        // Some modded capabilities are only exposed after onAddedToWorld. Repeat
-        // restoration here, then replace the empty snapshot queued by EntityJoinLevelEvent.
+        // Some container capabilities are only exposed after onAddedToWorld. Repeat
+        // their restoration, then replace the empty snapshot queued by EntityJoinLevelEvent.
         restoreChestInventory(entity, nbt);
-        com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
         if (!trulybestfriends.persistRestoredPet(player.getUUID(), entity, level)) {
             trulybestfriends.LOGGER.error("Failed to persist restored container snapshot for {}", entity.getUUID());
         }

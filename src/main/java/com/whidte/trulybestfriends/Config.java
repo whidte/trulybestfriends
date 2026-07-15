@@ -17,6 +17,14 @@ public class Config
 {
     private static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
 
+    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> OWNER_NBT_FIELDS = BUILDER
+            .comment("Top-level NBT field names used to find an owner UUID on living entities that do not implement OwnableEntity.",
+                    "Fields are checked in order and may contain either a UUID tag or a UUID string. Names are case-sensitive.")
+            .defineListAllowEmpty("ownerNbtFields", java.util.Arrays.asList(
+                    "Owner",
+                    "OwnerUUID"
+            ), s -> s instanceof String && !((String) s).isEmpty());
+
     public static final ForgeConfigSpec.IntValue SYNC_INTERVAL_TICKS = BUILDER
             .comment("Interval in ticks for full fallback scan of all loaded owned entities and caching their latest pet data")
             .defineInRange("syncIntervalTicks", 103, 1, 1200);
@@ -79,7 +87,8 @@ public class Config
                     "irons_spellbooks:summoned_claymore",
                     "irons_spellbooks:summoned_rapier",
                     "irons_spellbooks:spectral_hammer",
-                    "irons_spellbooks:wisp"
+                    "irons_spellbooks:wisp",
+                    "touhou_little_maid:chair"
             ), s -> s instanceof String && (((String) s).contains(":") || ((String) s).endsWith(":*")));
 
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> NO_REVIVE_WHITELIST = BUILDER
@@ -110,6 +119,8 @@ public class Config
 
     static final ForgeConfigSpec SPEC = BUILDER.build();
 
+    public static final java.util.List<String> ownerNbtFields = new java.util.ArrayList<>(java.util.Arrays.asList(
+            "Owner", "OwnerUUID"));
     public static int syncIntervalTicks;
     public static int localSyncIntervalTicks;
     public static int savePetDataCooldownTicks;
@@ -131,6 +142,9 @@ public class Config
     @SubscribeEvent
     static void onLoad(final ModConfigEvent event)
     {
+        ownerNbtFields.clear();
+        ownerNbtFields.addAll(OWNER_NBT_FIELDS.get());
+
         syncIntervalTicks = SYNC_INTERVAL_TICKS.get();
         localSyncIntervalTicks = LOCAL_SYNC_INTERVAL_TICKS.get();
         savePetDataCooldownTicks = SAVE_PET_DATA_COOLDOWN_TICKS.get();

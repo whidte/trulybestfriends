@@ -565,18 +565,17 @@ public class trulybestfriends {
         if (entity instanceof OwnableEntity ownable) {
             return ownable.getOwnerUUID();
         }
-        // Compatibility: read ownership from saved NBT (e.g. Ice &amp; Fire stores "Owner")
+        // Compatibility: read ownership from configured top-level NBT fields.
         CompoundTag nbt = entity.saveWithoutId(new CompoundTag());
-        if (nbt.hasUUID("Owner")) {
-            return nbt.getUUID("Owner");
-        }
-        if (nbt.hasUUID("OwnerUUID")) {
-            return nbt.getUUID("OwnerUUID");
-        }
-        if (nbt.contains("OwnerUUID", Tag.TAG_STRING)) {
-            try {
-                return UUID.fromString(nbt.getString("OwnerUUID"));
-            } catch (IllegalArgumentException ignored) {}
+        for (String field : Config.ownerNbtFields) {
+            if (nbt.hasUUID(field)) {
+                return nbt.getUUID(field);
+            }
+            if (nbt.contains(field, Tag.TAG_STRING)) {
+                try {
+                    return UUID.fromString(nbt.getString(field));
+                } catch (IllegalArgumentException ignored) {}
+            }
         }
         return null;
     }

@@ -1,6 +1,5 @@
 package com.whidte.trulybestfriends.network;
 
-import com.whidte.trulybestfriends.compat.CuriosCompat;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.server.level.ServerLevel;
@@ -27,7 +26,6 @@ public final class PetEntitySnapshot {
             nbt.putFloat("MaxHealth", (float) living.getAttributeValue(Attributes.MAX_HEALTH));
         }
         TeleportPetToPlayerPacket.backupChestInventory(entity, nbt);
-        CuriosCompat.backup(entity, nbt);
         nbt.putString("OwnerUUID", ownerUUID.toString());
         nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(entity.getType()).toString());
         nbt.putString("Dimension", level.dimension().location().toString());
