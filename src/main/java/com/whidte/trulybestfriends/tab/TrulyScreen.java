@@ -387,6 +387,7 @@ public class TrulyScreen extends Screen {
 
 	private void rebuildFilteredPetUuids(UUID preferredSelection, boolean revealSelection) {
 		int previousScrollOffset = scrollOffset;
+		int previousSelectedIndex = selectedPetIndex;
 		petUuids.clear();
 		String activeSpeciesFilter = searchMode ? "" : speciesFilter;
 		String activeSearchQuery = searchMode ? searchQuery : "";
@@ -408,7 +409,8 @@ public class TrulyScreen extends Screen {
 		} else {
 			scrollOffset = previousScrollOffset;
 			snapScrollOffset();
-			if (selectedPetIndex < scrollOffset || selectedPetIndex >= scrollOffset + MAX_VISIBLE) {
+			if (selectedPetIndex != previousSelectedIndex
+					&& (selectedPetIndex < scrollOffset || selectedPetIndex >= scrollOffset + MAX_VISIBLE)) {
 				scrollOffset = (selectedPetIndex / COLUMNS) * COLUMNS;
 				snapScrollOffset();
 			}

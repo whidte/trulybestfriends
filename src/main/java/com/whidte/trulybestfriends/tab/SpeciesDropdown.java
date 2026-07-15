@@ -52,8 +52,12 @@ final class SpeciesDropdown extends AbstractWidget {
     @Override
     protected void renderWidget(@NotNull GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         int textureY = isHeaderHovered(mouseX, mouseY) ? 86 : 66;
-        graphics.blit(WIDGETS_TEXTURE, getX(), getY(), width, height,
-                0, textureY, 200, 20, 256, 256);
+        int middleWidth = width - 10;
+        graphics.blit(WIDGETS_TEXTURE, getX(), getY(), 5, height, 0, textureY, 5, 20, 256, 256);
+        RenderHelper.tileBlitH(graphics, WIDGETS_TEXTURE, getX() + 5, getY(),
+                middleWidth, height, 5, textureY, 190, 20, 256, 256);
+        graphics.blit(WIDGETS_TEXTURE, getX() + 5 + middleWidth, getY(),
+                5, height, 195, textureY, 5, 20, 256, 256);
         renderLabel(graphics, getMessage(), getX() + 3, getY() + 2, width - 13);
         renderArrow(graphics);
 
