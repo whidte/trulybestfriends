@@ -18,8 +18,6 @@ import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.TeleportToPetPacket;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.core.BlockPos;
@@ -54,7 +52,6 @@ import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
-import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
@@ -74,7 +71,6 @@ public class trulybestfriends {
     public static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
 
     private static final String PETS_INDEX_FILE = "pets_index.nbt";
-    private static final String PET_STATES_KEY = "PetStates";
     private static final ResourceLocation TRULY_BEST_FRIENDS_ADVANCEMENT = ResourceLocation.fromNamespaceAndPath("minecraft", "husbandry/tame_an_animal");
     private static final int LOCAL_SYNC_CHUNK_RADIUS = 2;
     private static final Map<String, List<UUID>> indexCache = new ConcurrentHashMap<>();
@@ -129,7 +125,7 @@ public class trulybestfriends {
      */
     public static void forceTrackPet(ServerPlayer owner, Entity pet) {
         if (!(pet.level() instanceof ServerLevel level)) return;
-        INSTANCE.updatePetIndex(pet);
+        INSTANCE.updatePetIndex(pet, owner.getUUID());
         INSTANCE.savePetData(owner.getUUID(), pet, level);
         flushPendingPetSaves(owner.getUUID());
     }
@@ -173,7 +169,7 @@ public class trulybestfriends {
                 return;
             }
             savePetData(owner, animal, (ServerLevel) animal.level());
-            updatePetIndex(animal);
+            updatePetIndex(animal, owner);
             flushPendingPetSaves(owner);
         }
     }
@@ -211,11 +207,6 @@ public class trulybestfriends {
     }
 
     @SubscribeEvent
-    public void onServerStarted(ServerStartedEvent event) {
-        loadPetIndex(event.getServer().overworld());
-    }
-
-    @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         flushPendingPetSaves();
         ReviveProtection.clear(event.getServer());
@@ -228,8 +219,6 @@ public class trulybestfriends {
                 chunk.level().setChunkForced(chunk.chunkX(), chunk.chunkZ(), false));
         forcedChunkReferences.clear();
         chunksForcedByMod.clear();
-        indexCache.clear();
-        trackedPetUUIDs.clear();
     }
 
     @SubscribeEvent
@@ -354,7 +343,9 @@ public class trulybestfriends {
                 ownerUUID,
                 pet.getUUID(),
                 worldPath,
-                nbt));
+                nbt,
+                resolvePlayerName(level, ownerUUID),
+                BuiltInRegistries.ENTITY_TYPE.getKey(pet.getType()).toString()));
 
         if (hasPetFileInOtherOwnerDir(PetIOUtil.getModDir(level), ownerUUID, pet.getUUID())) {
             flushPendingPetSaves(ownerUUID);
@@ -391,15 +382,21 @@ public class trulybestfriends {
             Files.createDirectories(ownerDir);
 
             File nbtFile = ownerDir.resolve(pending.petUUID() + ".nbt").toFile();
+            boolean ownerChanged = false;
             if (!nbtFile.exists()) {
                 Path oldOwnerFile = findPetFileInOtherOwnerDir(modDir, pending.ownerUUID(), pending.petUUID());
                 if (oldOwnerFile != null) {
                     Files.move(oldOwnerFile, nbtFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    ownerChanged = true;
                     LOGGER.debug("Moved pet NBT {} to new owner {}", pending.petUUID(), pending.ownerUUID());
                 }
             }
 
             PetIOUtil.writePetSnapshotPreservingRecall(nbtFile, pending.nbt());
+            if (ownerChanged) {
+                boolean recalled = NbtFileIO.readCompressed(nbtFile).getBoolean("Recalled");
+                updatePetIndexEntry(modDir, pending.ownerName(), pending.typeKey(), pending.petUUID(), recalled);
+            }
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to save pet data for {}: {}", pending.petUUID(), e.getMessage());
@@ -407,7 +404,8 @@ public class trulybestfriends {
         }
     }
 
-    private record PendingPetSave(UUID ownerUUID, UUID petUUID, Path worldPath, CompoundTag nbt) {}
+    private record PendingPetSave(UUID ownerUUID, UUID petUUID, Path worldPath, CompoundTag nbt,
+                                  String ownerName, String typeKey) {}
 
     private static final class PendingRemoval {
         private final UUID ownerUUID;
@@ -604,38 +602,46 @@ public class trulybestfriends {
         return ownerUUID != null && ownerUUID.equals(getCompatOwnerUUID(entity));
     }
 
+    private static String resolvePlayerName(ServerLevel level, UUID ownerUUID) {
+        ServerPlayer onlineOwner = level.getServer().getPlayerList().getPlayer(ownerUUID);
+        if (onlineOwner != null) return onlineOwner.getGameProfile().getName();
+        return level.getServer().getProfileCache().get(ownerUUID)
+                .map(profile -> profile.getName())
+                .orElse(ownerUUID.toString());
+    }
+
     private static void removePetFromIndex(Path modDir, UUID petUUID) throws IOException {
         File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
         if (!indexFile.exists()) return;
 
         CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
-        String uuidStr = petUUID.toString();
+        if (removePetIndexEntry(indexTag, petUUID)) {
+            NbtFileIO.writeCompressed(indexTag, indexFile);
+        }
+    }
+
+    private static boolean removePetIndexEntry(CompoundTag indexTag, UUID petUUID) {
+        String uuid = petUUID.toString();
         boolean changed = false;
-        for (String typeKey : new ArrayList<>(indexTag.getAllKeys())) {
-            if (PET_STATES_KEY.equals(typeKey)) continue;
-            ListTag uuidList = indexTag.getList(typeKey, Tag.TAG_STRING);
-            for (int i = uuidList.size() - 1; i >= 0; i--) {
-                if (uuidStr.equals(uuidList.getString(i))) {
-                    uuidList.remove(i);
+        for (String playerName : new ArrayList<>(indexTag.getAllKeys())) {
+            if (!indexTag.contains(playerName, Tag.TAG_COMPOUND)) continue;
+            CompoundTag playerTag = indexTag.getCompound(playerName);
+            for (String typeKey : new ArrayList<>(playerTag.getAllKeys())) {
+                if (!playerTag.contains(typeKey, Tag.TAG_COMPOUND)) continue;
+                CompoundTag typeTag = playerTag.getCompound(typeKey);
+                if (typeTag.contains(uuid, Tag.TAG_COMPOUND)) {
+                    typeTag.remove(uuid);
                     changed = true;
+                    List<UUID> cached = indexCache.get(typeKey);
+                    if (cached != null) cached.remove(petUUID);
                 }
+                if (typeTag.isEmpty()) playerTag.remove(typeKey);
+                else playerTag.put(typeKey, typeTag);
             }
-            if (uuidList.isEmpty()) {
-                indexTag.remove(typeKey);
-                indexCache.remove(typeKey);
-            } else {
-                indexTag.put(typeKey, uuidList);
-                List<UUID> cachedList = indexCache.get(typeKey);
-                if (cachedList != null) cachedList.remove(petUUID);
-            }
+            if (playerTag.isEmpty()) indexTag.remove(playerName);
+            else indexTag.put(playerName, playerTag);
         }
-        CompoundTag petStates = indexTag.getCompound(PET_STATES_KEY);
-        if (petStates.contains(uuidStr)) {
-            petStates.remove(uuidStr);
-            indexTag.put(PET_STATES_KEY, petStates);
-            changed = true;
-        }
-        if (changed) NbtFileIO.writeCompressed(indexTag, indexFile);
+        return changed;
     }
 
     public static void updatePetRecalledState(ServerLevel level, UUID petUUID, boolean recalled) {
@@ -644,24 +650,60 @@ public class trulybestfriends {
 
         try {
             CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
-            if (putPetState(indexTag, petUUID, recalled)) {
-                NbtFileIO.writeCompressed(indexTag, indexFile);
+            String uuid = petUUID.toString();
+            for (String playerName : indexTag.getAllKeys()) {
+                if (!indexTag.contains(playerName, Tag.TAG_COMPOUND)) continue;
+                CompoundTag playerTag = indexTag.getCompound(playerName);
+                for (String typeKey : playerTag.getAllKeys()) {
+                    if (!playerTag.contains(typeKey, Tag.TAG_COMPOUND)) continue;
+                    CompoundTag typeTag = playerTag.getCompound(typeKey);
+                    if (!typeTag.contains(uuid, Tag.TAG_COMPOUND)) continue;
+                    CompoundTag state = typeTag.getCompound(uuid);
+                    if (state.contains("Recalled") && state.getBoolean("Recalled") == recalled) return;
+                    state.putBoolean("Recalled", recalled);
+                    typeTag.put(uuid, state);
+                    playerTag.put(typeKey, typeTag);
+                    indexTag.put(playerName, playerTag);
+                    NbtFileIO.writeCompressed(indexTag, indexFile);
+                    return;
+                }
             }
         } catch (IOException e) {
             LOGGER.error("Failed to update recalled state in pet index for {}: {}", petUUID, e.getMessage());
         }
     }
 
-    private static boolean putPetState(CompoundTag indexTag, UUID petUUID, boolean recalled) {
-        CompoundTag petStates = indexTag.getCompound(PET_STATES_KEY);
+    private static void updatePetIndexEntry(Path modDir, String playerName, String typeKey,
+                                            UUID petUUID, boolean recalled) throws IOException {
+        File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
+        CompoundTag indexTag = indexFile.exists() ? NbtFileIO.readCompressed(indexFile) : new CompoundTag();
+        if (putPetIndexEntry(indexTag, playerName, typeKey, petUUID, recalled)) {
+            NbtFileIO.writeCompressed(indexTag, indexFile);
+        }
+    }
+
+    private static boolean putPetIndexEntry(CompoundTag indexTag, String playerName, String typeKey,
+                                            UUID petUUID, boolean recalled) {
         String uuid = petUUID.toString();
-        CompoundTag oldState = petStates.getCompound(uuid);
-        if (oldState.contains("Recalled") && oldState.getBoolean("Recalled") == recalled) return false;
+        CompoundTag playerTag = indexTag.getCompound(playerName);
+        CompoundTag typeTag = playerTag.getCompound(typeKey);
+        boolean alreadyInPlace = typeTag.contains(uuid, Tag.TAG_COMPOUND);
+        if (alreadyInPlace) {
+            CompoundTag state = typeTag.getCompound(uuid);
+            if (state.contains("Recalled") && state.getBoolean("Recalled") == recalled) return false;
+        } else {
+            removePetIndexEntry(indexTag, petUUID);
+            playerTag = indexTag.getCompound(playerName);
+            typeTag = playerTag.getCompound(typeKey);
+        }
 
         CompoundTag state = new CompoundTag();
         state.putBoolean("Recalled", recalled);
-        petStates.put(uuid, state);
-        indexTag.put(PET_STATES_KEY, petStates);
+        typeTag.put(uuid, state);
+        playerTag.put(typeKey, typeTag);
+        indexTag.put(playerName, playerTag);
+        List<UUID> cached = indexCache.computeIfAbsent(typeKey, ignored -> new ArrayList<>());
+        if (!cached.contains(petUUID)) cached.add(petUUID);
         return true;
     }
 
@@ -681,39 +723,13 @@ public class trulybestfriends {
         }
     }
 
-    private void updatePetIndex(Entity pet) {
+    private void updatePetIndex(Entity pet, UUID ownerUUID) {
         try {
             ServerLevel level = (ServerLevel) pet.level();
             Path modDir = PetIOUtil.getModDir(level);
-            File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
-
-            CompoundTag indexTag = new CompoundTag();
-            if (indexFile.exists()) {
-                indexTag = NbtFileIO.readCompressed(indexFile);
-            }
-
             String typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(pet.getType()).toString();
             UUID petUUID = pet.getUUID();
-            String uuidStr = petUUID.toString();
-
-            ListTag uuidList = indexTag.getList(typeKey, Tag.TAG_STRING);
-            boolean alreadyExists = false;
-            for (Tag tag : uuidList) {
-                if (tag instanceof StringTag st && uuidStr.equals(st.getAsString())) {
-                    alreadyExists = true;
-                    break;
-                }
-            }
-            if (!alreadyExists) {
-                uuidList.add(StringTag.valueOf(uuidStr));
-                indexTag.put(typeKey, uuidList);
-                indexCache.computeIfAbsent(typeKey, k -> new ArrayList<>()).add(petUUID);
-            }
-            if (!alreadyExists || !indexTag.getCompound(PET_STATES_KEY).contains(uuidStr)) {
-                putPetState(indexTag, petUUID, false);
-                NbtFileIO.writeCompressed(indexTag, indexFile);
-            }
-
+            updatePetIndexEntry(modDir, resolvePlayerName(level, ownerUUID), typeKey, petUUID, false);
             trackedPetUUIDs.add(petUUID);
         } catch (IOException e) {
             LOGGER.error("Failed to update pet index for {}: {}", pet.getUUID(), e.getMessage());
@@ -733,7 +749,7 @@ public class trulybestfriends {
         if (entityType != null && Config.isAutoRegisterBlacklisted(entityType.toString())) return false;
 
         if (countOwnerPets(level, ownerUUID) >= Config.maxPets) return false;
-        updatePetIndex(entity);
+        updatePetIndex(entity, ownerUUID);
         return true;
     }
 
@@ -833,71 +849,38 @@ public class trulybestfriends {
     }
 
     public static Map<String, List<UUID>> loadPetIndex(ServerLevel level) {
+        if (!indexCache.isEmpty()) return indexCache;
+
         try {
             Path modDir = PetIOUtil.getModDir(level);
             File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
 
             if (indexFile.exists()) {
                 CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
-                indexCache.clear();
-                trackedPetUUIDs.clear();
-                for (String key : indexTag.getAllKeys()) {
-                    if (PET_STATES_KEY.equals(key)) continue;
-                    ListTag uuidList = indexTag.getList(key, Tag.TAG_STRING);
-                    List<UUID> uuids = new ArrayList<>();
-                    for (Tag rawTag : uuidList) {
-                        if (rawTag instanceof StringTag stringTag) {
+                for (String playerName : indexTag.getAllKeys()) {
+                    if (!indexTag.contains(playerName, Tag.TAG_COMPOUND)) continue;
+                    CompoundTag playerTag = indexTag.getCompound(playerName);
+                    for (String typeKey : playerTag.getAllKeys()) {
+                        if (!playerTag.contains(typeKey, Tag.TAG_COMPOUND)) continue;
+                        CompoundTag typeTag = playerTag.getCompound(typeKey);
+                        List<UUID> uuids = indexCache.computeIfAbsent(typeKey, ignored -> new ArrayList<>());
+                        for (String uuidString : typeTag.getAllKeys()) {
+                            if (!typeTag.contains(uuidString, Tag.TAG_COMPOUND)) continue;
                             try {
-                                UUID uuid = UUID.fromString(stringTag.getAsString());
-                                uuids.add(uuid);
+                                UUID uuid = UUID.fromString(uuidString);
+                                if (!uuids.contains(uuid)) uuids.add(uuid);
                                 trackedPetUUIDs.add(uuid);
                             } catch (IllegalArgumentException e) {
-                                LOGGER.warn("Invalid UUID in pet index: {}", stringTag.getAsString());
+                                LOGGER.warn("Invalid UUID in pet index: {}", uuidString);
                             }
                         }
                     }
-                    indexCache.put(key, uuids);
                 }
-                refreshPetStatesFromDisk(indexTag, modDir);
-                NbtFileIO.writeCompressed(indexTag, indexFile);
             }
         } catch (IOException e) {
             LOGGER.error("Failed to load pet index: {}", e.getMessage());
         }
         return indexCache;
-    }
-
-    private static void refreshPetStatesFromDisk(CompoundTag indexTag, Path modDir) throws IOException {
-        Map<UUID, Boolean> recalledByUuid = new HashMap<>();
-        if (Files.exists(modDir)) {
-            try (var ownerDirs = Files.list(modDir)) {
-                for (Path ownerDir : ownerDirs.filter(Files::isDirectory).toList()) {
-                    try (var petFiles = Files.list(ownerDir)) {
-                        for (Path petFile : petFiles.filter(path -> path.getFileName().toString().endsWith(".nbt")).toList()) {
-                            String fileName = petFile.getFileName().toString();
-                            try {
-                                UUID petUUID = UUID.fromString(fileName.substring(0, fileName.length() - 4));
-                                if (trackedPetUUIDs.contains(petUUID)) {
-                                    recalledByUuid.put(petUUID,
-                                            NbtFileIO.readCompressed(petFile.toFile()).getBoolean("Recalled"));
-                                }
-                            } catch (IllegalArgumentException | IOException e) {
-                                LOGGER.warn("Failed to refresh pet index state from {}: {}", petFile, e.getMessage());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        CompoundTag oldStates = indexTag.getCompound(PET_STATES_KEY);
-        indexTag.remove(PET_STATES_KEY);
-        for (UUID petUUID : trackedPetUUIDs) {
-            String uuid = petUUID.toString();
-            boolean recalled = recalledByUuid.getOrDefault(petUUID,
-                    oldStates.getCompound(uuid).getBoolean("Recalled"));
-            putPetState(indexTag, petUUID, recalled);
-        }
     }
 
     private void syncAllPets(MinecraftServer server) {
@@ -1028,30 +1011,15 @@ public class trulybestfriends {
             if (!indexFile.exists()) return;
 
             CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
+            UUID ownerUUID = getCompatOwnerUUID(newEntity);
+            if (ownerUUID == null) return;
             String typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(newEntity.getType()).toString();
-            String oldStr = oldUuid.toString();
-            String newStr = newEntity.getUUID().toString();
-
-            ListTag uuidList = indexTag.getList(typeKey, Tag.TAG_STRING);
-            for (int i = 0; i < uuidList.size(); i++) {
-                if (uuidList.getString(i).equals(oldStr)) {
-                    uuidList.set(i, StringTag.valueOf(newStr));
-                    indexTag.put(typeKey, uuidList);
-                    CompoundTag petStates = indexTag.getCompound(PET_STATES_KEY);
-                    petStates.remove(oldStr);
-                    indexTag.put(PET_STATES_KEY, petStates);
-                    putPetState(indexTag, newEntity.getUUID(), false);
-                    NbtFileIO.writeCompressed(indexTag, indexFile);
-
-                    // Update cache
-                    List<UUID> cachedList = indexCache.get(typeKey);
-                    if (cachedList != null) {
-                        int idx = cachedList.indexOf(oldUuid);
-                        if (idx >= 0) cachedList.set(idx, newEntity.getUUID());
-                    }
-                    return;
-                }
+            boolean changed = removePetIndexEntry(indexTag, oldUuid);
+            if (putPetIndexEntry(indexTag, resolvePlayerName(level, ownerUUID), typeKey,
+                    newEntity.getUUID(), false)) {
+                changed = true;
             }
+            if (changed) NbtFileIO.writeCompressed(indexTag, indexFile);
         } catch (IOException e) {
             LOGGER.error("Failed to replace pet UUID in index: {}", e.getMessage());
         }
