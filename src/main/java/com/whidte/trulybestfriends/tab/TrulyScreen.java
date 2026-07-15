@@ -25,6 +25,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.registries.BuiltInRegistries;
 import org.joml.Quaternionf;
@@ -505,7 +506,8 @@ public class TrulyScreen extends Screen {
 				for (String key : nbt.getAllKeys()) {
 					merged.put(key, nbt.get(key));
 				}
-				if (!merged.equals(oldNbt)) {
+				boolean previewChanged = !merged.equals(oldNbt);
+				if (previewChanged) {
 					invalidatePreviewEntity(uuid);
 				}
 				petNbtCache.put(uuid, merged);
@@ -516,6 +518,9 @@ public class TrulyScreen extends Screen {
 				finishPetListUpdate(
 						!oldSpecies.equals(merged.getString("EntityType")),
 						!java.util.Objects.equals(previousSelection, getSelectedUuid()));
+				if (previewChanged && uuid.equals(getSelectedUuid())) {
+					refreshScaleForCurrentPetPreservingZoom();
+				}
 			}
 			case com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_DELETE -> {
 				UUID uuid = packet.getPetUuid();
@@ -582,6 +587,23 @@ public class TrulyScreen extends Screen {
 		this.currentScale = this.referenceScale;
 	}
 
+	private void refreshScaleForCurrentPetPreservingZoom() {
+		UUID uuid = getSelectedUuid();
+		if (uuid == null) return;
+		LivingEntity entity = getPreviewEntity(uuid);
+		if (entity == null) return;
+
+		float newReferenceScale = computePreviewScale(entity, BASE_SCALE);
+		float zoomRatio = referenceScale > 0.0f && Float.isFinite(currentScale)
+				? currentScale / referenceScale
+				: 1.0f;
+		this.referenceScale = newReferenceScale;
+		this.currentScale = Mth.clamp(
+				newReferenceScale * zoomRatio,
+				newReferenceScale * 0.5f,
+				newReferenceScale * 2.0f);
+	}
+
 	/**
 	 * Computes the scale parameter for
 	 * {@link InventoryScreen#renderEntityInInventory}, following the approach
@@ -594,8 +616,10 @@ public class TrulyScreen extends Screen {
 	 * inside the preview area, including multipart entities whose bounding
 	 * box alone is far smaller than their actual model.</p>
 	 *
-	 * <p>For ordinary entities ({@code getScale() == 1.0}) we fall back to the
-	 * classic bounding-box heuristic so existing pets render unchanged.</p>
+	 * <p>For ordinary entities ({@code getScale() == 1.0}) we use their standing
+	 * dimensions with the classic bounding-box heuristic. Using the current
+	 * bounding box would make sleeping or crouching pets appear much larger in
+	 * the preview because those poses temporarily reduce entity height.</p>
 	 *
 	 * <p>No fixed numeric clamp is applied here — the caller stores the result
 	 * as {@code referenceScale} and the scroll-zoom handler clamps
@@ -612,8 +636,10 @@ public class TrulyScreen extends Screen {
 			// Scaled entity (IaF dragon, ...): use the IaF formula.
 			return baseSize / scale;
 		}
-		// Ordinary entity: keep the bounding-box heuristic.
-		float maxDim = Math.max(entity.getBbWidth(), entity.getBbHeight());
+		// Ordinary entity: use stable standing dimensions rather than a
+		// pose-dependent current bounding box.
+		var standingDimensions = entity.getDimensions(Pose.STANDING);
+		float maxDim = Math.max(standingDimensions.width(), standingDimensions.height());
 		if (maxDim <= 0) return baseSize;
 		float computed = baseSize * (HORSE_MAX_DIM / maxDim);
 		// Multipart entities whose getScale() == 1 (e.g. the Ender Dragon)
