@@ -278,7 +278,6 @@ public class RevivePetPacket implements CustomPacketPayload {
         // 5. 写回磁盘 NBT，保持盘/世界一致
         try {
             TeleportPetToPlayerPacket.restoreChestInventory(corpse, originalNbt);
-            com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(corpse, originalNbt);
             CompoundTag saved = PetEntitySnapshot.capture(corpse, player.getUUID(), playerLevel);
             if (originalNbt.contains("Priority")) {
                 saved.putInt("Priority", Math.max(1, Math.min(6, originalNbt.getInt("Priority"))));

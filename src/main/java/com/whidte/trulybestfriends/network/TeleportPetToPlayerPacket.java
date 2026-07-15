@@ -245,7 +245,6 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                                                ServerPlayer player, ServerLevel level) {
         // Capabilities may only be exposed after the entity joins the world.
         restoreChestInventory(entity, nbt);
-        com.whidte.trulybestfriends.compat.CuriosCompat.restoreAfterSpawn(entity, nbt);
         if (!trulybestfriends.persistRestoredPet(player.getUUID(), entity, level)) {
             trulybestfriends.LOGGER.error("Failed to persist restored container snapshot for {}", entity.getUUID());
         }
