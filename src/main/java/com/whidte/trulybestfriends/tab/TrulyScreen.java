@@ -721,7 +721,6 @@ public class TrulyScreen extends Screen {
 		// Draw the panel first, then layer custom widgets and overlays on top.
 		this.renderBackground(g, mouseX, mouseY, partialTick);
 		g.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
-		renderListBackground(g);
 		PetEntry selectedEntry = null;
 		SpeciesDropdown speciesDropdown = null;
 		for (GuiEventListener listener : this.children()) {
@@ -778,16 +777,6 @@ public class TrulyScreen extends Screen {
 				// Optional L2Tabs versions do not all expose a tooltip hook.
 			}
 		}
-	}
-
-	private void renderListBackground(GuiGraphics g) {
-		int x = this.leftPos + LIST_PANEL_OFFSET_X;
-		int y = this.topPos + LIST_PANEL_OFFSET_Y;
-		int right = this.leftPos + this.imageWidth - SCROLLBAR_RIGHT_OFFSET;
-		g.fill(x, y, right, y + LIST_PANEL_HEIGHT, 0x20000000);
-
-		int controlsY = this.topPos + LIST_CONTROLS_OFFSET_Y;
-		g.fill(x, controlsY, x + LIST_PANEL_WIDTH, controlsY + LIST_CONTROL_HEIGHT, 0x20000000);
 	}
 
 	private void renderScrollBar(GuiGraphics g) {

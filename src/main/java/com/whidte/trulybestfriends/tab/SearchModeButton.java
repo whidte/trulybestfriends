@@ -30,7 +30,7 @@ final class SearchModeButton extends AbstractButton {
 
     @Override
     protected void renderWidget(@NotNull GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        graphics.blitSprite(SEARCH_ICON, getX(), getY(), getWidth(), getHeight());
+        graphics.blitSprite(SEARCH_ICON, getX(), getY() + 1, getWidth(), getHeight());
     }
 
     @Override

@@ -86,6 +86,8 @@ final class TrulyConstants {
 	// --- Scale / Rotation ---
 	/** 普通宠物模型在界面中渲染时使用的基础缩放值。 */
 	static final float BASE_SCALE = 17f;
+	/** 列表条目中的宠物预览相对于基础缩放值的比例。 */
+	static final float LIST_ENTRY_SCALE_RATIO = 25f / 50f;
 	/** 宠物模型默认的水平旋转输入值，用于确定初始朝向。 */
 	static final float DEFAULT_ROT_X = -37f;
 	/** 宠物模型默认的垂直旋转输入值，用于确定初始俯仰角。 */

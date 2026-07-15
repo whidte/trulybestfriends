@@ -59,7 +59,7 @@ class PetEntry extends AbstractWidget {
 
 		LivingEntity pet = screen.getPreviewEntity(uuid);
 		if (pet != null) {
-			float miniScale = TrulyScreen.computePreviewScale(pet, BASE_SCALE * (28f / 50f));
+			float miniScale = TrulyScreen.computePreviewScale(pet, BASE_SCALE * LIST_ENTRY_SCALE_RATIO);
 			int miniX = getX() + width / 2;
 			int miniY = getY() + (textY - getY()) / 2 + 7;
 			boolean multipart = pet.getScale() > 1.0001f || (pet.getParts() != null && pet.getParts().length > 0);
