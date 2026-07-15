@@ -275,10 +275,10 @@ public class TrulyScreen extends Screen {
 	private void addListControls() {
 		searchBox = new EditBox(
 				font(),
-				this.leftPos + LIST_MODE_CONTROL_OFFSET_X,
-				this.topPos + LIST_CONTROLS_OFFSET_Y,
-				LIST_MODE_CONTROL_WIDTH,
-				LIST_CONTROL_HEIGHT,
+				this.leftPos + LIST_MODE_CONTROL_OFFSET_X + 1,
+				this.topPos + LIST_CONTROLS_OFFSET_Y + 1,
+				LIST_MODE_CONTROL_WIDTH - 2,
+				LIST_CONTROL_HEIGHT - 2,
 				Component.translatable("trulybestfriends.search.name"));
 		searchBox.setHint(Component.translatable("trulybestfriends.search.hint"));
 		searchBox.setMaxLength(64);
@@ -719,7 +719,6 @@ public class TrulyScreen extends Screen {
 		// Draw the panel first, then layer custom widgets and overlays on top.
 		this.renderBackground(g);
 		g.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
-		renderListBackground(g);
 		PetEntry selectedEntry = null;
 		SpeciesDropdown speciesDropdown = null;
 		for (GuiEventListener listener : this.children()) {
@@ -770,16 +769,6 @@ public class TrulyScreen extends Screen {
 		if (tabManager != null) {
 			tabManager.onToolTipRender(g, mouseX, mouseY);
 		}
-	}
-
-	private void renderListBackground(GuiGraphics g) {
-		int x = this.leftPos + LIST_PANEL_OFFSET_X;
-		int y = this.topPos + LIST_PANEL_OFFSET_Y;
-		int right = this.leftPos + this.imageWidth - SCROLLBAR_RIGHT_OFFSET;
-		g.fill(x, y, right, y + LIST_PANEL_HEIGHT, 0x20000000);
-
-		int controlsY = this.topPos + LIST_CONTROLS_OFFSET_Y;
-		g.fill(x, controlsY, x + LIST_PANEL_WIDTH, controlsY + LIST_CONTROL_HEIGHT, 0x20000000);
 	}
 
 	private void renderScrollBar(GuiGraphics g) {
