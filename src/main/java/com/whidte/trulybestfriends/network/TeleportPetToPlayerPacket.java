@@ -17,6 +17,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.animal.horse.AbstractChestedHorse;
 import net.minecraft.world.entity.animal.horse.AbstractHorse;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
@@ -178,6 +179,8 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     }
 
     private static void teleportEntityToPlayer(LivingEntity entity, ServerPlayer player, ServerLevel level) {
+        standPetUp(entity);
+
         // If the pet is a Mob, within 16 blocks, and can path to the player —
         // make it walk to a safe point near the player instead of teleporting.
         if (entity instanceof Mob mob && mob.isAlive()) {
@@ -217,9 +220,11 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     }
 
     static boolean summonFromDisk(CompoundTag nbt, UUID petUuid, ServerPlayer player, ServerLevel level) {
-        Entity entity = PetEntitySnapshot.restore(nbt, petUuid, level);
+        CompoundTag summonNbt = prepareSummonSnapshot(nbt);
+        Entity entity = PetEntitySnapshot.restore(summonNbt, petUuid, level);
         if (entity == null) return false;
-        restoreChestInventory(entity, nbt);
+        restoreChestInventory(entity, summonNbt);
+        standPetUp(entity);
 
         float bbWidth = entity instanceof LivingEntity living ? living.getBbWidth() : 0.6f;
         int radius = Math.max(1, (int) Math.ceil(bbWidth));
@@ -227,7 +232,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         if (safePosition != null) {
             entity.setPos(safePosition.x, safePosition.y, safePosition.z);
             if (!level.tryAddFreshEntityWithPassengers(entity)) return false;
-            finishRestoredEntity(entity, nbt, player, level);
+            finishRestoredEntity(entity, summonNbt, player, level);
             if (entity instanceof LivingEntity living) {
                 living.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
             }
@@ -235,10 +240,23 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         }
         entity.setPos(player.getX(), player.getY(), player.getZ());
         if (level.tryAddFreshEntityWithPassengers(entity)) {
-            finishRestoredEntity(entity, nbt, player, level);
+            finishRestoredEntity(entity, summonNbt, player, level);
             return true;
         }
         return false;
+    }
+
+    static CompoundTag prepareSummonSnapshot(CompoundTag nbt) {
+        CompoundTag snapshot = nbt.copy();
+        if (snapshot.getBoolean("Sitting")) snapshot.putBoolean("Sitting", false);
+        return snapshot;
+    }
+
+    private static void standPetUp(Entity entity) {
+        if (entity instanceof TamableAnimal tamable) {
+            tamable.setOrderedToSit(false);
+            tamable.setInSittingPose(false);
+        }
     }
 
     private static void finishRestoredEntity(Entity entity, CompoundTag nbt,
