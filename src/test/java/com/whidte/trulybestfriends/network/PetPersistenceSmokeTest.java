@@ -17,7 +17,20 @@ public final class PetPersistenceSmokeTest {
         testAtomicNbtReplacement();
         testSnapshotFieldPreservation();
         testTotemEffectNbtKey();
-        System.out.println("PetPersistenceSmokeTest: 6/6 passed");
+        testSummonClearsSittingState();
+        System.out.println("PetPersistenceSmokeTest: 7/7 passed");
+    }
+
+    private static void testSummonClearsSittingState() {
+        CompoundTag original = new CompoundTag();
+        original.putBoolean("Sitting", true);
+        original.putString("Marker", "preserved");
+
+        CompoundTag prepared = TeleportPetToPlayerPacket.prepareSummonSnapshot(original);
+
+        require(!prepared.getBoolean("Sitting"), "summoned pet remained ordered to sit");
+        require(original.getBoolean("Sitting"), "summon preparation mutated the rollback snapshot");
+        require("preserved".equals(prepared.getString("Marker")), "summon preparation lost unrelated NBT");
     }
 
     private static void testLegacyHorseSlots() {
