@@ -26,7 +26,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.level.ChunkPos;
@@ -75,7 +74,6 @@ public class trulybestfriends {
     private static final Map<ForcedChunk, Integer> forcedChunkReferences = new ConcurrentHashMap<>();
     private static final Set<ForcedChunk> chunksForcedByMod = ConcurrentHashMap.newKeySet();
     private static final Set<LocalSyncCandidate> localSyncCandidates = ConcurrentHashMap.newKeySet();
-    private static final Map<UUID, String> shoulderPetTypes = new ConcurrentHashMap<>(); // UUID -> entity type key
     private static final Map<UUID, PendingPetSave> pendingPetSaves = new ConcurrentHashMap<>();
     private static final Set<UUID> persistedDeathSnapshots = ConcurrentHashMap.newKeySet();
     private static final long PENDING_REMOVAL_TIMEOUT_TICKS = 100L;
@@ -223,7 +221,6 @@ public class trulybestfriends {
             if (localSyncTickCounter >= Config.localSyncIntervalTicks) {
                 localSyncTickCounter = 0;
                 collectLocalSyncCandidates(event.getServer());
-                trackShoulderPets(event.getServer());
             }
             if (Config.syncIntervalTicks > 0 && syncTickCounter >= Config.syncIntervalTicks) {
                 syncTickCounter = 0;
@@ -502,7 +499,6 @@ public class trulybestfriends {
         pendingPetSaves.remove(petUUID);
         removePendingRemovals(ownerUUID, petUUID);
         trackedPetUUIDs.remove(petUUID);
-        shoulderPetTypes.remove(petUUID);
         petDeathTimes.remove(petUUID);
         persistedDeathSnapshots.remove(petUUID);
         try {
@@ -514,6 +510,7 @@ public class trulybestfriends {
     }
 
     public static boolean deletePetData(ServerPlayer player, UUID petUUID) {
+        if (PetIOUtil.getShoulderEntity(player, petUUID) != null) return false;
         try {
             flushPendingPetSaves(player.getUUID());
             Path modDir = PetIOUtil.getModDir(player);
@@ -937,78 +934,6 @@ public class trulybestfriends {
     private boolean hasTrulyBestFriendsAdvancement(MinecraftServer server, ServerPlayer player) {
         Advancement advancement = server.getAdvancements().getAdvancement(TRULY_BEST_FRIENDS_ADVANCEMENT);
         return advancement != null && player.getAdvancements().getOrStartProgress(advancement).isDone();
-    }
-
-    private void trackShoulderPets(MinecraftServer server) {
-        Map<UUID, String> currentShoulder = new java.util.HashMap<>();
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            for (var shoulder : new CompoundTag[]{player.getShoulderEntityLeft(), player.getShoulderEntityRight()}) {
-                if (shoulder.contains("UUID") && !shoulder.isEmpty()) {
-                    UUID uuid = shoulder.getUUID("UUID");
-                    String typeKey = shoulder.getString("id");
-                    currentShoulder.put(uuid, typeKey);
-                }
-            }
-        }
-
-        // Detect newly dismounted shoulder pets
-        for (var entry : shoulderPetTypes.entrySet()) {
-            UUID oldUuid = entry.getKey();
-            if (!currentShoulder.containsKey(oldUuid)) {
-                // Shoulder pet dismounted - find the new entity
-                String typeKey = entry.getValue();
-                for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                    Entity found = findNearbyPetOfType(player, typeKey);
-                    if (found != null && !trackedPetUUIDs.contains(found.getUUID())) {
-                        replacePetUuidInIndex((ServerLevel) player.level(), oldUuid, found);
-                        trackedPetUUIDs.remove(oldUuid);
-                        trackedPetUUIDs.add(found.getUUID());
-                        LOGGER.debug("Shoulder pet dismounted: {} -> {}", oldUuid, found.getUUID());
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Update current shoulder state
-        shoulderPetTypes.clear();
-        shoulderPetTypes.putAll(currentShoulder);
-    }
-
-    private Entity findNearbyPetOfType(ServerPlayer player, String typeKey) {
-        ResourceLocation rl = ResourceLocation.tryParse(typeKey);
-        if (rl == null) return null;
-        EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(rl);
-        if (type == null) return null;
-
-        for (Entity entity : player.level().getEntities(player, player.getBoundingBox().inflate(5))) {
-            if (entity.getType() == type
-                    && player.getUUID().equals(getCompatOwnerUUID(entity))) {
-                return entity;
-            }
-        }
-        return null;
-    }
-
-    private void replacePetUuidInIndex(ServerLevel level, UUID oldUuid, Entity newEntity) {
-        try {
-            Path modDir = PetIOUtil.getModDir(level);
-            File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
-            if (!indexFile.exists()) return;
-
-            CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
-            UUID ownerUUID = getCompatOwnerUUID(newEntity);
-            if (ownerUUID == null) return;
-            String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(newEntity.getType()).toString();
-            boolean changed = removePetIndexEntry(indexTag, oldUuid);
-            if (putPetIndexEntry(indexTag, resolvePlayerName(level, ownerUUID), typeKey,
-                    newEntity.getUUID(), false)) {
-                changed = true;
-            }
-            if (changed) NbtFileIO.writeCompressed(indexTag, indexFile);
-        } catch (IOException e) {
-            LOGGER.error("Failed to replace pet UUID in index: {}", e.getMessage());
-        }
     }
 
     private void loadPlayerPetsData(ServerPlayer player) {

@@ -159,10 +159,12 @@ public final class PetIOUtil {
 
     /** Return the shoulder NBT matching petUuid, or null if not on either shoulder. */
     public static CompoundTag getShoulderEntity(ServerPlayer player, UUID petUuid) {
-        CompoundTag left = player.getShoulderEntityLeft();
-        if (left.contains("UUID") && left.getUUID("UUID").equals(petUuid)) return left;
-        CompoundTag right = player.getShoulderEntityRight();
-        if (right.contains("UUID") && right.getUUID("UUID").equals(petUuid)) return right;
+        return findShoulderEntity(player.getShoulderEntityLeft(), player.getShoulderEntityRight(), petUuid);
+    }
+
+    static CompoundTag findShoulderEntity(CompoundTag left, CompoundTag right, UUID petUuid) {
+        if (left.hasUUID("UUID") && left.getUUID("UUID").equals(petUuid)) return left;
+        if (right.hasUUID("UUID") && right.getUUID("UUID").equals(petUuid)) return right;
         return null;
     }
 

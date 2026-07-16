@@ -150,6 +150,17 @@ public class RequestPetDataPacket {
     }
 
     private static CompoundTag getLoadedPetNbt(ServerPlayer player, UUID petUuid, CompoundTag storedNbt) {
+        CompoundTag shoulderNbt = PetIOUtil.getShoulderEntity(player, petUuid);
+        if (shoulderNbt != null) {
+            CompoundTag nbt = toClientNbt(shoulderNbt);
+            preserveStoredUiFields(storedNbt, nbt);
+            nbt.putString("OwnerUUID", player.getUUID().toString());
+            String typeKey = shoulderNbt.getString("id");
+            if (!typeKey.isEmpty()) nbt.putString("EntityType", typeKey);
+            nbt.putString("Dimension", player.serverLevel().dimension().location().toString());
+            return nbt;
+        }
+
         ServerLevel storedLevel = getStoredLevel(player, storedNbt);
         CompoundTag nbt = storedLevel != null ? getLoadedPetNbtFromLevel(player, petUuid, storedLevel, storedNbt) : null;
         if (nbt != null) return nbt;
@@ -175,6 +186,7 @@ public class RequestPetDataPacket {
      *  in any server level.  Used to set the "Lost" flag in full-list snapshots
      *  without the overhead of building the full GUI NBT. */
     private static boolean isPetLoaded(ServerPlayer player, UUID petUuid) {
+        if (PetIOUtil.getShoulderEntity(player, petUuid) != null) return true;
         for (ServerLevel level : player.server.getAllLevels()) {
             Entity entity = level.getEntity(petUuid);
             if (entity instanceof OwnableEntity ownable

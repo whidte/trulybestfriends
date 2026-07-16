@@ -16,7 +16,26 @@ public final class PetGuiNbtSmokeTest {
         testFullNbtPassengerFiltering();
         testFullListBatching();
         testUnchangedUpdateDeduplication();
+        testShoulderEntityLookup();
         System.out.println("PetGuiNbtSmokeTest: passed");
+    }
+
+    private static void testShoulderEntityLookup() {
+        UUID leftUuid = UUID.randomUUID();
+        UUID rightUuid = UUID.randomUUID();
+        CompoundTag left = new CompoundTag();
+        left.putUUID("UUID", leftUuid);
+        CompoundTag right = new CompoundTag();
+        right.putUUID("UUID", rightUuid);
+
+        require(PetIOUtil.findShoulderEntity(left, right, leftUuid) == left,
+                "left shoulder pet was not found");
+        require(PetIOUtil.findShoulderEntity(left, right, rightUuid) == right,
+                "right shoulder pet was not found");
+        require(PetIOUtil.findShoulderEntity(left, right, UUID.randomUUID()) == null,
+                "unrelated UUID matched a shoulder pet");
+        require(PetIOUtil.findShoulderEntity(new CompoundTag(), new CompoundTag(), leftUuid) == null,
+                "empty shoulder matched a pet");
     }
 
     private static void testFullNbtPassengerFiltering() {
