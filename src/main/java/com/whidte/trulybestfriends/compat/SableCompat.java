@@ -40,7 +40,7 @@ import java.util.UUID;
  * </ol>
  *
  * <p>所有 Sable 类引用均通过 {@link Class#forName} + 反射访问，因为 Sable 不是
- * 编译期依赖。模式与 {@link IafCompat} 一致。</p>
+ * 编译期依赖。</p>
  */
 public final class SableCompat {
 

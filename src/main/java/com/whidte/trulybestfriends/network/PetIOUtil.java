@@ -140,9 +140,8 @@ public final class PetIOUtil {
         int priority = oldNbt != null && oldNbt.contains("Priority")
                 ? Math.max(1, Math.min(6, oldNbt.getInt("Priority")))
                 : 6;
-        boolean recalledValue = preserveRecalled && oldNbt != null
-                ? oldNbt.getBoolean("Recalled")
-                : recalled;
+        boolean recalledValue = !PetDeathState.isStoredDead(snapshot)
+                && (preserveRecalled && oldNbt != null ? oldNbt.getBoolean("Recalled") : recalled);
 
         CompoundTag nbt = snapshot.copy();
         nbt.putInt("Priority", priority);

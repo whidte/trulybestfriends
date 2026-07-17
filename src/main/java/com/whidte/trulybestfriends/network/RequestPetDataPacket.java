@@ -101,10 +101,10 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                                 String uuidStr = f.getName().replace(".nbt", "");
                                 UUID uuid = UUID.fromString(uuidStr);
                                 CompoundTag replyNbt = toClientNbt(storedNbt);
-                                // Mark pets whose entity is not currently loaded in any
-                                // level as "Lost" so the client can switch the glow
-                                // button into delete mode.
-                                replyNbt.putBoolean("Lost", !isPetLoaded(player, uuid));
+                                // Stored-dead pets intentionally have no world entity.
+                                // Only an unloaded living pet is considered lost.
+                                replyNbt.putBoolean("Lost",
+                                        shouldMarkLost(storedNbt, isPetLoaded(player, uuid)));
                                 // 注入内存中的死亡时刻（不写盘），供客户端计算复活冷却
                                 trulybestfriends.injectDeathTimeIntoNbt(uuid, replyNbt);
                                 CompoundTag entry = new CompoundTag();
@@ -135,12 +135,8 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                     CompoundTag storedNbt = NbtFileIO.readCompressed(nbtFile);
                     CompoundTag liveNbt = getLoadedPetNbt(player, packet.petUuid, storedNbt);
                     CompoundTag replyNbt = liveNbt != null ? liveNbt : toClientNbt(storedNbt);
-                    // Set the "Lost" flag so the client can switch the glow button
-                    // into delete mode when the entity is not loaded.  Explicitly
-                    // setting false when loaded clears any stale "Lost" flag from
-                    // a previous response (applySyncPacket merges keys, it does
-                    // not remove them).
-                    replyNbt.putBoolean("Lost", liveNbt == null);
+                    // Explicit false clears stale client state because updates merge keys.
+                    replyNbt.putBoolean("Lost", shouldMarkLost(storedNbt, liveNbt != null));
                     // 注入内存中的死亡时刻（不写盘），供客户端计算复活冷却
                     trulybestfriends.injectDeathTimeIntoNbt(packet.petUuid, replyNbt);
                     if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {
@@ -182,10 +178,13 @@ public class RequestPetDataPacket implements CustomPacketPayload {
     static CompoundTag createUpdateNbt(ServerPlayer player, UUID petUuid, CompoundTag storedNbt) {
         CompoundTag liveNbt = getLoadedPetNbt(player, petUuid, storedNbt);
         CompoundTag replyNbt = liveNbt != null ? liveNbt : toClientNbt(storedNbt);
-        // Explicit false clears a stale Lost flag in the client's merged cache.
-        replyNbt.putBoolean("Lost", liveNbt == null);
+        replyNbt.putBoolean("Lost", shouldMarkLost(storedNbt, liveNbt != null));
         trulybestfriends.injectDeathTimeIntoNbt(petUuid, replyNbt);
         return replyNbt;
+    }
+
+    static boolean shouldMarkLost(CompoundTag storedNbt, boolean loaded) {
+        return !loaded && !PetDeathState.isDeadSnapshot(storedNbt);
     }
 
     /** Checks whether a pet entity is currently loaded and owned by the player

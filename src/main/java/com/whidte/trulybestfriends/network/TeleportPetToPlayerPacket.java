@@ -6,6 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -32,9 +33,15 @@ import net.neoforged.neoforge.items.IItemHandlerModifiable;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
+import java.util.function.IntFunction;
+import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 
 /** Server-side: teleport a released (non-recalled) pet to the player's current position. */
 public class TeleportPetToPlayerPacket implements CustomPacketPayload {
@@ -91,7 +98,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                 PetWarningPacket.send(player, 0, packet.petUuid); // recalled
                 return;
             }
-            if (nbt.contains("Health", 5) && nbt.getFloat("Health") <= 0) {
+            if (PetDeathState.isDeadSnapshot(nbt)) {
                 PetWarningPacket.send(player, 1, packet.petUuid); // dead
                 return;
             }
@@ -291,21 +298,41 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                 restoreItemHandler(entity, nbt);
                 return;
             }
+            if (!hasContainerBackup) return;
 
-            // TBF backups use absolute live-container slot indices.
+            int savedSize = nbt.contains("TBF_ChestSize", 3)
+                    ? nbt.getInt("TBF_ChestSize")
+                    : inventory.getContainerSize();
+            int restorableSlots = Math.min(Math.max(savedSize, 0), inventory.getContainerSize());
+            List<ItemStack> backup = emptyInventory(restorableSlots);
+
+            // TBF container backups use absolute live-container slot indices.
             if (nbt.contains("TBF_ChestItems", 9)) {
-                restoreContainerItems(inventory, nbt.getList("TBF_ChestItems", 10),
+                readBackupItems(backup, nbt.getList("TBF_ChestItems", 10),
                         entity.registryAccess(), 0);
             }
 
-            // Vanilla 1.21 horse NBT uses slots relative to the chest area and
-            // remains authoritative when a stale legacy backup is also present.
+            // Vanilla 1.21 horse Items are chest-relative. Their whole range,
+            // including omitted empty slots, is authoritative over legacy data.
             if (nbt.contains("Items", 9)) {
                 int slotOffset = entity instanceof AbstractChestedHorse ? 1 : 0;
-                restoreContainerItems(inventory, nbt.getList("Items", 10),
+                for (int slot = slotOffset; slot < restorableSlots; slot++) {
+                    backup.set(slot, ItemStack.EMPTY);
+                }
+                readBackupItems(backup, nbt.getList("Items", 10),
                         entity.registryAccess(), slotOffset);
             }
-            inventory.setChanged();
+
+            InventoryRestoreResult result = restoreInventoryIfSafe(restorableSlots,
+                    inventory::getItem, backup, inventory::setItem,
+                    ItemStack::isEmpty, ItemStack::matches, ItemStack::copy);
+            if (result == InventoryRestoreResult.RESTORED) {
+                inventory.setChanged();
+            } else if (result == InventoryRestoreResult.CONFLICT) {
+                trulybestfriends.LOGGER.warn(
+                        "Skipped container backup for {} because its live inventory is nonempty and differs",
+                        entity.getClass().getSimpleName());
+            }
         } catch (Exception e) {
             trulybestfriends.LOGGER.error(
                     "restoreChestInventory: failed for {}: {}",
@@ -345,16 +372,54 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         return items;
     }
 
-    static void restoreContainerItems(Container inventory, ListTag items,
-                                      HolderLookup.Provider registries, int slotOffset) {
+    private static void readBackupItems(List<ItemStack> backup, ListTag items,
+                                        HolderLookup.Provider registries, int slotOffset) {
         for (int i = 0; i < items.size(); i++) {
             CompoundTag itemTag = items.getCompound(i);
-            int slot = (itemTag.getByte("Slot") & 255) + slotOffset;
-            if (slot >= inventory.getContainerSize()) continue;
+            Tag slotTag = itemTag.get("Slot");
+            int encodedSlot = slotTag != null && slotTag.getId() == Tag.TAG_BYTE
+                    ? itemTag.getByte("Slot") & 255
+                    : itemTag.getInt("Slot");
+            int slot = encodedSlot + slotOffset;
+            if (slot < 0 || slot >= backup.size()) continue;
 
             ItemStack stack = ItemStack.parseOptional(registries, itemTag);
-            if (!stack.isEmpty()) inventory.setItem(slot, stack);
+            if (!stack.isEmpty()) backup.set(slot, stack);
         }
+    }
+
+    private static List<ItemStack> emptyInventory(int size) {
+        List<ItemStack> inventory = new ArrayList<>(size);
+        for (int slot = 0; slot < size; slot++) inventory.add(ItemStack.EMPTY);
+        return inventory;
+    }
+
+    enum InventoryRestoreResult {
+        MATCHED,
+        RESTORED,
+        CONFLICT
+    }
+
+    static <T> InventoryRestoreResult restoreInventoryIfSafe(
+            int slotCount, IntFunction<T> liveStack, List<T> backup,
+            BiConsumer<Integer, T> setStack, Predicate<T> isEmpty,
+            BiPredicate<T, T> stacksMatch, UnaryOperator<T> copyStack) {
+        boolean liveIsEmpty = true;
+        boolean matchesBackup = true;
+        for (int slot = 0; slot < slotCount; slot++) {
+            T current = liveStack.apply(slot);
+            if (!isEmpty.test(current)) liveIsEmpty = false;
+            if (!stacksMatch.test(current, backup.get(slot))) matchesBackup = false;
+        }
+
+        if (matchesBackup) return InventoryRestoreResult.MATCHED;
+        if (!liveIsEmpty) return InventoryRestoreResult.CONFLICT;
+
+        for (int slot = 0; slot < slotCount; slot++) {
+            T stack = backup.get(slot);
+            if (!isEmpty.test(stack)) setStack.accept(slot, copyStack.apply(stack));
+        }
+        return InventoryRestoreResult.RESTORED;
     }
 
     private static Container getEntityInventory(Entity entity) {
@@ -384,18 +449,17 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         if (!(handler instanceof IItemHandlerModifiable modifiable)) return;
 
         int savedSize = nbt.getInt("TBF_ItemHandlerSize");
-        int restorableSlots = Math.min(savedSize, handler.getSlots());
-        for (int slot = 0; slot < restorableSlots; slot++) {
-            modifiable.setStackInSlot(slot, ItemStack.EMPTY);
-        }
-
+        int restorableSlots = Math.min(Math.max(savedSize, 0), handler.getSlots());
+        List<ItemStack> backup = emptyInventory(restorableSlots);
         ListTag items = nbt.getList("TBF_ItemHandlerItems", 10);
-        for (int i = 0; i < items.size(); i++) {
-            CompoundTag itemTag = items.getCompound(i);
-            int slot = itemTag.getInt("Slot");
-            if (slot < 0 || slot >= restorableSlots) continue;
-            ItemStack stack = ItemStack.parseOptional(entity.registryAccess(), itemTag);
-            if (!stack.isEmpty()) modifiable.setStackInSlot(slot, stack);
+        readBackupItems(backup, items, entity.registryAccess(), 0);
+        InventoryRestoreResult result = restoreInventoryIfSafe(restorableSlots,
+                handler::getStackInSlot, backup, modifiable::setStackInSlot,
+                ItemStack::isEmpty, ItemStack::matches, ItemStack::copy);
+        if (result == InventoryRestoreResult.CONFLICT) {
+            trulybestfriends.LOGGER.warn(
+                    "Skipped item-handler backup for {} because its live inventory is nonempty and differs",
+                    entity.getClass().getSimpleName());
         }
     }
 

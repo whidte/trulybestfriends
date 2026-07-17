@@ -9,6 +9,7 @@ import com.whidte.trulybestfriends.network.NbtFileIO;
 import com.whidte.trulybestfriends.network.PetSyncTracker;
 import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.PetEntitySnapshot;
+import com.whidte.trulybestfriends.network.PetDeathState;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
 import com.whidte.trulybestfriends.network.RequestPetDataPacket;
 import com.whidte.trulybestfriends.network.SableSubLevelSyncPacket;
@@ -27,6 +28,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.OwnableEntity;
@@ -47,7 +49,6 @@ import net.neoforged.neoforge.entity.PartEntity;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
-import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
@@ -79,7 +80,6 @@ public class trulybestfriends {
     private static final Set<ForcedChunk> chunksForcedByMod = ConcurrentHashMap.newKeySet();
     private static final Set<LocalSyncCandidate> localSyncCandidates = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, PendingPetSave> pendingPetSaves = new ConcurrentHashMap<>();
-    private static final Set<UUID> persistedDeathSnapshots = ConcurrentHashMap.newKeySet();
     private static final long PENDING_REMOVAL_TIMEOUT_TICKS = 100L;
 
     /** 宠物死亡时刻（内存，不持久化）。key=petUUID, value=System.currentTimeMillis()。
@@ -97,7 +97,6 @@ public class trulybestfriends {
         INSTANCE = this;
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
         NeoForge.EVENT_BUS.register(this);
-        com.whidte.trulybestfriends.compat.CuriosCompat.register();
         modEventBus.addListener(Config::onLoad);
         modEventBus.addListener(this::registerPayloads);
         if (FMLEnvironment.dist == Dist.CLIENT) {
@@ -176,6 +175,7 @@ public class trulybestfriends {
     public void onEntityJoinLevel(EntityJoinLevelEvent event) {
         if (event.getLevel().isClientSide() || !(event.getLevel() instanceof ServerLevel level)) return;
         Entity entity = event.getEntity();
+        if (discardIfStoredDead(entity, level)) return;
         if (discardIfRecalled(entity, level)) return;
         UUID ownerUUID = getCompatOwnerUUID(entity);
         if (ownerUUID != null) {
@@ -209,7 +209,6 @@ public class trulybestfriends {
         flushPendingPetSaves();
         ReviveProtection.clear(event.getServer());
         petDeathTimes.clear();  // 死亡时刻仅在内存，不持久化
-        persistedDeathSnapshots.clear();
         pendingRemovals.clear();
         PetSyncTracker.clearAll();
         TeleportPetToPlayerPacket.clearPendingSummons();
@@ -255,22 +254,67 @@ public class trulybestfriends {
     public void onLivingDeath(LivingDeathEvent event) {
         Entity entity = event.getEntity();
         if (!entity.level().isClientSide()) ReviveProtection.remove(entity.getUUID());
-        if (!entity.level().isClientSide()
-                && trackedPetUUIDs.contains(entity.getUUID())) {
-            UUID owner = getCompatOwnerUUID(entity);
-            if (owner == null) return;
-            persistedDeathSnapshots.remove(entity.getUUID());
-            // 记录死亡时刻到内存（不写盘），用于复活冷却计算。
-            petDeathTimes.put(entity.getUUID(), System.currentTimeMillis());
-            ResourceLocation entityType = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
-            if (entityType != null && Config.isClearOnDeathEntity(entityType.toString())) {
-                clearPetDataAndCache(entity, owner, (ServerLevel) entity.level());
-            } else {
-                if (savePetData(owner, entity, (ServerLevel) entity.level())
-                        && flushPendingPetSave(entity.getUUID())) {
-                    persistedDeathSnapshots.add(entity.getUUID());
-                }
-            }
+        if (entity.level().isClientSide() || !trackedPetUUIDs.contains(entity.getUUID())) return;
+
+        UUID owner = getCompatOwnerUUID(entity);
+        if (owner == null) return;
+        ServerLevel level = (ServerLevel) entity.level();
+        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        String entityTypeKey = entityType != null ? entityType.toString() : null;
+
+        if (Config.isClearOnDeathEntity(entityTypeKey)) {
+            clearPetDataAndCache(entity, owner, level);
+            return;
+        }
+        if (Config.isNoReviveEntity(entityTypeKey)) {
+            savePetData(owner, entity, level);
+            flushPendingPetSave(entity.getUUID());
+        }
+    }
+
+    /** Called from LivingEntity#die before NeoForge posts LivingDeathEvent. */
+    public static boolean tryStoreFatalPet(LivingEntity entity) {
+        return tryStoreFatalPet(entity, null);
+    }
+
+    /** Stores a fatal pet removed without entering LivingEntity#die. */
+    public static boolean tryStoreFatalPet(LivingEntity entity, DamageSource directDeathSource) {
+        if (INSTANCE == null || entity.level().isClientSide()
+                || !trackedPetUUIDs.contains(entity.getUUID())) return false;
+
+        ReviveProtection.remove(entity.getUUID());
+        UUID owner = getCompatOwnerUUID(entity);
+        if (owner == null) return false;
+        ServerLevel level = (ServerLevel) entity.level();
+        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        String entityTypeKey = entityType != null ? entityType.toString() : null;
+        if (Config.isNoReviveEntity(entityTypeKey)) return false;
+
+        if (!INSTANCE.savePetData(owner, entity, level, true) || !flushPendingPetSave(entity.getUUID())) {
+            pendingPetSaves.remove(entity.getUUID());
+            LOGGER.error("Pet {} will follow normal death because its stored-death snapshot could not be persisted",
+                    entity.getUUID());
+            return false;
+        }
+
+        petDeathTimes.put(entity.getUUID(), System.currentTimeMillis());
+        removePendingRemovals(owner, entity.getUUID());
+        updatePetRecalledState(level, entity.getUUID(), false);
+        sendStoredDeathMessage(entity, owner, level, directDeathSource);
+        entity.ejectPassengers();
+        entity.stopRiding();
+        entity.discard();
+        return true;
+    }
+
+    private static void sendStoredDeathMessage(LivingEntity entity, UUID ownerUUID, ServerLevel level,
+                                               DamageSource directDeathSource) {
+        if (!level.getGameRules().getBoolean(net.minecraft.world.level.GameRules.RULE_SHOWDEATHMESSAGES)) return;
+        ServerPlayer owner = level.getServer().getPlayerList().getPlayer(ownerUUID);
+        if (owner != null) {
+            owner.sendSystemMessage(directDeathSource != null
+                    ? directDeathSource.getLocalizedDeathMessage(entity)
+                    : entity.getCombatTracker().getDeathMessage());
         }
     }
 
@@ -282,7 +326,6 @@ public class trulybestfriends {
     /** 复活成功后清除死亡时刻记录。 */
     public static void clearPetDeathTime(UUID petUuid) {
         petDeathTimes.remove(petUuid);
-        persistedDeathSnapshots.remove(petUuid);
     }
 
     /** 将内存中的死亡时刻注入到 NBT（仅用于网络同步给客户端，不写盘）。
@@ -296,32 +339,11 @@ public class trulybestfriends {
         }
     }
 
-    @SubscribeEvent
-    public void onLivingDrops(LivingDropsEvent event) {
-        Entity entity = event.getEntity();
-        boolean snapshotPersisted = persistedDeathSnapshots.contains(entity.getUUID());
-        ResourceLocation entityType = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
-        if (trackedPetUUIDs.contains(entity.getUUID())
-                && snapshotPersisted
-                && entityType != null
-                && !Config.isNoReviveEntity(entityType.toString())) {
-            // Ice and Fire 联动：IDeadMob 实体（龙、独眼巨人等）死亡后变尸体长期驻留，
-            // 玩家右键采集血液/鳞片/骨头。清空掉落会破坏 IaF 的采集机制。
-            // 这类实体仍可复活（IafCompat 原地治愈），区别于 noReviveWhitelist
-            //（那个是"保留掉落+禁止复活"，这里是"保留掉落+允许复活"）。
-            if (com.whidte.trulybestfriends.compat.IafCompat.isDeadMob(entity)) {
-                return;
-            }
-            event.getDrops().clear();
-        }
+    private boolean savePetData(UUID ownerUUID, Entity pet, ServerLevel level) {
+        return savePetData(ownerUUID, pet, level, false);
     }
 
-    private boolean savePetData(UUID ownerUUID, Entity pet, ServerLevel level) {
-        if (pet instanceof LivingEntity living
-                && !living.isAlive()
-                && persistedDeathSnapshots.contains(pet.getUUID())) {
-            return true;
-        }
+    private boolean savePetData(UUID ownerUUID, Entity pet, ServerLevel level, boolean storedDead) {
         if (!isKnownPlayer(level.getServer(), ownerUUID)) {
             LOGGER.warn("Skipping pet save: owner UUID {} is not a known player", ownerUUID);
             return false;
@@ -329,12 +351,13 @@ public class trulybestfriends {
         CompoundTag nbt;
         try {
             nbt = PetEntitySnapshot.capture(pet, ownerUUID, level);
+            if (storedDead) PetDeathState.markStoredDead(nbt);
         } catch (RuntimeException e) {
             LOGGER.error("Failed to capture pet snapshot for {}: {}", pet.getUUID(), e.getMessage(), e);
             return false;
         }
         // LastDeathTime 完全不由磁盘管理——改由服务器内存 Map (petDeathTimes) 记录，
-        // 在 onLivingDeath 时写入，通过网络同步注入给客户端。不写盘避免被 syncAllPets 反复刷新。
+        // 在封存死亡时写入，通过网络同步注入给客户端。不写盘避免被 syncAllPets 反复刷新。
         Path worldPath = level.getServer().getWorldPath(LevelResource.ROOT);
         pendingPetSaves.put(pet.getUUID(), new PendingPetSave(
                 ownerUUID,
@@ -510,7 +533,6 @@ public class trulybestfriends {
         removePendingRemovals(ownerUUID, petUUID);
         trackedPetUUIDs.remove(petUUID);
         petDeathTimes.remove(petUUID);
-        persistedDeathSnapshots.remove(petUUID);
         try {
             removePetFromIndex(modDir, petUUID);
         } catch (IOException e) {
@@ -530,7 +552,6 @@ public class trulybestfriends {
             removePendingRemovals(player.getUUID(), petUUID);
             trackedPetUUIDs.remove(petUUID);
             petDeathTimes.remove(petUUID);
-            persistedDeathSnapshots.remove(petUUID);
             removePetFromIndex(modDir, petUUID);
             return true;
         } catch (IOException e) {
@@ -841,6 +862,42 @@ public class trulybestfriends {
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to read recalled pet NBT for {}: {}", petUUID, e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean discardIfStoredDead(Entity entity, ServerLevel level) {
+        UUID ownerUUID = getCompatOwnerUUID(entity);
+        if (ownerUUID == null) return false;
+
+        UUID petUUID = entity.getUUID();
+        File nbtFile = PetIOUtil.getOwnerDir(level, ownerUUID).resolve(petUUID + ".nbt").toFile();
+        if (!nbtFile.exists()) return false;
+
+        try {
+            CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
+            boolean explicitlyStored = PetDeathState.isStoredDead(nbt);
+            String typeKey = nbt.contains("EntityType")
+                    ? nbt.getString("EntityType")
+                    : BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
+            if (!explicitlyStored
+                    && (!PetDeathState.isDeadSnapshot(nbt) || Config.isNoReviveEntity(typeKey))) {
+                return false;
+            }
+
+            if (!explicitlyStored) {
+                PetDeathState.markStoredDead(nbt);
+                NbtFileIO.writeCompressed(nbt, nbtFile);
+            }
+            trackedPetUUIDs.add(petUUID);
+            removePendingRemovals(ownerUUID, petUUID);
+            entity.ejectPassengers();
+            entity.stopRiding();
+            entity.discard();
+            LOGGER.info("Discarded loaded copy of stored-dead pet {}", petUUID);
+            return true;
+        } catch (IOException e) {
+            LOGGER.error("Failed to reconcile stored-dead pet {}: {}", petUUID, e.getMessage());
             return false;
         }
     }

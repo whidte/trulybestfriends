@@ -4,7 +4,8 @@
   "package": "com.whidte.trulybestfriends.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "EntityMixin"
+    "EntityMixin",
+    "LivingEntityMixin"
   ],
   "injectors": {
     "defaultRequire": 1

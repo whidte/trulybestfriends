@@ -111,7 +111,7 @@ public class RecallPetPacket implements CustomPacketPayload {
                 }
                 CompoundTag recalledSnapshot = nbt.copy();
                 try {
-                    if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) {
+                    if (PetDeathState.isDeadSnapshot(nbt)) {
                         // Dead pet: just clear the stale Recalled flag, don't summon a corpse
                         nbt.remove("Recalled");
                         NbtFileIO.writeCompressed(nbt, nbtFile);
@@ -143,7 +143,7 @@ public class RecallPetPacket implements CustomPacketPayload {
 
             // --- RECALL path: pet is supposedly alive somewhere (not Recalled on disk) ---
             // Dead pets cannot be recalled (use revive instead)
-            if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) return;
+            if (PetDeathState.isDeadSnapshot(nbt)) return;
 
             // Resolve the pet's last known dimension from NBT
             ServerLevel petLevel = playerLevel;

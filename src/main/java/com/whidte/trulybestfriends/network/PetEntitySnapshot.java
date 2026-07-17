@@ -3,7 +3,6 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.compat.SableCompat;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -31,27 +30,24 @@ public final class PetEntitySnapshot {
         nbt.putString("EntityType", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
         nbt.putString("Dimension", level.dimension().location().toString());
         SableCompat.captureSubLevelInfo(nbt, level, entity.position());
-        return nbt;
+        return copyRootEntityOnly(nbt);
     }
 
     public static Entity restore(CompoundTag snapshot, UUID expectedUuid, ServerLevel level) {
-        CompoundTag entityNbt = snapshot.copy();
+        CompoundTag entityNbt = copyRootEntityOnly(snapshot);
         if (!entityNbt.contains("id", 8)) {
             String legacyType = entityNbt.getString("EntityType");
             if (legacyType.isEmpty()) return null;
             entityNbt.putString("id", legacyType);
         }
-        migrateLegacyChestedHorseItems(entityNbt);
-
         Entity entity = EntityType.loadEntityRecursive(entityNbt, level, loaded -> loaded);
         if (entity != null) entity.setUUID(expectedUuid);
         return entity;
     }
 
-    /** Converts the legacy capability backup into the 1.21 absolute-slot backup. */
-    static void migrateLegacyChestedHorseItems(CompoundTag nbt) {
-        if (!nbt.getList("TBF_ChestItems", 10).isEmpty()) return;
-        ListTag legacyItems = nbt.getList("TBF_ItemHandlerItems", 10);
-        if (!legacyItems.isEmpty()) nbt.put("TBF_ChestItems", legacyItems.copy());
+    static CompoundTag copyRootEntityOnly(CompoundTag snapshot) {
+        CompoundTag root = snapshot.copy();
+        root.remove("Passengers");
+        return root;
     }
 }

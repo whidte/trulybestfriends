@@ -189,6 +189,7 @@ class SummonToPlayerButton extends AbstractWidget {
             if (nbt != null) {
                 nbt.putFloat("Health", 1.0f);
                 nbt.remove("Recalled");
+                nbt.remove("TBF_State");
                 nbt.remove("DeathTime");
                 nbt.remove("HurtTime");
             }
