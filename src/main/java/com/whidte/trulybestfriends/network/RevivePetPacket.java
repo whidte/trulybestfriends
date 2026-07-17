@@ -2,7 +2,6 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.ReviveProtection;
-import com.whidte.trulybestfriends.compat.IafCompat;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -16,7 +15,6 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
@@ -61,7 +59,7 @@ public class RevivePetPacket {
                 CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
 
                 // Only revive if actually dead
-                if (!nbt.contains("Health") || nbt.getFloat("Health") > 0) return;
+                if (!PetDeathState.isDeadSnapshot(nbt)) return;
 
                 // Whitelisted entity types cannot be revived via this mod
                 if (nbt.contains("EntityType") && Config.isNoReviveEntity(nbt.getString("EntityType"))) {
@@ -85,17 +83,6 @@ public class RevivePetPacket {
                 if (!player.isCreative() && !hasItems(player)) return;
                 CompoundTag deadSnapshot = nbt.copy();
 
-                // Ice and Fire 联动：龙等 IDeadMob 实体死亡后变成同 UUID 尸体长期驻留世界。
-                // 若尸体已加载在玩家所在维度，原地治愈（setModelDead(false)+setDeathStage(0)），
-                // 避免 summonFromDisk 因 UUID 冲突失败。详见 IafCompat。
-                if (IafCompat.isLoaded()
-                        && reviveCorpseInPlace(player.server, packet.petUuid, player, level, nbt, nbtFile)) {
-                    if (!player.isCreative()) consumeItems(player);
-                    trulybestfriends.clearPetDeathTime(packet.petUuid);
-                    completeRevive(level, packet.petUuid);
-                    return;
-                }
-
                 // Update saved position to a safe spot near the player FIRST,
                 // so the pet appears at the player's location when summoned.
                 nbt.putString("Dimension", level.dimension().location().toString());
@@ -104,6 +91,7 @@ public class RevivePetPacket {
                 // Revive at 1 HP and clear death markers
                 nbt.putFloat("Health", 1.0f);
                 nbt.remove("Recalled");
+                PetDeathState.clear(nbt);
                 nbt.remove("DeathTime");
                 nbt.remove("HurtTime");
                 nbt.putBoolean("NoAI", false);
@@ -216,93 +204,6 @@ public class RevivePetPacket {
 
     private static CompoundTag saveEffect(MobEffectInstance instance) {
         return instance.save(new CompoundTag());
-    }
-
-    /**
-     * Ice and Fire 联动：原地治愈已加载的 IDeadMob 尸体。
-     *
-     * <p>IaF 龙死亡后变同 UUID 尸体长期驻留世界，{@code summonFromDisk} 因 UUID 冲突复活失败。
-     * 本方法跨维度查找已加载的尸体，若在玩家所在维度则原地治愈（清除 IaF 尸体状态 +
-     * 通用复活 + 图腾效果 + 传送 + 写盘），返回 true 让 caller 跳过 summonFromDisk。</p>
-     *
-     * <p>跨维度的尸体无法安全传送（changeDimension 复杂且易丢实体），改为 discard 尸体后
-     * 返回 false，让 caller 走原 summonFromDisk 路径在玩家维度新建实体（尸体已清，无冲突）。</p>
-     *
-     * @return true=已原地复活（caller 跳过原路径）；false=未处理（caller 走原路径）
-     */
-    private static boolean reviveCorpseInPlace(MinecraftServer server, UUID petUuid,
-                                               ServerPlayer player, ServerLevel playerLevel,
-                                               CompoundTag originalNbt, File nbtFile) {
-        if (!IafCompat.isLoaded()) return false;
-
-        // 跨所有维度查找已加载的同 UUID 实体
-        LivingEntity corpse = null;
-        for (ServerLevel sl : server.getAllLevels()) {
-            Entity e = sl.getEntity(petUuid);
-            if (e instanceof LivingEntity le && IafCompat.isMobDead(le)) {
-                corpse = le;
-                break;
-            }
-        }
-        if (corpse == null) return false;  // 尸体未加载，走原路径
-
-        // 跨维度尸体：discard 后走原路径在玩家维度新建（避免 changeDimension 复杂性）
-        if (corpse.level() != playerLevel) {
-            trulybestfriends.LOGGER.info("IaF corpse {} is cross-dimension; falling back to transactional summon", petUuid);
-            return false;
-        }
-
-        // 1. 清除 IaF 尸体状态（setModelDead(false) + setDeathStage(0)）
-        if (!IafCompat.clearCorpseState(corpse)) {
-            trulybestfriends.LOGGER.warn("IaF clearCorpseState failed for {}, falling back to summon", petUuid);
-            return false;
-        }
-
-        // 2. 通用复活：HP=1，清死亡标记
-        //    deathTime/hurtTime 是 LivingEntity 的 public int 字段，直接赋值。
-        //    deathTime=0 后 vanilla aiStep 不再调 tickDeath，IaF 不会把 modelDead 设回 true。
-        corpse.setHealth(1.0f);
-        corpse.deathTime = 0;
-        corpse.hurtTime = 0;
-        if (corpse instanceof Mob mob) mob.setNoAi(false);
-
-        // 3. 清除死亡前效果并施加新图腾效果；completeRevive 会统一登记 20 tick 绝对免伤
-        applyFreshTotemEffects(corpse);
-
-        // 4. 传送到玩家旁（同维度，直接 teleportTo）
-        teleportCorpseToPlayer(corpse, player, playerLevel);
-
-        // 5. 写回磁盘 NBT，保持盘/世界一致
-        try {
-            TeleportPetToPlayerPacket.restoreChestInventory(corpse, originalNbt);
-            CompoundTag saved = PetEntitySnapshot.capture(corpse, player.getUUID(), playerLevel);
-            if (originalNbt.contains("Priority")) {
-                saved.putInt("Priority", Math.max(1, Math.min(6, originalNbt.getInt("Priority"))));
-            }
-            saved.remove("Recalled");
-            saved.remove("LastDeathTime");  // 清死亡时间，避免复活冷却误判
-            NbtFileIO.writeCompressed(saved, nbtFile);
-            trulybestfriends.updatePetRecalledState(playerLevel, petUuid, false);
-        } catch (IOException e) {
-            trulybestfriends.LOGGER.error("reviveCorpseInPlace: failed to write nbt for {}: {}", petUuid, e.getMessage());
-        }
-
-        trulybestfriends.LOGGER.info("IaF corpse {} revived in place near player {}", petUuid, player.getName().getString());
-        return true;
-    }
-
-    /** 同维度内把实体传送到玩家旁的安全位置。 */
-    private static void teleportCorpseToPlayer(LivingEntity entity, ServerPlayer player, ServerLevel level) {
-        int radius = Math.max(1, (int) Math.ceil(entity.getBbWidth()));
-        Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(level, player, entity, radius, 6, 16);
-        if (safePosition != null) {
-            entity.teleportTo(safePosition.x, safePosition.y, safePosition.z);
-            entity.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
-            return;
-        }
-        // 兜底：直接传送到玩家坐标
-        entity.teleportTo(player.getX(), player.getY(), player.getZ());
-        entity.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
     }
 
     private static boolean hasItems(ServerPlayer player) {

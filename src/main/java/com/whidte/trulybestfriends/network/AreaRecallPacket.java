@@ -88,7 +88,7 @@ public class AreaRecallPacket {
                     CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
 
                     // Skip dead pets
-                    if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) continue;
+                    if (PetDeathState.isDeadSnapshot(nbt)) continue;
                     // Skip already recalled pets
                     if (nbt.getBoolean("Recalled")) continue;
 

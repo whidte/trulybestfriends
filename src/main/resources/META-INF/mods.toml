@@ -44,20 +44,6 @@ config="trulybestfriends.mixins.json"
     side="BOTH"
 
 [[dependencies.${mod_id}]]
-    modId="iceandfire"
-    mandatory=false
-    versionRange="[0.0,)"
-    ordering="AFTER"
-    side="BOTH"
-
-[[dependencies.${mod_id}]]
-    modId="curios"
-    mandatory=false
-    versionRange="[5.5.1,)"
-    ordering="AFTER"
-    side="BOTH"
-
-[[dependencies.${mod_id}]]
     modId="ftbteams"
     mandatory=false
     versionRange="[2001.3.1,)"

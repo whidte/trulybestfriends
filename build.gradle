@@ -154,9 +154,8 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
-    // L2Library, L2Tabs, and Curios are optional soft dependencies.
+    // L2Library and L2Tabs are optional soft dependencies.
     compileOnly fg.deobf("curse.maven:l2library-620203:6806000")
-    compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:5.7.1+1.20.1:api")
     compileOnly fg.deobf("dev.ftb.mods:ftb-teams-forge:2001.3.1")
 
     // When installed, the mod gains an inventory tab; otherwise a keybinding opens the screen.

@@ -25,9 +25,15 @@ import net.minecraftforge.items.IItemHandlerModifiable;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
+import java.util.function.IntFunction;
+import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 import java.util.function.Supplier;
 
 /** Server-side: teleport a released (non-recalled) pet to the player's current position. */
@@ -82,7 +88,7 @@ public class TeleportPetToPlayerPacket {
                 PetWarningPacket.send(player, 0, packet.petUuid); // recalled
                 return;
             }
-            if (nbt.contains("Health", 5) && nbt.getFloat("Health") <= 0) {
+            if (PetDeathState.isDeadSnapshot(nbt)) {
                 PetWarningPacket.send(player, 1, packet.petUuid); // dead
                 return;
             }
@@ -256,7 +262,12 @@ public class TeleportPetToPlayerPacket {
         entity.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().ifPresent(handler -> {
             if (!(handler instanceof IItemHandlerModifiable modifiable)) return;
             try {
-                restoreItemHandler(modifiable, nbt);
+                InventoryRestoreResult result = restoreItemHandler(modifiable, nbt);
+                if (result == InventoryRestoreResult.CONFLICT) {
+                    trulybestfriends.LOGGER.warn(
+                            "Skipped item-handler backup for {} because its live inventory is nonempty and differs",
+                            entity.getClass().getSimpleName());
+                }
             } catch (RuntimeException e) {
                 trulybestfriends.LOGGER.error("Failed to restore item handler for {}: {}",
                         entity.getClass().getSimpleName(), e.getMessage(), e);
@@ -264,24 +275,63 @@ public class TeleportPetToPlayerPacket {
         });
     }
 
-    static void restoreItemHandler(IItemHandlerModifiable handler, CompoundTag nbt) {
+    static InventoryRestoreResult restoreItemHandler(IItemHandlerModifiable handler, CompoundTag nbt) {
         int savedSize = nbt.getInt("TBF_ItemHandlerSize");
-        int restorableSlots = Math.min(savedSize, handler.getSlots());
-        for (int slot = 0; slot < restorableSlots; slot++) {
-            handler.setStackInSlot(slot, ItemStack.EMPTY);
-        }
+        int restorableSlots = Math.min(Math.max(savedSize, 0), handler.getSlots());
+        List<ItemStack> backup = emptyInventory(restorableSlots);
         net.minecraft.nbt.ListTag items = nbt.getList("TBF_ItemHandlerItems", 10);
         for (int i = 0; i < items.size(); i++) {
             CompoundTag itemTag = items.getCompound(i);
             int slot = itemTag.getInt("Slot");
             if (slot < 0 || slot >= restorableSlots) continue;
             ItemStack stack = ItemStack.of(itemTag);
-            if (!stack.isEmpty()) handler.setStackInSlot(slot, stack);
+            if (!stack.isEmpty()) backup.set(slot, stack);
         }
+        return restoreInventoryIfSafe(restorableSlots, handler::getStackInSlot,
+                backup, handler::setStackInSlot, ItemStack::isEmpty,
+                (current, expected) -> current.isEmpty() && expected.isEmpty()
+                        || (current.getCount() == expected.getCount()
+                        && ItemStack.isSameItemSameTags(current, expected)),
+                ItemStack::copy);
+    }
+
+    private static List<ItemStack> emptyInventory(int size) {
+        List<ItemStack> inventory = new ArrayList<>(size);
+        for (int slot = 0; slot < size; slot++) inventory.add(ItemStack.EMPTY);
+        return inventory;
+    }
+
+    enum InventoryRestoreResult {
+        MATCHED,
+        RESTORED,
+        CONFLICT
+    }
+
+    static <T> InventoryRestoreResult restoreInventoryIfSafe(
+            int slotCount, IntFunction<T> liveStack, List<T> backup,
+            BiConsumer<Integer, T> setStack, Predicate<T> isEmpty,
+            BiPredicate<T, T> stacksMatch, UnaryOperator<T> copyStack) {
+        boolean liveIsEmpty = true;
+        boolean matchesBackup = true;
+        for (int slot = 0; slot < slotCount; slot++) {
+            T current = liveStack.apply(slot);
+            if (!isEmpty.test(current)) liveIsEmpty = false;
+            if (!stacksMatch.test(current, backup.get(slot))) matchesBackup = false;
+        }
+
+        if (matchesBackup) return InventoryRestoreResult.MATCHED;
+        if (!liveIsEmpty) return InventoryRestoreResult.CONFLICT;
+
+        for (int slot = 0; slot < slotCount; slot++) {
+            T stack = backup.get(slot);
+            if (!isEmpty.test(stack)) setStack.accept(slot, copyStack.apply(stack));
+        }
+        return InventoryRestoreResult.RESTORED;
     }
 
     /** Backs up modded inventory capabilities; vanilla horse data stays authoritative. */
     public static void backupChestInventory(Entity entity, CompoundTag nbt) {
+        if (entity instanceof AbstractHorse) return;
         entity.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().ifPresent(handler ->
                 backupItemHandler(handler, nbt));
     }
