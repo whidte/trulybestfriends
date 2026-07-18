@@ -19,6 +19,8 @@ import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.TeleportToPetPacket;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.core.BlockPos;
@@ -51,6 +53,7 @@ import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
@@ -71,15 +74,18 @@ public class trulybestfriends {
     public static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
 
     private static final String PETS_INDEX_FILE = "pets_index.nbt";
+    private static final String BLACKLISTED_UUIDS_KEY = "TBF_BlacklistedUUIDs";
     private static final ResourceLocation TRULY_BEST_FRIENDS_ADVANCEMENT = ResourceLocation.fromNamespaceAndPath("minecraft", "husbandry/tame_an_animal");
     private static final int LOCAL_SYNC_CHUNK_RADIUS = 2;
     private static final Map<String, List<UUID>> indexCache = new ConcurrentHashMap<>();
     private static final Set<UUID> trackedPetUUIDs = ConcurrentHashMap.newKeySet();
+    private static final Set<UUID> blacklistedPetUUIDs = ConcurrentHashMap.newKeySet();
     private static final Set<PendingRemoval> pendingRemovals = ConcurrentHashMap.newKeySet();
     private static final Map<ForcedChunk, Integer> forcedChunkReferences = new ConcurrentHashMap<>();
     private static final Set<ForcedChunk> chunksForcedByMod = ConcurrentHashMap.newKeySet();
     private static final Set<LocalSyncCandidate> localSyncCandidates = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, PendingPetSave> pendingPetSaves = new ConcurrentHashMap<>();
+    private static volatile boolean petIndexLoaded;
     private static final long PENDING_REMOVAL_TIMEOUT_TICKS = 100L;
 
     /** 宠物死亡时刻（内存，不持久化）。key=petUUID, value=System.currentTimeMillis()。
@@ -114,17 +120,84 @@ public class trulybestfriends {
         }
     }
 
+    /** 判断指定 UUID 当前是否在读取黑名单中。 */
+    public static boolean isPetUUIDBlacklisted(ServerLevel level, UUID petUUID) {
+        loadPetIndex(level);
+        return blacklistedPetUUIDs.contains(petUUID);
+    }
+
     /**
-     * Force-track an entity as a pet for the given owner, bypassing the
-     * normal taming/ownership checks.  Used by the {@code /tbf trackdragon}
-     * command to add non-tameable entities (e.g. the Ender Dragon) for
-     * preview/testing purposes.
+     * 从读取黑名单中移除指定 UUID 并写回索引文件。
+     * 返回 true 表示该 UUID 之前确实在黑名单中并已被移除，
+     * 返回 false 表示本来就不在黑名单（无需操作）或写盘失败。
      */
-    public static void forceTrackPet(ServerPlayer owner, Entity pet) {
-        if (!(pet.level() instanceof ServerLevel level)) return;
-        INSTANCE.updatePetIndex(pet, owner.getUUID());
-        INSTANCE.savePetData(owner.getUUID(), pet, level);
-        flushPendingPetSaves(owner.getUUID());
+    public static boolean unblacklistPetUUID(ServerLevel level, UUID petUUID) {
+        if (!isPetUUIDBlacklisted(level, petUUID)) return false;
+        try {
+            Path modDir = PetIOUtil.getModDir(level);
+            File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
+            if (indexFile.exists()) {
+                CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
+                removeBlacklistEntry(indexTag, petUUID);
+                NbtFileIO.writeCompressed(indexTag, indexFile);
+            } else {
+                blacklistedPetUUIDs.remove(petUUID);
+            }
+            return true;
+        } catch (IOException e) {
+            LOGGER.error("Failed to remove blacklist entry for {}: {}", petUUID, e.getMessage());
+            return false;
+        }
+    }
+
+    /** {@link #tryLoadPet} 的判定与读取结果。 */
+    public enum LoadResult {
+        /** 读取成功。 */
+        OK,
+        /** 不是 {@link LivingEntity}，或通过 {@link Config#ownerNbtFields} 无法解析出 owner UUID。 */
+        NOT_A_PET,
+        /** owner UUID 不对应任何已知玩家（既不在线也无 playerdata 文件）。 */
+        UNKNOWN_OWNER,
+        /** 实体类型在 {@link Config#isAutoRegisterBlacklisted} 列表中。 */
+        TYPE_BLACKLISTED,
+        /** owner 已达 {@link Config#maxPets} 上限。 */
+        LIMIT_REACHED,
+        /** 在读取黑名单中但移除条目失败。 */
+        UNBLACKLIST_FAILED,
+        /** 保存宠物数据失败。 */
+        SAVE_FAILED,
+    }
+
+    /**
+     * 对指定实体走原模组的正常读取判定与流程（与
+     * {@link #registerUntrackedOwnedPet} 一致），用于 {@code /tbf load} 指令。
+     *
+     * <p>判定依次为：必须是 {@link LivingEntity}、能通过 {@link Config#ownerNbtFields}
+     * 解析出 owner UUID、owner 是已知玩家、实体类型不在 {@link Config#isAutoRegisterBlacklisted}
+     * 列表中、owner 未达 {@link Config#maxPets} 上限。判定通过后，若 UUID 在读取黑名单中
+     * 则先移除该条目，再保存数据并更新索引（{@code updatePetIndex} 内部也会兜底移除黑名单）。</p>
+     */
+    public static LoadResult tryLoadPet(Entity entity, ServerLevel level) {
+        if (INSTANCE == null) return LoadResult.SAVE_FAILED;
+        if (!(entity instanceof LivingEntity living)) return LoadResult.NOT_A_PET;
+        UUID ownerUUID = getCompatOwnerUUID(living);
+        if (ownerUUID == null) return LoadResult.NOT_A_PET;
+        if (!isKnownPlayer(level.getServer(), ownerUUID)) return LoadResult.UNKNOWN_OWNER;
+        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        String entityTypeKey = entityType != null ? entityType.toString() : null;
+        if (entityTypeKey != null && Config.isAutoRegisterBlacklisted(entityTypeKey)) {
+            return LoadResult.TYPE_BLACKLISTED;
+        }
+        if (INSTANCE.countOwnerPets(level, ownerUUID) >= Config.maxPets) return LoadResult.LIMIT_REACHED;
+
+        if (isPetUUIDBlacklisted(level, living.getUUID())) {
+            if (!unblacklistPetUUID(level, living.getUUID())) return LoadResult.UNBLACKLIST_FAILED;
+        }
+
+        if (!INSTANCE.savePetData(ownerUUID, living, level)) return LoadResult.SAVE_FAILED;
+        INSTANCE.updatePetIndex(living, ownerUUID);
+        flushPendingPetSaves(ownerUUID);
+        return LoadResult.OK;
     }
 
     /** Replace a join-time pending save with the fully restored live snapshot. */
@@ -156,6 +229,7 @@ public class trulybestfriends {
         if (animal.level().isClientSide()) return;
         UUID owner = getCompatOwnerUUID(animal);
         if (owner != null) {
+            if (isPetUUIDBlacklisted((ServerLevel) animal.level(), animal.getUUID())) return;
             if (countOwnerPets((ServerLevel) animal.level(), owner) >= Config.maxPets) {
                 ServerPlayer ownerPlayer = animal.level().getServer().getPlayerList().getPlayer(owner);
                 if (ownerPlayer != null) {
@@ -205,6 +279,11 @@ public class trulybestfriends {
     }
 
     @SubscribeEvent
+    public void onServerStarted(ServerStartedEvent event) {
+        loadPetIndex(event.getServer().overworld());
+    }
+
+    @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         flushPendingPetSaves();
         ReviveProtection.clear(event.getServer());
@@ -216,6 +295,12 @@ public class trulybestfriends {
                 chunk.level().setChunkForced(chunk.chunkX(), chunk.chunkZ(), false));
         forcedChunkReferences.clear();
         chunksForcedByMod.clear();
+        localSyncCandidates.clear();
+        pendingPetSaves.clear();
+        indexCache.clear();
+        trackedPetUUIDs.clear();
+        blacklistedPetUUIDs.clear();
+        petIndexLoaded = false;
     }
 
     @SubscribeEvent
@@ -542,17 +627,36 @@ public class trulybestfriends {
     }
 
     public static boolean deletePetData(ServerPlayer player, UUID petUUID) {
-        if (PetIOUtil.getShoulderEntity(player, petUUID) != null) return false;
+        // If the pet is currently recalled to disk, release it back into the world
+        // before deleting its NBT file — otherwise the entity would vanish together
+        // with the data. Abort the whole deletion if the release fails (e.g. summon
+        // failed and the Recalled flag was rolled back) so the player can retry.
+        if (!RecallPetPacket.releaseRecalledPet(player, petUUID, player.serverLevel())) {
+            LOGGER.warn("Aborted deletePetData for {}: recalled pet could not be released", petUUID);
+            return false;
+        }
+
+        PendingPetSave pending = pendingPetSaves.get(petUUID);
+        Path petFile = PetIOUtil.getOwnerDir(player).resolve(petUUID + ".nbt");
+        boolean ownsPendingSave = pending != null && player.getUUID().equals(pending.ownerUUID());
+        boolean isShoulderPet = PetIOUtil.getShoulderEntity(player, petUUID) != null;
+        boolean isLoadedOwnedPet = isLoadedOwnedPet(player, petUUID);
+        if (!Files.exists(petFile) && !ownsPendingSave && !isShoulderPet && !isLoadedOwnedPet) return false;
+
+        // Stop queued writes and summons before touching disk so stale data
+        // cannot recreate the entry after this deletion.
+        pendingPetSaves.remove(petUUID);
+        removePendingRemovals(player.getUUID(), petUUID);
+        localSyncCandidates.removeIf(candidate -> candidate.entityUUID().equals(petUUID));
+        TeleportPetToPlayerPacket.cancelPendingSummons(player.getUUID(), petUUID);
+        ReviveProtection.remove(petUUID);
+        trackedPetUUIDs.remove(petUUID);
+        petDeathTimes.remove(petUUID);
+
         try {
-            flushPendingPetSaves(player.getUUID());
             Path modDir = PetIOUtil.getModDir(player);
-            Path petFile = PetIOUtil.getOwnerDir(player).resolve(petUUID + ".nbt");
-            if (!Files.deleteIfExists(petFile)) return false;
-            pendingPetSaves.remove(petUUID);
-            removePendingRemovals(player.getUUID(), petUUID);
-            trackedPetUUIDs.remove(petUUID);
-            petDeathTimes.remove(petUUID);
-            removePetFromIndex(modDir, petUUID);
+            blacklistPetUUID(modDir, petUUID);
+            deletePetFiles(modDir, petUUID);
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to delete pet data for {}: {}", petUUID, e.getMessage());
@@ -638,6 +742,57 @@ public class trulybestfriends {
         }
     }
 
+    private static void blacklistPetUUID(Path modDir, UUID petUUID) throws IOException {
+        blacklistedPetUUIDs.add(petUUID);
+        Files.createDirectories(modDir);
+        File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
+        CompoundTag indexTag = indexFile.exists() ? NbtFileIO.readCompressed(indexFile) : new CompoundTag();
+        removePetIndexEntry(indexTag, petUUID);
+        addBlacklistEntry(indexTag, petUUID);
+        NbtFileIO.writeCompressed(indexTag, indexFile);
+    }
+
+    private static void deletePetFiles(Path modDir, UUID petUUID) throws IOException {
+        if (!Files.exists(modDir)) return;
+        String fileName = petUUID + ".nbt";
+        try (var entries = Files.list(modDir)) {
+            for (Path ownerDir : entries.filter(Files::isDirectory).toList()) {
+                Files.deleteIfExists(ownerDir.resolve(fileName));
+            }
+        }
+    }
+
+    static boolean addBlacklistEntry(CompoundTag indexTag, UUID petUUID) {
+        ListTag blacklist = indexTag.getList(BLACKLISTED_UUIDS_KEY, Tag.TAG_STRING);
+        String uuid = petUUID.toString();
+        for (int i = 0; i < blacklist.size(); i++) {
+            if (uuid.equals(blacklist.getString(i))) return false;
+        }
+        blacklist.add(StringTag.valueOf(uuid));
+        indexTag.put(BLACKLISTED_UUIDS_KEY, blacklist);
+        return true;
+    }
+
+    static boolean isBlacklistEntry(CompoundTag indexTag, UUID petUUID) {
+        String uuid = petUUID.toString();
+        ListTag blacklist = indexTag.getList(BLACKLISTED_UUIDS_KEY, Tag.TAG_STRING);
+        for (int i = 0; i < blacklist.size(); i++) {
+            if (uuid.equals(blacklist.getString(i))) return true;
+        }
+        return false;
+    }
+
+    private static void removeBlacklistEntry(CompoundTag indexTag, UUID petUUID) {
+        ListTag blacklist = indexTag.getList(BLACKLISTED_UUIDS_KEY, Tag.TAG_STRING);
+        String uuid = petUUID.toString();
+        for (int i = blacklist.size() - 1; i >= 0; i--) {
+            if (uuid.equals(blacklist.getString(i))) blacklist.remove(i);
+        }
+        if (blacklist.isEmpty()) indexTag.remove(BLACKLISTED_UUIDS_KEY);
+        else indexTag.put(BLACKLISTED_UUIDS_KEY, blacklist);
+        blacklistedPetUUIDs.remove(petUUID);
+    }
+
     private static boolean removePetIndexEntry(CompoundTag indexTag, UUID petUUID) {
         String uuid = petUUID.toString();
         boolean changed = false;
@@ -702,6 +857,7 @@ public class trulybestfriends {
 
     private static boolean putPetIndexEntry(CompoundTag indexTag, String playerName, String typeKey,
                                             UUID petUUID, boolean recalled) {
+        removeBlacklistEntry(indexTag, petUUID);
         String uuid = petUUID.toString();
         CompoundTag playerTag = indexTag.getCompound(playerName);
         CompoundTag typeTag = playerTag.getCompound(typeKey);
@@ -761,6 +917,7 @@ public class trulybestfriends {
 
     private boolean registerUntrackedOwnedPet(Entity entity, UUID ownerUUID, ServerLevel level) {
         if (trackedPetUUIDs.contains(entity.getUUID())) return false;
+        if (isPetUUIDBlacklisted(level, entity.getUUID())) return false;
         if (!isKnownPlayer(level.getServer(), ownerUUID)) return false;
 
         ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
@@ -902,8 +1059,8 @@ public class trulybestfriends {
         }
     }
 
-    public static Map<String, List<UUID>> loadPetIndex(ServerLevel level) {
-        if (!indexCache.isEmpty()) return indexCache;
+    public static synchronized Map<String, List<UUID>> loadPetIndex(ServerLevel level) {
+        if (petIndexLoaded) return indexCache;
 
         try {
             Path modDir = PetIOUtil.getModDir(level);
@@ -911,7 +1068,16 @@ public class trulybestfriends {
 
             if (indexFile.exists()) {
                 CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
+                ListTag blacklist = indexTag.getList(BLACKLISTED_UUIDS_KEY, Tag.TAG_STRING);
+                for (int i = 0; i < blacklist.size(); i++) {
+                    try {
+                        blacklistedPetUUIDs.add(UUID.fromString(blacklist.getString(i)));
+                    } catch (IllegalArgumentException e) {
+                        LOGGER.warn("Invalid UUID in pet blacklist: {}", blacklist.getString(i));
+                    }
+                }
                 for (String playerName : indexTag.getAllKeys()) {
+                    if (BLACKLISTED_UUIDS_KEY.equals(playerName)) continue;
                     if (!indexTag.contains(playerName, Tag.TAG_COMPOUND)) continue;
                     CompoundTag playerTag = indexTag.getCompound(playerName);
                     for (String typeKey : playerTag.getAllKeys()) {
@@ -934,7 +1100,16 @@ public class trulybestfriends {
         } catch (IOException e) {
             LOGGER.error("Failed to load pet index: {}", e.getMessage());
         }
+        petIndexLoaded = true;
         return indexCache;
+    }
+
+    private static boolean isLoadedOwnedPet(ServerPlayer player, UUID petUUID) {
+        for (ServerLevel level : player.getServer().getAllLevels()) {
+            Entity entity = level.getEntity(petUUID);
+            if (entity != null && isOwnedBy(entity, player.getUUID())) return true;
+        }
+        return false;
     }
 
     private void syncAllPets(MinecraftServer server) {

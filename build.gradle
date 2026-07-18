@@ -130,6 +130,15 @@ tasks.named('check') {
     dependsOn tasks.named('petGuiNbtSmokeTest')
     dependsOn tasks.named('petListFilterSmokeTest')
     dependsOn tasks.named('reviveProtectionSmokeTest')
+    dependsOn tasks.named('petIndexBlacklistTest')
+}
+
+tasks.register('petIndexBlacklistTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates persistent UUID blacklist entries in the pet index.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.PetIndexBlacklistTest'
 }
 
 tasks.register('petPersistenceSmokeTest', JavaExec) {

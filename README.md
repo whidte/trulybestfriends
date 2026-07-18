@@ -61,7 +61,7 @@
 
 ```
 <存档>/trulybestfriends/
-├── pets_index.nbt              # 宠物索引（按实体类型分组）
+├── pets_index.nbt              # 宠物索引及手动取消追踪的 UUID 黑名单
 └── <玩家UUID>/
     └── <宠物UUID>.nbt          # 每只宠物的完整 NBT
 ```

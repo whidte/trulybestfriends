@@ -102,6 +102,11 @@ final class TrulyConstants {
 	static final int REFRESH_INTERVAL = 20;
 	/** 发光按钮的正方形边长。 */
 	static final int GLOW_BUTTON_SIZE = 18;
+	/** Independent delete control at the upper-left corner of the main preview. */
+	static final int DELETE_X = 3;
+	static final int DELETE_Y = 3;
+	static final int DELETE_BUTTON_WIDTH = 7;
+	static final int DELETE_BUTTON_HEIGHT = 7;
 
 	// --- Textures ---
 	/** 标签页主面板背景纹理。 */
@@ -111,6 +116,9 @@ final class TrulyConstants {
 	static final ResourceLocation SEARCH_ICON = ResourceLocation.withDefaultNamespace("icon/search");
 	/** 原版发光效果图标纹理。 */
 	static final ResourceLocation GLOWING_ICON = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/mob_effect/glowing.png");
+	/** Vanilla Realms close-button sprites used by the delete control. */
+	static final ResourceLocation DELETE_ICON = ResourceLocation.withDefaultNamespace("widget/cross_button");
+	static final ResourceLocation DELETE_ICON_HIGHLIGHTED = ResourceLocation.withDefaultNamespace("widget/cross_button_highlighted");
 	/** 模组内通用操作按钮的自定义纹理。 */
 	static final ResourceLocation WIDGET_BUTTON = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/widget_button.png");
 	/** 宠物列表滚动条轨道纹理。 */
@@ -119,8 +127,6 @@ final class TrulyConstants {
 	static final ResourceLocation SCROLLBAR_THUMB = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/scrollbar_thumb.png");
 	/** 宠物列表条目纹理，纵向包含普通态和选中态。 */
 	static final ResourceLocation PET_ENTRY = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/pet_entry.png");
-	/** 删除宠物数据按钮使用的原版取消图标。 */
-	static final ResourceLocation DELETE_ICON = ResourceLocation.withDefaultNamespace("container/beacon/cancel");
 	/** 原版按钮的默认状态 sprite。 */
 	static final ResourceLocation BUTTON = ResourceLocation.withDefaultNamespace("widget/button");
 	/** 原版按钮的悬停或高亮状态 sprite。 */

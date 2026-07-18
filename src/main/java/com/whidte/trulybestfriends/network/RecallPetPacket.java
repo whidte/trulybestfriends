@@ -109,33 +109,7 @@ public class RecallPetPacket implements CustomPacketPayload {
                     PetWarningPacket.send(player, 2, packet.petUuid);
                     return;
                 }
-                CompoundTag recalledSnapshot = nbt.copy();
-                try {
-                    if (PetDeathState.isDeadSnapshot(nbt)) {
-                        // Dead pet: just clear the stale Recalled flag, don't summon a corpse
-                        nbt.remove("Recalled");
-                        NbtFileIO.writeCompressed(nbt, nbtFile);
-                        trulybestfriends.updatePetRecalledState(playerLevel, packet.petUuid, false);
-                        return;
-                    }
-                    nbt.remove("Recalled");
-                    NbtFileIO.writeCompressed(nbt, nbtFile);
-                    trulybestfriends.updatePetRecalledState(playerLevel, packet.petUuid, false);
-                } catch (IOException e) {
-                    trulybestfriends.LOGGER.error("Failed to clear Recalled flag for {}: {}", packet.petUuid, e.getMessage());
-                    return;
-                }
-                if (summonPet(player, packet.petUuid, playerLevel, nbt)) {
-                    player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT,
-                            net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
-                } else {
-                    try {
-                        NbtFileIO.writeCompressed(recalledSnapshot, nbtFile);
-                        trulybestfriends.updatePetRecalledState(playerLevel, packet.petUuid, true);
-                    } catch (IOException rollbackError) {
-                        trulybestfriends.LOGGER.error("Failed to roll back recalled state for {}: {}",
-                                packet.petUuid, rollbackError.getMessage(), rollbackError);
-                    }
+                if (!releaseRecalledPet(player, packet.petUuid, playerLevel)) {
                     PetWarningPacket.send(player, 3, packet.petUuid);
                 }
                 return;
@@ -266,5 +240,74 @@ public class RecallPetPacket implements CustomPacketPayload {
 
     private static boolean summonPet(ServerPlayer player, UUID petUuid, ServerLevel level, CompoundTag nbt) {
         return TeleportPetToPlayerPacket.summonFromDisk(nbt, petUuid, player, level);
+    }
+
+    /**
+     * Release a recalled pet back into the world: clears the {@code Recalled}
+     * flag on disk and summons the entity near the player.  Used by
+     * {@link #handle} (toggle action) and by {@code trulybestfriends.deletePetData}
+     * (pre-delete release so the entity does not vanish together with its NBT file).
+     *
+     * <p>Return value:
+     * <ul>
+     *   <li>{@code true} — pet has no NBT on disk, is not in {@code Recalled} state,
+     *       is a dead snapshot (only the flag is cleared), or was successfully
+     *       summoned back into the world.</li>
+     *   <li>{@code false} — NBT read failed, {@code isPendingRemoval} blocked the
+     *       release, the {@code Recalled} flag could not be cleared, or summoning
+     *       failed (in which case the flag is rolled back to {@code true}).</li>
+     * </ul>
+     *
+     * <p>Note: this method does <b>not</b> check {@code isPendingRemoval} — callers
+     * that need to differentiate that case (e.g. {@link #handle}) must check it
+     * themselves before invoking this method.</p>
+     */
+    public static boolean releaseRecalledPet(ServerPlayer player, UUID petUuid, ServerLevel level) {
+        Path ownerDir = PetIOUtil.getOwnerDir(player);
+        File nbtFile = ownerDir.resolve(petUuid + ".nbt").toFile();
+        if (!nbtFile.exists()) return true;
+
+        CompoundTag nbt;
+        try {
+            nbt = NbtFileIO.readCompressed(nbtFile);
+        } catch (IOException e) {
+            trulybestfriends.LOGGER.error("Failed to read pet NBT for release: {}", e.getMessage());
+            return false;
+        }
+
+        if (!nbt.getBoolean("Recalled")) return true;
+
+        CompoundTag recalledSnapshot = nbt.copy();
+        try {
+            if (PetDeathState.isDeadSnapshot(nbt)) {
+                // Dead pet: just clear the stale Recalled flag, don't summon a corpse
+                nbt.remove("Recalled");
+                NbtFileIO.writeCompressed(nbt, nbtFile);
+                trulybestfriends.updatePetRecalledState(level, petUuid, false);
+                return true;
+            }
+            nbt.remove("Recalled");
+            NbtFileIO.writeCompressed(nbt, nbtFile);
+            trulybestfriends.updatePetRecalledState(level, petUuid, false);
+        } catch (IOException e) {
+            trulybestfriends.LOGGER.error("Failed to clear Recalled flag for {}: {}", petUuid, e.getMessage());
+            return false;
+        }
+
+        if (summonPet(player, petUuid, level, nbt)) {
+            player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT,
+                    net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
+            return true;
+        }
+
+        // Summon failed: roll back the Recalled flag so the pet is not lost
+        try {
+            NbtFileIO.writeCompressed(recalledSnapshot, nbtFile);
+            trulybestfriends.updatePetRecalledState(level, petUuid, true);
+        } catch (IOException rollbackError) {
+            trulybestfriends.LOGGER.error("Failed to roll back recalled state for {}: {}",
+                    petUuid, rollbackError.getMessage(), rollbackError);
+        }
+        return false;
     }
 }

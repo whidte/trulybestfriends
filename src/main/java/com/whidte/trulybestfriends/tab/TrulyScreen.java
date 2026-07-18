@@ -61,6 +61,7 @@ public class TrulyScreen extends Screen {
 	long lastGlowClickTime = 0;
 	UUID deletePromptUuid;
 	GlowButton glowButton;
+	DeleteButton deleteButton;
 	ActionButton actionButton;
 	SummonToPlayerButton summonToPlayerButton;
 	private SpeciesDropdown speciesFilterButton;
@@ -129,11 +130,6 @@ public class TrulyScreen extends Screen {
 
 	boolean hasSelection() {
 		return getSelectedUuid() != null;
-	}
-
-	boolean isSelectedPetInactive() {
-		CompoundTag nbt = getSelectedNbt();
-		return nbt != null && (nbt.getBoolean("Recalled") || isSelectedPetDead() || isSelectedPetLost());
 	}
 
 	boolean isSelectedPetDead() {
@@ -267,6 +263,8 @@ public class TrulyScreen extends Screen {
 	private void addButtons() {
 		glowButton = this.addRenderableWidget(
 				new GlowButton(this.leftPos + GLOW_X, this.topPos + GLOW_Y, this));
+		deleteButton = this.addRenderableWidget(
+				new DeleteButton(this.leftPos + DELETE_X, this.topPos + DELETE_Y, this));
 		actionButton = this.addRenderableWidget(
 				new ActionButton(this.leftPos + ACTION_X, this.topPos + ACTION_Y, this));
 		summonToPlayerButton = this.addRenderableWidget(new SummonToPlayerButton(
@@ -530,6 +528,12 @@ public class TrulyScreen extends Screen {
 				petNbtCache.remove(uuid);
 				invalidatePreviewEntity(uuid);
 				petPriorities.remove(uuid);
+				cooldowns.remove(uuid);
+				if (uuid.equals(warningUuid)) {
+					warningUuid = null;
+					warningText = null;
+					warningUntil = 0L;
+				}
 				if (uuid.equals(deletePromptUuid)) deletePromptUuid = null;
 				normalizeSpeciesFilter();
 				rebuildFilteredPetUuids(deletedSelectedPet ? null : previousSelection, false);
@@ -563,6 +567,7 @@ public class TrulyScreen extends Screen {
 	private void updateButtonVisibility() {
 		boolean has = hasSelection();
 		if (glowButton != null) glowButton.visible = has;
+		if (deleteButton != null) deleteButton.visible = has;
 		if (actionButton != null) actionButton.visible = has;
 		if (summonToPlayerButton != null) summonToPlayerButton.visible = has;
 	}
@@ -728,6 +733,8 @@ public class TrulyScreen extends Screen {
 				speciesDropdown = dropdown;
 			} else if (listener instanceof PetEntry entry && entry.isSelected()) {
 				selectedEntry = entry;
+			} else if (listener instanceof DeleteButton) {
+				// Render above the entity preview below so large models cannot cover the X.
 			} else if (listener instanceof net.minecraft.client.gui.components.Renderable renderable) {
 				renderable.render(g, mouseX, mouseY, partialTick);
 			}
@@ -749,6 +756,16 @@ public class TrulyScreen extends Screen {
 				renderHealthBar(g);
 				renderPetInfo(g);
 				renderPetLocation(g, mouseX, mouseY);
+				g.flush();
+			} finally {
+				g.pose().popPose();
+			}
+		}
+		if (deleteButton != null && deleteButton.visible) {
+			g.pose().pushPose();
+			g.pose().translate(0.0, 0.0, PET_INFO_OVERLAY_Z + 1);
+			try {
+				deleteButton.render(g, mouseX, mouseY, partialTick);
 				g.flush();
 			} finally {
 				g.pose().popPose();

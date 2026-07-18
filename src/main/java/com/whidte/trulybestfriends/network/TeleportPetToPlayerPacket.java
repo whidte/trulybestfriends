@@ -616,4 +616,13 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     public static void clearPendingSummons() {
         pendingSummons.clear();
     }
+
+    /** Cancel a queued summon when its pet is explicitly untracked/deleted. */
+    public static void cancelPendingSummons(UUID playerUuid, UUID petUuid) {
+        for (PendingSummon pending : new ArrayList<>(pendingSummons)) {
+            if (pending.playerUuid.equals(playerUuid) && pending.petUuid.equals(petUuid)) {
+                finishPendingSummon(pending);
+            }
+        }
+    }
 }
