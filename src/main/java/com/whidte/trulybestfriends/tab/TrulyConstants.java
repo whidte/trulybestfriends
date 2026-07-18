@@ -102,6 +102,11 @@ final class TrulyConstants {
 	static final int REFRESH_INTERVAL = 20;
 	/** 发光按钮的正方形边长。 */
 	static final int GLOW_BUTTON_SIZE = 18;
+	/** Independent delete control at the upper-left corner of the main preview. */
+	static final int DELETE_X = 3;
+	static final int DELETE_Y = 3;
+	static final int DELETE_BUTTON_WIDTH = 7;
+	static final int DELETE_BUTTON_HEIGHT = 7;
 
 	// --- Textures ---
 	/** 标签页主面板背景纹理。 */
@@ -112,8 +117,12 @@ final class TrulyConstants {
 			ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/recipe_book.png");
 	/** 原版发光效果图标纹理。 */
 	static final ResourceLocation GLOWING_ICON = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/mob_effect/glowing.png");
-	/** 原版信标界面纹理，其中包含删除按钮使用的取消图标。 */
-	static final ResourceLocation BEACON_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/container/beacon.png");
+	/** Bundled copies of the vanilla 1.21.1 Realms close-button sprites for 1.20.1. */
+	static final ResourceLocation DELETE_ICON_TEXTURE = ResourceLocation.fromNamespaceAndPath(
+			"truly_best_friends", "textures/gui/cross_button.png");
+	static final ResourceLocation DELETE_ICON_HIGHLIGHTED_TEXTURE = ResourceLocation.fromNamespaceAndPath(
+			"truly_best_friends", "textures/gui/cross_button_highlighted.png");
+	static final int DELETE_ICON_SOURCE_SIZE = 14;
 	/** 模组内通用操作按钮的自定义纹理。 */
 	static final ResourceLocation WIDGET_BUTTON = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/widget_button.png");
 	/** 原版通用控件纹理。 */

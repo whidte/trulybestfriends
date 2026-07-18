@@ -50,7 +50,7 @@
 | `reviveCooldownSeconds` | `120` | 复活冷却时间（秒，0~86400） |
 | `noReviveWhitelist` | `["touhou_little_maid:maid"]` | 保留掉落物且不可复活的实体类型列表 |
 | `autoRegisterBlacklist` | （见配置） | 不自动登记为宠物的实体类型列表，支持 `namespace:*` 通配符（默认屏蔽 Iron's Spells 的召唤物） |
-| `dimensionNames` | （见配置） | 维度显示名，格式 `维度ID\|语言码\|名称` |
+| `clearOnDeathWhitelist` | （见配置） | 死亡时保留掉落物，并彻底清除追踪数据的实体类型列表 |
 | `enableLoginLoadDiagnostics` | `false` | 登录时校验宠物 NBT 文件并打印日志（调试用） |
 
 ## 数据存储位置
@@ -59,7 +59,7 @@
 
 ```
 <存档>/trulybestfriends/
-├── pets_index.nbt              # 宠物索引（按实体类型分组）
+├── pets_index.nbt              # 宠物索引及手动取消追踪的 UUID 黑名单
 └── <玩家UUID>/
     └── <宠物UUID>.nbt          # 每只宠物的完整 NBT
 ```
