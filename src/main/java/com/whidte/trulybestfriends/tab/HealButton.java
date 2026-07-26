@@ -21,7 +21,7 @@ class HealButton extends AbstractWidget {
     private final TrulyScreen screen;
 
     HealButton(int x, int y, TrulyScreen screen) {
-        super(x, y, 20, 20, Component.translatable("trulybestfriends.heal.label"));
+        super(x, y, 20, 20, Component.translatable("effect.minecraft.regeneration"));
         this.screen = screen;
     }
 
@@ -74,7 +74,7 @@ class HealButton extends AbstractWidget {
         CompoundTag nbt = screen.getSelectedNbt();
         List<Component> lines = new ArrayList<>();
         if (nbt == null) {
-            lines.add(Component.translatable("trulybestfriends.heal.label"));
+            lines.add(Component.translatable("effect.minecraft.regeneration"));
             if (disabledReason != null) {
                 lines.add(disabledReason.copy().withStyle(net.minecraft.ChatFormatting.RED));
             }

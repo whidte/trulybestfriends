@@ -35,7 +35,9 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
@@ -45,6 +47,7 @@ import java.util.function.UnaryOperator;
 
 /** Server-side: teleport a released (non-recalled) pet to the player's current position. */
 public class TeleportPetToPlayerPacket implements CustomPacketPayload {
+    private static final Set<UUID> UNTRACKED_DEATH_RELEASES = ConcurrentHashMap.newKeySet();
     public static final Type<TeleportPetToPlayerPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "teleport_pet_to_player"));
     public static final StreamCodec<FriendlyByteBuf, TeleportPetToPlayerPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), TeleportPetToPlayerPacket::decode);
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -251,6 +254,34 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             return true;
         }
         return false;
+    }
+
+    public static boolean isReleasingUntrackedDeath(UUID petUuid) {
+        return UNTRACKED_DEATH_RELEASES.contains(petUuid);
+    }
+
+    /** Adds a stored-dead pet alive so untracking can finish before fatal damage is applied. */
+    public static Entity releaseDeadPetForUntracking(CompoundTag nbt, UUID petUuid,
+                                                      ServerPlayer player, ServerLevel level) {
+        CompoundTag releaseNbt = PetDeathState.prepareForUntrackedRelease(nbt);
+        Entity entity = PetEntitySnapshot.restore(releaseNbt, petUuid, level);
+        if (!(entity instanceof LivingEntity living)) return null;
+        restoreChestInventory(entity, releaseNbt);
+        living.setHealth(1.0F);
+
+        int radius = Math.max(1, (int) Math.ceil(living.getBbWidth()));
+        Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(level, player, living, radius, 6, 16);
+        entity.setPos(safePosition != null ? safePosition : player.position());
+
+        UNTRACKED_DEATH_RELEASES.add(petUuid);
+        try {
+            if (!level.tryAddFreshEntityWithPassengers(entity)) return null;
+        } finally {
+            UNTRACKED_DEATH_RELEASES.remove(petUuid);
+        }
+        restoreChestInventory(entity, releaseNbt);
+        living.setHealth(1.0F);
+        return entity;
     }
 
     static CompoundTag prepareSummonSnapshot(CompoundTag nbt) {

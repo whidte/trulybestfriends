@@ -28,4 +28,14 @@ public final class PetDeathState {
         return isStoredDead(nbt)
                 || (nbt.contains("Health") && nbt.getFloat("Health") <= 0.0F);
     }
+
+    /** Creates a live release snapshot without mutating the revivable stored copy. */
+    public static CompoundTag prepareForUntrackedRelease(CompoundTag nbt) {
+        CompoundTag released = nbt.copy();
+        clear(released);
+        released.remove("Recalled");
+        released.remove("DeathTime");
+        released.putFloat("Health", 1.0F);
+        return released;
+    }
 }
