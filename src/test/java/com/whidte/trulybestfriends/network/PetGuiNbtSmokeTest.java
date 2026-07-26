@@ -13,7 +13,7 @@ public final class PetGuiNbtSmokeTest {
     private PetGuiNbtSmokeTest() {}
 
     public static void main(String[] args) {
-        testFullNbtPassengerFiltering();
+        testClientNbtFiltering();
         testFullListBatching();
         testUnchangedUpdateDeduplication();
         testShoulderEntityLookup();
@@ -38,7 +38,7 @@ public final class PetGuiNbtSmokeTest {
                 "empty shoulder matched a pet");
     }
 
-    private static void testFullNbtPassengerFiltering() {
+    private static void testClientNbtFiltering() {
         CompoundTag storedNbt = new CompoundTag();
         storedNbt.putString("EntityType", "minecraft:donkey");
         storedNbt.putFloat("Health", 20.0f);
@@ -53,6 +53,10 @@ public final class PetGuiNbtSmokeTest {
         storedNbt.put("ArmorItem", largeCompound("VisualHorseArmor"));
         storedNbt.put("Passengers", largeList("PassengerData"));
         storedNbt.put("Items", largeList("InventoryData"));
+        storedNbt.put("Inventory", largeList("AlternateInventoryData"));
+        storedNbt.putInt("TBF_ChestSize", 17);
+        storedNbt.put("TBF_ChestItems", largeList("ContainerBackupData"));
+        storedNbt.putInt("TBF_ItemHandlerSize", 23);
         storedNbt.put("TBF_ItemHandlerItems", largeList("BackupInventoryData"));
         storedNbt.put("ForgeCaps", largeCompound("ForgeCapabilityData"));
         storedNbt.put("CuriosInventory", largeCompound("CuriosData"));
@@ -74,11 +78,18 @@ public final class PetGuiNbtSmokeTest {
         require(clientNbt.hasUUID("Owner"), "tame owner UUID was not copied");
         require(clientNbt.contains("ArmorItem"), "visual horse armor was not copied");
         require(!clientNbt.contains("Passengers"), "passenger entity tree leaked into client sync");
-        require(clientNbt.contains("Items"), "vanilla inventory was not copied");
-        require(clientNbt.contains("TBF_ItemHandlerItems"), "inventory backup was not copied");
+        require(!clientNbt.contains("Items"), "vanilla inventory leaked into client sync");
+        require(!clientNbt.contains("Inventory"), "alternate inventory leaked into client sync");
+        require(!clientNbt.contains("TBF_ChestSize"), "container backup size leaked into client sync");
+        require(!clientNbt.contains("TBF_ChestItems"), "container backup leaked into client sync");
+        require(!clientNbt.contains("TBF_ItemHandlerSize"), "item handler backup size leaked into client sync");
+        require(!clientNbt.contains("TBF_ItemHandlerItems"), "item handler backup leaked into client sync");
         require(clientNbt.contains("ForgeCaps"), "Forge capabilities were not copied");
         require(clientNbt.contains("CuriosInventory"), "Curios data was not copied");
         require(storedNbt.contains("Items"), "creating GUI NBT modified the stored snapshot");
+        require(storedNbt.contains("Inventory"), "filtering modified the alternate stored inventory");
+        require(storedNbt.contains("TBF_ChestItems"), "filtering modified the stored container backup");
+        require(storedNbt.contains("TBF_ItemHandlerItems"), "filtering modified the stored item handler backup");
         require(storedNbt.contains("Passengers"), "filtering modified the stored snapshot");
     }
 

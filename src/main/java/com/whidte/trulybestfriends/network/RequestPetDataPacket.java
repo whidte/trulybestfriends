@@ -261,9 +261,16 @@ public class RequestPetDataPacket implements CustomPacketPayload {
 
     static CompoundTag toClientNbt(CompoundTag source) {
         CompoundTag nbt = source.copy();
-        // Passenger entity trees can recursively contain complete entities and
-        // are not needed to render or manage the tracked pet itself.
+        // Entity trees and stored inventory contents are not needed to render or
+        // manage the tracked pet. Keep visual equipment fields such as ArmorItem,
+        // ArmorItems, HandItems, and SaddleItem intact for the GUI preview.
         nbt.remove("Passengers");
+        nbt.remove("Items");
+        nbt.remove("Inventory");
+        nbt.remove("TBF_ChestSize");
+        nbt.remove("TBF_ChestItems");
+        nbt.remove("TBF_ItemHandlerSize");
+        nbt.remove("TBF_ItemHandlerItems");
         return nbt;
     }
 
