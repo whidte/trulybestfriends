@@ -232,6 +232,8 @@ public class trulybestfriends {
         UUID owner = getCompatOwnerUUID(animal);
         if (owner != null) {
             if (isPetUUIDBlacklisted((ServerLevel) animal.level(), animal.getUUID())) return;
+            ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(animal.getType());
+            if (entityType != null && Config.isAutoRegisterBlacklisted(entityType.toString())) return;
             if (countOwnerPets((ServerLevel) animal.level(), owner) >= Config.maxPets) {
                 ServerPlayer ownerPlayer = animal.level().getServer().getPlayerList().getPlayer(owner);
                 if (ownerPlayer != null) {

@@ -6,7 +6,6 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
@@ -37,7 +36,7 @@ public class DeletePetDataPacket implements CustomPacketPayload {
             if (trulybestfriends.deletePetData(player, packet.petUuid)) {
                 PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
                 SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
-                PacketDistributor.sendToPlayer(player, reply);
+                SyncPetDataPacket.sendToPlayer(player, reply);
             }
         });
 

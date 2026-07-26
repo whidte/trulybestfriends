@@ -15,6 +15,7 @@ public final class PetGuiNbtSmokeTest {
     public static void main(String[] args) {
         testClientNbtFiltering();
         testFullListBatching();
+        testPacketFragmentation();
         testUnchangedUpdateDeduplication();
         testShoulderEntityLookup();
         System.out.println("PetGuiNbtSmokeTest: passed");
@@ -141,6 +142,39 @@ public final class PetGuiNbtSmokeTest {
         require(PetSyncTracker.shouldSendUpdate(playerUuid, petUuid, changed),
                 "clearing a player did not clear its sync baseline");
         PetSyncTracker.clearAll();
+    }
+
+    private static void testPacketFragmentation() {
+        UUID petUuid = UUID.randomUUID();
+        CompoundTag large = new CompoundTag();
+        for (int i = 0; i < 8; i++) {
+            large.putString("LargeField" + i, "x".repeat(16_000));
+        }
+
+        SyncPetDataPacket logical = SyncPetDataPacket.update(petUuid, large);
+        List<SyncPetDataPacket> fragments = SyncPetDataPacket.splitForWire(logical);
+        require(fragments.size() > 1, "large update was not fragmented");
+
+        SyncPetDataPacket assembled = null;
+        for (SyncPetDataPacket fragment : fragments) {
+            FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+            try {
+                SyncPetDataPacket.encode(fragment, buffer);
+                require(buffer.readableBytes() <= SyncPetDataPacket.MAX_PACKET_BYTES,
+                        "fragment exceeded the packet size limit");
+                SyncPetDataPacket decoded = SyncPetDataPacket.decode(buffer);
+                require(decoded.isFragment(), "fragment codec lost fragment mode");
+                assembled = SyncPetDataPacket.collectFragment(decoded);
+            } finally {
+                buffer.release();
+            }
+        }
+
+        require(assembled != null, "fragments did not reassemble");
+        require(assembled.getMode() == SyncPetDataPacket.MODE_UPDATE,
+                "reassembled packet changed mode");
+        require(petUuid.equals(assembled.getPetUuid()), "reassembled packet changed UUID");
+        require(large.equals(assembled.getPetNbt()), "reassembled packet changed NBT");
     }
 
     private static List<SyncPetDataPacket> requireSingleEntryPackets(int entryCount) {

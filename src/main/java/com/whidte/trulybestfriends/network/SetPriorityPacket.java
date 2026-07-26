@@ -7,7 +7,6 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.File;
@@ -58,7 +57,7 @@ public class SetPriorityPacket implements CustomPacketPayload {
                 PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
                 // Pet was deleted — notify client so it can remove the entry
                 SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
-                PacketDistributor.sendToPlayer(player, reply);
+                SyncPetDataPacket.sendToPlayer(player, reply);
                 return;
             }
 
@@ -72,7 +71,7 @@ public class SetPriorityPacket implements CustomPacketPayload {
                         player, packet.petUuid, nbt);
                 if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {
                     SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
-                    PacketDistributor.sendToPlayer(player, reply);
+                    SyncPetDataPacket.sendToPlayer(player, reply);
                 }
             } catch (Exception e) {
                 trulybestfriends.LOGGER.error("Failed to update priority for {}: {}", packet.petUuid, e.getMessage());

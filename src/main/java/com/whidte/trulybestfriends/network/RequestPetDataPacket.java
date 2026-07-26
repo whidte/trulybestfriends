@@ -21,7 +21,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.File;
@@ -122,14 +121,14 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                 }
                 PetSyncTracker.replaceFullSnapshot(player.getUUID(), sentSnapshot);
                 for (SyncPetDataPacket reply : SyncPetDataPacket.fullListBatches(list)) {
-                    PacketDistributor.sendToPlayer(player, reply);
+                    SyncPetDataPacket.sendToPlayer(player, reply);
                 }
             } else {
                 File nbtFile = petDir.resolve(packet.petUuid + ".nbt").toFile();
                 if (!nbtFile.exists()) {
                     PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
                     SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
-                    PacketDistributor.sendToPlayer(player, reply);
+                    SyncPetDataPacket.sendToPlayer(player, reply);
                     return;
                 }
 
@@ -145,7 +144,7 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                             player.server, player.getUUID(), packet.petUuid, storedNbt, replyNbt);
                     if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {
                         SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
-                        PacketDistributor.sendToPlayer(player, reply);
+                        SyncPetDataPacket.sendToPlayer(player, reply);
                     }
                 } catch (Exception e) {
                     trulybestfriends.LOGGER.error("Failed to read pet file for {}: {}", packet.petUuid, e.getMessage());

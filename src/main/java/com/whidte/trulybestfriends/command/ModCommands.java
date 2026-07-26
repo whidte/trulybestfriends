@@ -6,9 +6,11 @@ import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
@@ -17,6 +19,7 @@ import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 
 /**
  * Registers {@code /tbf} commands.
@@ -44,20 +47,38 @@ public class ModCommands {
         dispatcher.register(
                 Commands.literal("tbf")
                         .then(Commands.literal("load")
+                                .requires(source -> source.hasPermission(2))
                                 .executes(ctx -> loadPointedPet(ctx.getSource()))
                         )
         );
     }
 
+    @SubscribeEvent
+    public static void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        var heldItemId = BuiltInRegistries.ITEM.getKey(event.getItemStack().getItem());
+        if (heldItemId == null || !heldItemId.toString().equals(Config.manualRegisterItem)) return;
+
+        loadPet(player.createCommandSourceStack(), player, event.getTarget(), false);
+        event.setCancellationResult(InteractionResult.SUCCESS);
+        event.setCanceled(true);
+    }
+
     private static int loadPointedPet(CommandSourceStack source) throws CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
-        ServerLevel level = source.getLevel();
 
         Entity pointed = pickPointedEntity(player);
         if (pointed == null) {
-            source.sendFailure(Component.literal("No entity in view."));
+            source.sendFailure(Component.translatable("trulybestfriends.load.no_entity"));
             return 0;
         }
+
+        return loadPet(source, player, pointed, true);
+    }
+
+    private static int loadPet(CommandSourceStack source, ServerPlayer player, Entity pointed,
+                               boolean informAdmins) {
+        ServerLevel level = player.serverLevel();
 
         // 权限检查：注册自己的宠物无需 OP；注册别人的宠物需要 OP（等级 ≥2）。
         // 无法解析 owner 的情况留待 tryLoadPet 返回 NOT_A_PET 反馈，不在此拦截。
@@ -65,40 +86,29 @@ public class ModCommands {
         if (ownerUUID != null
                 && !ownerUUID.equals(player.getUUID())
                 && !source.hasPermission(2)) {
-            source.sendFailure(Component.literal(
-                    "You do not have permission to load another player's pet (requires OP)."));
+            source.sendFailure(Component.translatable("trulybestfriends.load.no_permission"));
             return 0;
         }
 
-        // 记录读取前的黑名单状态，用于在成功消息里附带"已移除黑名单条目"提示。
-        boolean wasBlacklisted = trulybestfriends.isPetUUIDBlacklisted(level, pointed.getUUID());
-        String entityName = pointed.getDisplayName().getString();
+        Component entityName = pointed.getDisplayName();
         java.util.UUID petUUID = pointed.getUUID();
 
         // 走原模组的正常读取判定与流程（见 trulybestfriends#tryLoadPet）。
         trulybestfriends.LoadResult result = trulybestfriends.tryLoadPet(pointed, level);
         switch (result) {
             case OK -> {
-                if (wasBlacklisted) {
-                    source.sendSuccess(() -> Component.literal(
-                            "Removed blacklist entry for " + entityName + " (" + petUUID + ")."), true);
-                }
-                source.sendSuccess(() -> Component.literal(
-                        "Loaded " + entityName + " (" + petUUID + ") into the pet tab."), true);
+                source.sendSuccess(() -> Component.translatable(
+                        "trulybestfriends.load.success", entityName, petUUID.toString()), informAdmins);
                 return 1;
             }
-            case NOT_A_PET -> source.sendFailure(Component.literal(
-                    "Pointed entity is not a readable pet (must be a living entity with an Owner NBT field)."));
-            case UNKNOWN_OWNER -> source.sendFailure(Component.literal(
-                    "Pointed entity's owner is not a known player on this server."));
-            case TYPE_BLACKLISTED -> source.sendFailure(Component.literal(
-                    "Pointed entity type is in autoRegisterBlacklist and cannot be loaded."));
-            case LIMIT_REACHED -> source.sendFailure(Component.literal(
-                    "Owner has reached maxPets limit (" + Config.maxPets + ")."));
-            case UNBLACKLIST_FAILED -> source.sendFailure(Component.literal(
-                    "Entity is blacklisted but the entry could not be removed."));
-            case SAVE_FAILED -> source.sendFailure(Component.literal(
-                    "Failed to save pet data for pointed entity."));
+            case NOT_A_PET -> source.sendFailure(Component.translatable("trulybestfriends.load.not_a_pet"));
+            case UNKNOWN_OWNER -> source.sendFailure(Component.translatable("trulybestfriends.load.unknown_owner"));
+            case TYPE_BLACKLISTED -> source.sendFailure(Component.translatable("trulybestfriends.load.type_blacklisted"));
+            case LIMIT_REACHED -> source.sendFailure(Component.translatable(
+                    "trulybestfriends.load.limit_reached", Config.maxPets));
+            case UNBLACKLIST_FAILED -> source.sendFailure(Component.translatable(
+                    "trulybestfriends.load.unblacklist_failed"));
+            case SAVE_FAILED -> source.sendFailure(Component.translatable("trulybestfriends.load.save_failed"));
         }
         return 0;
     }
