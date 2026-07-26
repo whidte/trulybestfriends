@@ -2,16 +2,21 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
+import io.netty.buffer.Unpooled;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.PacketDistributor;
 
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -30,7 +35,17 @@ public class SyncPetDataPacket {
     public static final int MODE_FULL_LIST = 0;
     public static final int MODE_UPDATE = 1;
     public static final int MODE_DELETE = 2;
+    /** Transport-only mode used when a logical packet exceeds the wire limit. */
+    private static final int MODE_FRAGMENT = 3;
     public static final int MAX_FULL_LIST_ENTRIES = 1;
+    /** Maximum encoded payload size for one custom packet (30 KiB). */
+    public static final int MAX_PACKET_BYTES = 30 * 1024;
+    /* Leave room for the fragment header and the custom-channel envelope. */
+    private static final int WIRE_OVERHEAD_RESERVE_BYTES = 256;
+    private static final int MAX_LOGICAL_PACKET_BYTES = MAX_PACKET_BYTES - WIRE_OVERHEAD_RESERVE_BYTES;
+    private static final int MAX_FRAGMENT_CHUNK_BYTES = MAX_LOGICAL_PACKET_BYTES;
+    private static final int MAX_FRAGMENT_COUNT = 4096;
+    private static final Map<UUID, FragmentAccumulator> CLIENT_FRAGMENTS = new ConcurrentHashMap<>();
 
     private final int mode;
     private final UUID petUuid;          // used by UPDATE / DELETE; null for FULL_LIST
@@ -39,11 +54,23 @@ public class SyncPetDataPacket {
     private final long serverTime;
     private final boolean firstBatch;
     private final boolean lastBatch;
+    private final UUID fragmentId;
+    private final int originalMode;
+    private final int fragmentIndex;
+    private final int fragmentCount;
+    private final byte[] fragmentData;
 
     // --- Constructors ---
 
     private SyncPetDataPacket(int mode, UUID petUuid, CompoundTag petNbt, ListTag fullList, long serverTime,
                               boolean firstBatch, boolean lastBatch) {
+        this(mode, petUuid, petNbt, fullList, serverTime, firstBatch, lastBatch,
+                null, -1, -1, -1, null);
+    }
+
+    private SyncPetDataPacket(int mode, UUID petUuid, CompoundTag petNbt, ListTag fullList, long serverTime,
+                              boolean firstBatch, boolean lastBatch, UUID fragmentId, int originalMode,
+                              int fragmentIndex, int fragmentCount, byte[] fragmentData) {
         this.mode = mode;
         this.petUuid = petUuid;
         this.petNbt = petNbt;
@@ -51,6 +78,11 @@ public class SyncPetDataPacket {
         this.serverTime = serverTime;
         this.firstBatch = firstBatch;
         this.lastBatch = lastBatch;
+        this.fragmentId = fragmentId;
+        this.originalMode = originalMode;
+        this.fragmentIndex = fragmentIndex;
+        this.fragmentCount = fragmentCount;
+        this.fragmentData = fragmentData;
     }
 
     /** Split a full snapshot into ordered packets containing exactly one pet each. */
@@ -90,6 +122,53 @@ public class SyncPetDataPacket {
         return new SyncPetDataPacket(MODE_DELETE, uuid, null, null, System.currentTimeMillis(), true, true);
     }
 
+    /** Sends one logical packet, splitting its encoded form when necessary. */
+    public static void sendToPlayer(ServerPlayer player, SyncPetDataPacket packet) {
+        for (SyncPetDataPacket wirePacket : packet.splitForWire()) {
+            trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), wirePacket);
+        }
+    }
+
+    /** Returns this packet or ordered transport fragments small enough for the wire. */
+    static List<SyncPetDataPacket> splitForWire(SyncPetDataPacket packet) {
+        return packet.splitForWire();
+    }
+
+    private List<SyncPetDataPacket> splitForWire() {
+        if (mode == MODE_FRAGMENT) return List.of(this);
+
+        byte[] encoded = encodeLogical(this);
+        if (encoded.length <= MAX_LOGICAL_PACKET_BYTES) return List.of(this);
+
+        int count = (encoded.length + MAX_FRAGMENT_CHUNK_BYTES - 1) / MAX_FRAGMENT_CHUNK_BYTES;
+        if (count > MAX_FRAGMENT_COUNT) {
+            throw new IllegalArgumentException("Sync packet requires too many fragments: " + count);
+        }
+
+        UUID id = UUID.randomUUID();
+        List<SyncPetDataPacket> fragments = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            int start = index * MAX_FRAGMENT_CHUNK_BYTES;
+            int end = Math.min(start + MAX_FRAGMENT_CHUNK_BYTES, encoded.length);
+            byte[] chunk = java.util.Arrays.copyOfRange(encoded, start, end);
+            fragments.add(new SyncPetDataPacket(MODE_FRAGMENT, null, null, null, 0L,
+                    false, false, id, mode, index, count, chunk));
+        }
+        return fragments;
+    }
+
+    private static byte[] encodeLogical(SyncPetDataPacket packet) {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            encode(packet, buffer);
+            byte[] bytes = new byte[buffer.readableBytes()];
+            buffer.getBytes(buffer.readerIndex(), bytes);
+            return bytes;
+        } finally {
+            buffer.release();
+        }
+    }
+
     // --- Codec ---
 
     public static void encode(SyncPetDataPacket packet, FriendlyByteBuf buf) {
@@ -114,6 +193,13 @@ public class SyncPetDataPacket {
             case MODE_DELETE -> {
                 buf.writeUUID(packet.petUuid);
                 buf.writeLong(packet.serverTime);
+            }
+            case MODE_FRAGMENT -> {
+                buf.writeUUID(packet.fragmentId);
+                buf.writeVarInt(packet.originalMode);
+                buf.writeVarInt(packet.fragmentIndex);
+                buf.writeVarInt(packet.fragmentCount);
+                buf.writeByteArray(packet.fragmentData);
             }
             default -> throw new IllegalArgumentException("Unknown mode: " + packet.mode);
         }
@@ -157,6 +243,20 @@ public class SyncPetDataPacket {
                 long serverTime = buf.readLong();
                 yield new SyncPetDataPacket(MODE_DELETE, uuid, null, null, serverTime, true, true);
             }
+            case MODE_FRAGMENT -> {
+                UUID fragmentId = buf.readUUID();
+                int originalMode = buf.readVarInt();
+                int fragmentIndex = buf.readVarInt();
+                int fragmentCount = buf.readVarInt();
+                if (originalMode < MODE_FULL_LIST || originalMode > MODE_DELETE
+                        || fragmentCount <= 0 || fragmentCount > MAX_FRAGMENT_COUNT
+                        || fragmentIndex < 0 || fragmentIndex >= fragmentCount) {
+                    throw new IllegalArgumentException("Invalid sync packet fragment metadata");
+                }
+                byte[] data = buf.readByteArray(MAX_FRAGMENT_CHUNK_BYTES);
+                yield new SyncPetDataPacket(MODE_FRAGMENT, null, null, null, 0L,
+                        false, false, fragmentId, originalMode, fragmentIndex, fragmentCount, data);
+            }
             default -> throw new IllegalArgumentException("Unknown mode: " + mode);
         };
     }
@@ -164,16 +264,88 @@ public class SyncPetDataPacket {
     // --- Handler (client side) ---
 
     public static void handle(SyncPetDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
+        final SyncPetDataPacket received = packet;
         ctx.get().enqueueWork(() -> {
+            SyncPetDataPacket applyPacket = received;
+            if (applyPacket.mode == MODE_FRAGMENT) {
+                SyncPetDataPacket complete = collectFragment(applyPacket);
+                if (complete == null) return;
+                applyPacket = complete;
+            }
             Minecraft mc = Minecraft.getInstance();
             if (mc.screen instanceof TrulyScreen screen) {
-                screen.applySyncPacket(packet);
+                screen.applySyncPacket(applyPacket);
             } else {
                 // Cache for later use when the screen opens
-                TrulyScreen.cacheSyncPacket(packet);
+                TrulyScreen.cacheSyncPacket(applyPacket);
             }
         });
         ctx.get().setPacketHandled(true);
+    }
+
+    static SyncPetDataPacket collectFragment(SyncPetDataPacket packet) {
+        FragmentAccumulator accumulator = CLIENT_FRAGMENTS.compute(packet.fragmentId, (id, existing) -> {
+            if (existing == null || existing.count != packet.fragmentCount
+                    || existing.originalMode != packet.originalMode) {
+                return new FragmentAccumulator(packet.originalMode, packet.fragmentCount);
+            }
+            return existing;
+        });
+        if (!accumulator.add(packet.fragmentIndex, packet.fragmentData)) {
+            CLIENT_FRAGMENTS.remove(packet.fragmentId, accumulator);
+            return null;
+        }
+        if (!accumulator.complete()) return null;
+
+        CLIENT_FRAGMENTS.remove(packet.fragmentId, accumulator);
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.wrappedBuffer(accumulator.join()));
+        try {
+            SyncPetDataPacket complete = decode(buffer);
+            if (complete.mode != packet.originalMode) return null;
+            return complete;
+        } finally {
+            buffer.release();
+        }
+    }
+
+    private static final class FragmentAccumulator {
+        private final int originalMode;
+        private final int count;
+        private final byte[][] chunks;
+        private int received;
+        private int totalBytes;
+
+        private FragmentAccumulator(int originalMode, int count) {
+            this.originalMode = originalMode;
+            this.count = count;
+            this.chunks = new byte[count][];
+        }
+
+        private synchronized boolean add(int index, byte[] data) {
+            if (index < 0 || index >= count || data == null || data.length > MAX_FRAGMENT_CHUNK_BYTES) {
+                return false;
+            }
+            if (chunks[index] == null) {
+                chunks[index] = data;
+                received++;
+                totalBytes += data.length;
+            }
+            return true;
+        }
+
+        private synchronized boolean complete() {
+            return received == count;
+        }
+
+        private synchronized byte[] join() {
+            byte[] result = new byte[totalBytes];
+            int offset = 0;
+            for (byte[] chunk : chunks) {
+                System.arraycopy(chunk, 0, result, offset, chunk.length);
+                offset += chunk.length;
+            }
+            return result;
+        }
     }
 
     // --- Accessors ---
@@ -185,4 +357,7 @@ public class SyncPetDataPacket {
     public long getServerTime() { return serverTime; }
     public boolean isFirstBatch() { return firstBatch; }
     public boolean isLastBatch() { return lastBatch; }
+    public boolean isFragment() { return mode == MODE_FRAGMENT; }
+    public int getFragmentIndex() { return fragmentIndex; }
+    public int getFragmentCount() { return fragmentCount; }
 }

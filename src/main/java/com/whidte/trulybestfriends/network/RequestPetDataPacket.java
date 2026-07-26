@@ -18,7 +18,6 @@ import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.network.PacketDistributor;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -116,14 +115,14 @@ public class RequestPetDataPacket {
                 }
                 PetSyncTracker.replaceFullSnapshot(player.getUUID(), sentSnapshot);
                 for (SyncPetDataPacket reply : SyncPetDataPacket.fullListBatches(list)) {
-                    trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                    SyncPetDataPacket.sendToPlayer(player, reply);
                 }
             } else {
                 File nbtFile = petDir.resolve(packet.petUuid + ".nbt").toFile();
                 if (!nbtFile.exists()) {
                     PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
                     SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
-                    trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                    SyncPetDataPacket.sendToPlayer(player, reply);
                     return;
                 }
 
@@ -139,7 +138,7 @@ public class RequestPetDataPacket {
                             player.server, player.getUUID(), packet.petUuid, storedNbt, replyNbt);
                     if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {
                         SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
-                        trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                        SyncPetDataPacket.sendToPlayer(player, reply);
                     }
                 } catch (Exception e) {
                     trulybestfriends.LOGGER.error("Failed to read pet file for {}: {}", packet.petUuid, e.getMessage());

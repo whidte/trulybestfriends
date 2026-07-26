@@ -5,7 +5,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.PacketDistributor;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -53,7 +52,7 @@ public class SetPriorityPacket {
                 PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
                 // Pet was deleted — notify client so it can remove the entry
                 SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
-                trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                SyncPetDataPacket.sendToPlayer(player, reply);
                 return;
             }
 
@@ -67,7 +66,7 @@ public class SetPriorityPacket {
                         player, packet.petUuid, nbt);
                 if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {
                     SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
-                    trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
+                    SyncPetDataPacket.sendToPlayer(player, reply);
                 }
             } catch (Exception e) {
                 trulybestfriends.LOGGER.error("Failed to update priority for {}: {}", packet.petUuid, e.getMessage());

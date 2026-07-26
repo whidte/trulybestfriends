@@ -47,8 +47,8 @@ public class Config
             .defineInRange("recallCooldownMs", 3000, 250, 30000);
 
     public static final ForgeConfigSpec.IntValue MAX_PETS = BUILDER
-            .comment("Maximum number of pets a player can have tracked at once (1-128, default 64)")
-            .defineInRange("maxPets", 64, 1, 128);
+            .comment("Maximum number of pets a player can have tracked at once (1-512, default 64)")
+            .defineInRange("maxPets", 64, 1, 512);
 
     public static final ForgeConfigSpec.IntValue AREA_RECALL_DEFAULT_RANGE = BUILDER
             .comment("Default range (blocks) for area recall when holding Shift. Adjustable with scroll wheel (1-16).")
@@ -61,6 +61,12 @@ public class Config
     public static final ForgeConfigSpec.ConfigValue<String> REVIVE_ITEM = BUILDER
             .comment("Item ID required to revive a dead pet (e.g. \"minecraft:totem_of_undying\").")
             .define("reviveItem", "minecraft:totem_of_undying");
+
+    public static final ForgeConfigSpec.ConfigValue<String> MANUAL_REGISTER_ITEM = BUILDER
+            .comment("Item used to manually register a pet by right-clicking the entity.",
+                    "The registration uses the same checks and behavior as /tbf load.")
+            .define("manualRegisterItem", "minecraft:stick",
+                    value -> value instanceof String && ResourceLocation.tryParse((String) value) != null);
 
     public static final ForgeConfigSpec.IntValue REVIVE_ITEM_COUNT = BUILDER
             .comment("Number of revive items required to revive a dead pet.")
@@ -163,6 +169,7 @@ public class Config
     public static int areaRecallDefaultRange;
     public static int maxPendingSummons;
     public static String reviveItem;
+    public static String manualRegisterItem;
     public static int reviveItemCount;
     public static int reviveCooldownSeconds;
     public static int healHungerCost;
@@ -195,6 +202,7 @@ public class Config
         areaRecallDefaultRange = AREA_RECALL_DEFAULT_RANGE.get();
         maxPendingSummons = MAX_PENDING_SUMMONS.get();
         reviveItem = REVIVE_ITEM.get();
+        manualRegisterItem = MANUAL_REGISTER_ITEM.get();
         reviveItemCount = REVIVE_ITEM_COUNT.get();
         reviveCooldownSeconds = REVIVE_COOLDOWN_SECONDS.get();
         healHungerCost = HEAL_HUNGER_COST.get();
