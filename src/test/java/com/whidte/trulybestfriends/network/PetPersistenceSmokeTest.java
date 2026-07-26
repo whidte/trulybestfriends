@@ -51,6 +51,11 @@ public final class PetPersistenceSmokeTest {
         require(snapshot.getFloat("Health") == 0.0F, "stored-dead health was not normalized");
         require(!snapshot.contains("Recalled"), "stored-dead snapshot retained recalled state");
 
+        CompoundTag released = PetDeathState.prepareForUntrackedRelease(snapshot);
+        require(released.getFloat("Health") == 1.0F, "released death snapshot was not made alive");
+        require(!PetDeathState.isStoredDead(released), "released death snapshot retained the storage marker");
+        require(PetDeathState.isStoredDead(snapshot), "release preparation mutated the stored snapshot");
+
         PetDeathState.clear(snapshot);
         require(!PetDeathState.isStoredDead(snapshot), "stored-death marker was not cleared");
         require(PetDeathState.isDeadSnapshot(snapshot), "legacy health-based death compatibility was lost");

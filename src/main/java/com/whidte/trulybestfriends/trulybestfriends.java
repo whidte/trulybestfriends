@@ -223,6 +223,7 @@ public class trulybestfriends {
     public void onEntityJoinLevel(EntityJoinLevelEvent event) {
         if (event.getLevel().isClientSide() || !(event.getLevel() instanceof ServerLevel level)) return;
         Entity entity = event.getEntity();
+        if (TeleportPetToPlayerPacket.isReleasingUntrackedDeath(entity.getUUID())) return;
         if (discardIfStoredDead(entity, level)) return;
         if (discardIfRecalled(entity, level)) return;
         UUID ownerUUID = getCompatOwnerUUID(entity);
@@ -620,19 +621,37 @@ public class trulybestfriends {
     }
 
     public static boolean deletePetData(ServerPlayer player, UUID petUUID) {
-        // A recalled pet only exists in its NBT file. Release it before deleting
-        // that file so manual untracking cannot make the entity disappear forever.
-        if (!RecallPetPacket.releaseRecalledPet(player, petUUID, player.serverLevel())) {
-            LOGGER.warn("Aborted deletePetData for {}: recalled pet could not be released", petUUID);
-            return false;
-        }
-
+        flushPendingPetSaves(player.getUUID());
         PendingPetSave pending = pendingPetSaves.get(petUUID);
         Path petFile = PetIOUtil.getOwnerDir(player).resolve(petUUID + ".nbt");
         boolean ownsPendingSave = pending != null && player.getUUID().equals(pending.ownerUUID());
         boolean isShoulderPet = PetIOUtil.getShoulderEntity(player, petUUID) != null;
         boolean isLoadedOwnedPet = isLoadedOwnedPet(player, petUUID);
         if (!Files.exists(petFile) && !ownsPendingSave && !isShoulderPet && !isLoadedOwnedPet) return false;
+
+        CompoundTag deadSnapshot = null;
+        if (Files.exists(petFile)) {
+            try {
+                CompoundTag stored = NbtFileIO.readCompressed(petFile.toFile());
+                if (PetDeathState.isDeadSnapshot(stored)) deadSnapshot = stored;
+            } catch (IOException e) {
+                LOGGER.error("Failed to inspect pet NBT before deletion for {}: {}", petUUID, e.getMessage());
+                return false;
+            }
+        }
+
+        Entity releasedDeadEntity = null;
+        if (deadSnapshot != null) {
+            releasedDeadEntity = TeleportPetToPlayerPacket.releaseDeadPetForUntracking(
+                    deadSnapshot, petUUID, player, player.serverLevel());
+            if (releasedDeadEntity == null) {
+                LOGGER.warn("Aborted deletePetData for {}: dead pet could not be released", petUUID);
+                return false;
+            }
+        } else if (!RecallPetPacket.releaseRecalledPet(player, petUUID, player.serverLevel())) {
+            LOGGER.warn("Aborted deletePetData for {}: recalled pet could not be released", petUUID);
+            return false;
+        }
 
         pendingPetSaves.remove(petUUID);
         PetHealingManager.clear(petUUID);
@@ -647,10 +666,23 @@ public class trulybestfriends {
             Path modDir = PetIOUtil.getModDir(player);
             blacklistPetUUID(modDir, petUUID);
             deletePetFiles(modDir, petUUID);
+            killReleasedPetWithVoidDamage(releasedDeadEntity);
             return true;
         } catch (IOException e) {
+            if (releasedDeadEntity != null) releasedDeadEntity.discard();
             LOGGER.error("Failed to delete pet data for {}: {}", petUUID, e.getMessage());
             return false;
+        }
+    }
+
+    private static void killReleasedPetWithVoidDamage(Entity entity) {
+        if (!(entity instanceof LivingEntity living)) return;
+        DamageSource voidDamage = living.damageSources().fellOutOfWorld();
+        living.invulnerableTime = 0;
+        living.hurt(voidDamage, Float.MAX_VALUE);
+        if (!living.isDeadOrDying()) {
+            living.setHealth(0.0F);
+            living.die(voidDamage);
         }
     }
 

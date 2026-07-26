@@ -77,7 +77,7 @@ final class TrulyConstants {
 	/** 宠物位置或状态信息相对于标签页面板上边缘的 Y 坐标。 */
 	static final int LOCATION_Y = 98;
 	/** 召唤至玩家按钮相对于标签页面板左边缘的 X 坐标。 */
-	static final int SUMMON_TO_PLAYER_X = 7;
+	static final int SUMMON_TO_PLAYER_X = 17;
 	/** 召唤至玩家按钮相对于标签页面板上边缘的 Y 坐标。 */
 	static final int SUMMON_TO_PLAYER_Y = 134;
 	/** 召唤至玩家按钮的宽度。 */
