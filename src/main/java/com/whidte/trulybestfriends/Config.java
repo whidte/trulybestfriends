@@ -70,6 +70,38 @@ public class Config
             .comment("Cooldown in seconds after reviving a pet before another revive can be used.")
             .defineInRange("reviveCooldownSeconds", 120, 0, 86400);
 
+    public static final ForgeConfigSpec.IntValue HEAL_HUNGER_COST = BUILDER
+            .comment("Food points consumed when starting or extending pet healing. Creative players pay no cost.")
+            .defineInRange("healHungerCost", 3, 0, 20);
+
+    public static final ForgeConfigSpec.IntValue ADVANCED_HEAL_HUNGER_COST = BUILDER
+            .comment("Food points consumed by Shift-click advanced pet healing. Creative players pay no cost.")
+            .defineInRange("advancedHealHungerCost", 9, 0, 20);
+
+    public static final ForgeConfigSpec.IntValue HEAL_PULSE_INTERVAL_TICKS = BUILDER
+            .comment("Ticks between pet healing pulses.")
+            .defineInRange("healPulseIntervalTicks", 50, 1, 1200);
+
+    public static final ForgeConfigSpec.IntValue ADVANCED_HEAL_PULSE_INTERVAL_TICKS = BUILDER
+            .comment("Ticks between advanced pet healing pulses.")
+            .defineInRange("advancedHealPulseIntervalTicks", 25, 1, 1200);
+
+    public static final ForgeConfigSpec.IntValue HEAL_DURATION_PER_CLICK_TICKS = BUILDER
+            .comment("Healing duration added by one click.")
+            .defineInRange("healDurationPerClickTicks", 300, 1, 72000);
+
+    public static final ForgeConfigSpec.IntValue HEAL_MAX_DURATION_TICKS = BUILDER
+            .comment("Maximum remaining healing duration. A click that would exceed this value is rejected.")
+            .defineInRange("healMaxDurationTicks", 1200, 1, 72000);
+
+    public static final ForgeConfigSpec.DoubleValue HEAL_FLAT_AMOUNT = BUILDER
+            .comment("Flat health restored by each pulse.")
+            .defineInRange("healFlatAmount", 1.0, 0.0, 1000000.0);
+
+    public static final ForgeConfigSpec.DoubleValue HEAL_MAX_HEALTH_FRACTION = BUILDER
+            .comment("Fraction of the pet's current maximum health restored by each pulse (0.01 = 1%).")
+            .defineInRange("healMaxHealthFraction", 0.01, 0.0, 1.0);
+
     public static final ForgeConfigSpec.BooleanValue ENABLE_LOGIN_LOAD_DIAGNOSTICS = BUILDER
             .comment("If true, validates all pet .nbt files on player login and logs counts. Debug only.")
             .define("enableLoginLoadDiagnostics", false);
@@ -133,6 +165,14 @@ public class Config
     public static String reviveItem;
     public static int reviveItemCount;
     public static int reviveCooldownSeconds;
+    public static int healHungerCost;
+    public static int advancedHealHungerCost;
+    public static int healPulseIntervalTicks;
+    public static int advancedHealPulseIntervalTicks;
+    public static int healDurationPerClickTicks;
+    public static int healMaxDurationTicks;
+    public static double healFlatAmount;
+    public static double healMaxHealthFraction;
     public static boolean enableLoginLoadDiagnostics;
     public static java.util.Set<String> autoRegisterBlacklist = new java.util.HashSet<>();
     /** Entity type ids that keep death drops and cannot be revived. */
@@ -157,6 +197,14 @@ public class Config
         reviveItem = REVIVE_ITEM.get();
         reviveItemCount = REVIVE_ITEM_COUNT.get();
         reviveCooldownSeconds = REVIVE_COOLDOWN_SECONDS.get();
+        healHungerCost = HEAL_HUNGER_COST.get();
+        advancedHealHungerCost = ADVANCED_HEAL_HUNGER_COST.get();
+        healPulseIntervalTicks = HEAL_PULSE_INTERVAL_TICKS.get();
+        advancedHealPulseIntervalTicks = ADVANCED_HEAL_PULSE_INTERVAL_TICKS.get();
+        healDurationPerClickTicks = HEAL_DURATION_PER_CLICK_TICKS.get();
+        healMaxDurationTicks = HEAL_MAX_DURATION_TICKS.get();
+        healFlatAmount = HEAL_FLAT_AMOUNT.get();
+        healMaxHealthFraction = HEAL_MAX_HEALTH_FRACTION.get();
         enableLoginLoadDiagnostics = ENABLE_LOGIN_LOAD_DIAGNOSTICS.get();
 
         autoRegisterBlacklist.clear();

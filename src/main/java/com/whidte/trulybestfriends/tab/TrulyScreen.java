@@ -56,9 +56,8 @@ public class TrulyScreen extends Screen {
 	boolean isDraggingScrollbar = false;
 	boolean sortNeeded = false;
 	int tickCounter = 0;
-	long lastGlowClickTime = 0;
 	UUID deletePromptUuid;
-	GlowButton glowButton;
+	HealButton healButton;
 	DeleteButton deleteButton;
 	ActionButton actionButton;
 	SummonToPlayerButton summonToPlayerButton;
@@ -259,8 +258,8 @@ public class TrulyScreen extends Screen {
 	}
 
 	private void addButtons() {
-		glowButton = this.addRenderableWidget(
-				new GlowButton(this.leftPos + GLOW_X, this.topPos + GLOW_Y, this));
+		healButton = this.addRenderableWidget(
+				new HealButton(this.leftPos + HEAL_X, this.topPos + HEAL_Y, this));
 		deleteButton = this.addRenderableWidget(
 				new DeleteButton(this.leftPos + DELETE_X, this.topPos + DELETE_Y, this));
 		actionButton = this.addRenderableWidget(
@@ -564,7 +563,7 @@ public class TrulyScreen extends Screen {
 
 	private void updateButtonVisibility() {
 		boolean has = hasSelection();
-		if (glowButton != null) glowButton.visible = has;
+		if (healButton != null) healButton.visible = has;
 		if (deleteButton != null) deleteButton.visible = has;
 		if (actionButton != null) actionButton.visible = has;
 		if (summonToPlayerButton != null) summonToPlayerButton.visible = has;

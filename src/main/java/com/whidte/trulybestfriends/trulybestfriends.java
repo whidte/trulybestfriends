@@ -3,11 +3,12 @@ package com.whidte.trulybestfriends;
 import com.mojang.logging.LogUtils;
 import com.whidte.trulybestfriends.network.AreaRecallPacket;
 import com.whidte.trulybestfriends.network.DeletePetDataPacket;
-import com.whidte.trulybestfriends.network.GlowPetPacket;
+import com.whidte.trulybestfriends.network.HealPetPacket;
 import com.whidte.trulybestfriends.network.PetIOUtil;
 import com.whidte.trulybestfriends.network.NbtFileIO;
 import com.whidte.trulybestfriends.network.PetEntitySnapshot;
 import com.whidte.trulybestfriends.network.PetDeathState;
+import com.whidte.trulybestfriends.network.PetHealingManager;
 import com.whidte.trulybestfriends.network.PetSyncTracker;
 import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
@@ -38,6 +39,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
 import net.minecraftforge.event.entity.living.AnimalTameEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
@@ -88,7 +90,7 @@ public class trulybestfriends {
      *  服务器重启后清空 → 重启前的死亡宠物无冷却，可立即复活（符合"不保存到磁盘"的设计）。 */
     private static final Map<UUID, Long> petDeathTimes = new ConcurrentHashMap<>();
 
-    private static final String PROTOCOL_VERSION = "1";
+    private static final String PROTOCOL_VERSION = "3";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(MODID, "main"),
             () -> PROTOCOL_VERSION,
@@ -182,7 +184,7 @@ public class trulybestfriends {
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
-        CHANNEL.registerMessage(0, GlowPetPacket.class, GlowPetPacket::encode, GlowPetPacket::decode, GlowPetPacket::handle);
+        CHANNEL.registerMessage(0, HealPetPacket.class, HealPetPacket::encode, HealPetPacket::decode, HealPetPacket::handle);
         CHANNEL.registerMessage(1, RecallPetPacket.class, RecallPetPacket::encode, RecallPetPacket::decode, RecallPetPacket::handle);
         CHANNEL.registerMessage(2, TeleportToPetPacket.class, TeleportToPetPacket::encode, TeleportToPetPacket::decode, TeleportToPetPacket::handle);
         CHANNEL.registerMessage(3, TeleportPetToPlayerPacket.class, TeleportPetToPlayerPacket::encode, TeleportPetToPlayerPacket::decode, TeleportPetToPlayerPacket::handle);
@@ -230,9 +232,19 @@ public class trulybestfriends {
             // registerUntrackedOwnedPet handles first-time registration + index update.
             if (trackedPetUUIDs.contains(entity.getUUID())
                     || registerUntrackedOwnedPet(entity, ownerUUID, level)) {
+                if (entity instanceof LivingEntity living) {
+                    PetHealingManager.onEntityLoaded(living, ownerUUID);
+                }
                 savePetData(ownerUUID, entity, level);
             }
         }
+    }
+
+    @SubscribeEvent
+    public void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
+        if (event.getLevel().isClientSide() || !(event.getEntity() instanceof LivingEntity living)) return;
+        UUID ownerUUID = getCompatOwnerUUID(living);
+        if (ownerUUID != null) PetHealingManager.onEntityUnloaded(living, ownerUUID);
     }
 
     @SubscribeEvent
@@ -253,11 +265,13 @@ public class trulybestfriends {
     @SubscribeEvent
     public void onServerStarted(ServerStartedEvent event) {
         loadPetIndex(event.getServer().overworld());
+        PetHealingManager.load(event.getServer());
     }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         flushPendingPetSaves();
+        PetHealingManager.shutdown();
         ReviveProtection.clear(event.getServer());
         petDeathTimes.clear();  // 死亡时刻仅在内存，不持久化
         pendingRemovals.clear();
@@ -286,6 +300,7 @@ public class trulybestfriends {
             processPendingRemovals(event.getServer());
             TeleportPetToPlayerPacket.tickPendingSummons(event.getServer());
             ReviveProtection.tick(event.getServer());
+            PetHealingManager.tick(event.getServer());
             if (localSyncTickCounter >= Config.localSyncIntervalTicks) {
                 localSyncTickCounter = 0;
                 collectLocalSyncCandidates(event.getServer());
@@ -314,6 +329,7 @@ public class trulybestfriends {
         Entity entity = event.getEntity();
         if (!entity.level().isClientSide()) ReviveProtection.remove(entity.getUUID());
         if (entity.level().isClientSide() || !trackedPetUUIDs.contains(entity.getUUID())) return;
+        PetHealingManager.clear(entity.getUUID());
 
         UUID owner = getCompatOwnerUUID(entity);
         if (owner == null) return;
@@ -342,6 +358,7 @@ public class trulybestfriends {
                 || !trackedPetUUIDs.contains(entity.getUUID())) return false;
 
         ReviveProtection.remove(entity.getUUID());
+        PetHealingManager.clear(entity.getUUID());
         UUID owner = getCompatOwnerUUID(entity);
         if (owner == null) return false;
         ServerLevel level = (ServerLevel) entity.level();
@@ -415,6 +432,7 @@ public class trulybestfriends {
             LOGGER.error("Failed to capture pet snapshot for {}: {}", pet.getUUID(), e.getMessage(), e);
             return false;
         }
+        PetHealingManager.onPetSaved(pet.getUUID(), ownerUUID);
         // LastDeathTime 完全不由磁盘管理——改由服务器内存 Map (petDeathTimes) 记录，
         // 在封存死亡时写入，通过网络同步注入给客户端。不写盘避免被 syncAllPets 反复刷新。
         Path worldPath = level.getServer().getWorldPath(LevelResource.ROOT);
@@ -578,6 +596,7 @@ public class trulybestfriends {
      */
     private static void clearPetDataAndCache(Entity entity, UUID ownerUUID, ServerLevel level) {
         UUID petUUID = entity.getUUID();
+        PetHealingManager.clear(petUUID);
         // Remove NBT file from disk
         Path modDir = PetIOUtil.getModDir(level);
         Path ownerDir = modDir.resolve(ownerUUID.toString());
@@ -616,6 +635,7 @@ public class trulybestfriends {
         if (!Files.exists(petFile) && !ownsPendingSave && !isShoulderPet && !isLoadedOwnedPet) return false;
 
         pendingPetSaves.remove(petUUID);
+        PetHealingManager.clear(petUUID);
         removePendingRemovals(player.getUUID(), petUUID);
         localSyncCandidates.removeIf(candidate -> candidate.entityUUID().equals(petUUID));
         TeleportPetToPlayerPacket.cancelPendingSummons(player.getUUID(), petUUID);

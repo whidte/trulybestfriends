@@ -101,6 +101,8 @@ public class RequestPetDataPacket {
                                         shouldMarkLost(storedNbt, isPetLoaded(player, uuid)));
                                 // 注入内存中的死亡时刻（不写盘），供客户端计算复活冷却
                                 trulybestfriends.injectDeathTimeIntoNbt(uuid, replyNbt);
+                                PetHealingManager.decorateClientNbt(
+                                        player.server, player.getUUID(), uuid, storedNbt, replyNbt);
                                 CompoundTag entry = new CompoundTag();
                                 entry.putUUID("UUID", uuid);
                                 entry.put("NBT", replyNbt);
@@ -133,6 +135,8 @@ public class RequestPetDataPacket {
                     replyNbt.putBoolean("Lost", shouldMarkLost(storedNbt, liveNbt != null));
                     // 注入内存中的死亡时刻（不写盘），供客户端计算复活冷却
                     trulybestfriends.injectDeathTimeIntoNbt(packet.petUuid, replyNbt);
+                    PetHealingManager.decorateClientNbt(
+                            player.server, player.getUUID(), packet.petUuid, storedNbt, replyNbt);
                     if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {
                         SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
                         trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), reply);
@@ -174,6 +178,8 @@ public class RequestPetDataPacket {
         CompoundTag replyNbt = liveNbt != null ? liveNbt : toClientNbt(storedNbt);
         replyNbt.putBoolean("Lost", shouldMarkLost(storedNbt, liveNbt != null));
         trulybestfriends.injectDeathTimeIntoNbt(petUuid, replyNbt);
+        PetHealingManager.decorateClientNbt(
+                player.server, player.getUUID(), petUuid, storedNbt, replyNbt);
         return replyNbt;
     }
 

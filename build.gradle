@@ -273,6 +273,15 @@ tasks.named('check') {
     dependsOn tasks.named('petListFilterSmokeTest')
     dependsOn tasks.named('reviveProtectionSmokeTest')
     dependsOn tasks.named('petIndexBlacklistTest')
+    dependsOn tasks.named('petHealingSmokeTest')
+}
+
+tasks.register('petHealingSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates pet healing duration, pulse, cap, and pending-state rules.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.PetHealingSmokeTest'
 }
 
 tasks.register('petIndexBlacklistTest', JavaExec) {
