@@ -56,10 +56,10 @@ final class TrulyConstants {
 	static final int ENTITY_PREVIEW_OFFSET_X = 35;
 	/** 左侧已选宠物预览锚点相对于标签页面板上边缘的 Y 偏移。 */
 	static final int ENTITY_PREVIEW_OFFSET_Y = 50;
-	/** 发光按钮相对于标签页面板左边缘的 X 坐标。 */
-	static final int GLOW_X = 61;
-	/** 发光按钮相对于标签页面板上边缘的 Y 坐标。 */
-	static final int GLOW_Y = 13;
+	/** 生命恢复按钮相对于标签页面板左边缘的 X 坐标。 */
+	static final int HEAL_X = 61;
+	/** 生命恢复按钮相对于标签页面板上边缘的 Y 坐标。 */
+	static final int HEAL_Y = 13;
 	/** 收回或释放按钮相对于标签页面板左边缘的 X 坐标。 */
 	static final int ACTION_X = 61;
 	/** 收回或释放按钮相对于标签页面板上边缘的 Y 坐标。 */
@@ -100,8 +100,8 @@ final class TrulyConstants {
 	static final int REFERENCE_WINDOW_WIDTH = 1920;
 	/** 请求刷新已选宠物数据的间隔，单位为游戏刻。 */
 	static final int REFRESH_INTERVAL = 20;
-	/** 发光按钮的正方形边长。 */
-	static final int GLOW_BUTTON_SIZE = 18;
+	/** 生命恢复按钮的正方形边长。 */
+	static final int HEAL_BUTTON_SIZE = 18;
 	/** Independent delete control at the upper-left corner of the main preview. */
 	static final int DELETE_X = 3;
 	static final int DELETE_Y = 3;
@@ -114,8 +114,8 @@ final class TrulyConstants {
 			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/empty.png");
 	/** 原版透明背景放大镜 GUI sprite。 */
 	static final ResourceLocation SEARCH_ICON = ResourceLocation.withDefaultNamespace("icon/search");
-	/** 原版发光效果图标纹理。 */
-	static final ResourceLocation GLOWING_ICON = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/mob_effect/glowing.png");
+	/** 原版生命恢复效果图标纹理。 */
+	static final ResourceLocation REGENERATION_ICON = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/mob_effect/regeneration.png");
 	/** Vanilla Realms close-button sprites used by the delete control. */
 	static final ResourceLocation DELETE_ICON = ResourceLocation.withDefaultNamespace("widget/cross_button");
 	static final ResourceLocation DELETE_ICON_HIGHLIGHTED = ResourceLocation.withDefaultNamespace("widget/cross_button_highlighted");

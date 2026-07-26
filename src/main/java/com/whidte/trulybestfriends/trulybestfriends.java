@@ -3,13 +3,14 @@ package com.whidte.trulybestfriends;
 import com.mojang.logging.LogUtils;
 import com.whidte.trulybestfriends.network.AreaRecallPacket;
 import com.whidte.trulybestfriends.network.DeletePetDataPacket;
-import com.whidte.trulybestfriends.network.GlowPetPacket;
+import com.whidte.trulybestfriends.network.HealPetPacket;
 import com.whidte.trulybestfriends.network.PetIOUtil;
 import com.whidte.trulybestfriends.network.NbtFileIO;
 import com.whidte.trulybestfriends.network.PetSyncTracker;
 import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.PetEntitySnapshot;
 import com.whidte.trulybestfriends.network.PetDeathState;
+import com.whidte.trulybestfriends.network.PetHealingManager;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
 import com.whidte.trulybestfriends.network.RequestPetDataPacket;
 import com.whidte.trulybestfriends.network.SableSubLevelSyncPacket;
@@ -49,6 +50,7 @@ import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.entity.PartEntity;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
@@ -208,8 +210,8 @@ public class trulybestfriends {
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar registrar = event.registrar("1");
-        registrar.playToServer(GlowPetPacket.TYPE, GlowPetPacket.STREAM_CODEC, GlowPetPacket::handle);
+        PayloadRegistrar registrar = event.registrar("3");
+        registrar.playToServer(HealPetPacket.TYPE, HealPetPacket.STREAM_CODEC, HealPetPacket::handle);
         registrar.playToServer(RecallPetPacket.TYPE, RecallPetPacket.STREAM_CODEC, RecallPetPacket::handle);
         registrar.playToServer(TeleportToPetPacket.TYPE, TeleportToPetPacket.STREAM_CODEC, TeleportToPetPacket::handle);
         registrar.playToServer(TeleportPetToPlayerPacket.TYPE, TeleportPetToPlayerPacket.STREAM_CODEC, TeleportPetToPlayerPacket::handle);
@@ -258,9 +260,19 @@ public class trulybestfriends {
             // registerUntrackedOwnedPet handles first-time registration + index update.
             if (trackedPetUUIDs.contains(entity.getUUID())
                     || registerUntrackedOwnedPet(entity, ownerUUID, level)) {
+                if (entity instanceof LivingEntity living) {
+                    PetHealingManager.onEntityLoaded(living, ownerUUID);
+                }
                 savePetData(ownerUUID, entity, level);
             }
         }
+    }
+
+    @SubscribeEvent
+    public void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
+        if (event.getLevel().isClientSide() || !(event.getEntity() instanceof LivingEntity living)) return;
+        UUID ownerUUID = getCompatOwnerUUID(living);
+        if (ownerUUID != null) PetHealingManager.onEntityUnloaded(living, ownerUUID);
     }
 
     @SubscribeEvent
@@ -281,11 +293,13 @@ public class trulybestfriends {
     @SubscribeEvent
     public void onServerStarted(ServerStartedEvent event) {
         loadPetIndex(event.getServer().overworld());
+        PetHealingManager.load(event.getServer());
     }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         flushPendingPetSaves();
+        PetHealingManager.shutdown();
         ReviveProtection.clear(event.getServer());
         petDeathTimes.clear();  // 死亡时刻仅在内存，不持久化
         pendingRemovals.clear();
@@ -313,6 +327,7 @@ public class trulybestfriends {
             processPendingRemovals(event.getServer());
             TeleportPetToPlayerPacket.tickPendingSummons(event.getServer());
             ReviveProtection.tick(event.getServer());
+            PetHealingManager.tick(event.getServer());
             if (localSyncTickCounter >= Config.localSyncIntervalTicks) {
                 localSyncTickCounter = 0;
                 collectLocalSyncCandidates(event.getServer());
@@ -340,6 +355,7 @@ public class trulybestfriends {
         Entity entity = event.getEntity();
         if (!entity.level().isClientSide()) ReviveProtection.remove(entity.getUUID());
         if (entity.level().isClientSide() || !trackedPetUUIDs.contains(entity.getUUID())) return;
+        PetHealingManager.clear(entity.getUUID());
 
         UUID owner = getCompatOwnerUUID(entity);
         if (owner == null) return;
@@ -368,6 +384,7 @@ public class trulybestfriends {
                 || !trackedPetUUIDs.contains(entity.getUUID())) return false;
 
         ReviveProtection.remove(entity.getUUID());
+        PetHealingManager.clear(entity.getUUID());
         UUID owner = getCompatOwnerUUID(entity);
         if (owner == null) return false;
         ServerLevel level = (ServerLevel) entity.level();
@@ -433,6 +450,7 @@ public class trulybestfriends {
             LOGGER.warn("Skipping pet save: owner UUID {} is not a known player", ownerUUID);
             return false;
         }
+        PetHealingManager.onPetSaved(pet.getUUID(), ownerUUID);
         CompoundTag nbt;
         try {
             nbt = PetEntitySnapshot.capture(pet, ownerUUID, level);
@@ -604,6 +622,7 @@ public class trulybestfriends {
      */
     private static void clearPetDataAndCache(Entity entity, UUID ownerUUID, ServerLevel level) {
         UUID petUUID = entity.getUUID();
+        PetHealingManager.clear(petUUID);
         // Remove NBT file from disk
         Path modDir = PetIOUtil.getModDir(level);
         Path ownerDir = modDir.resolve(ownerUUID.toString());
@@ -646,6 +665,7 @@ public class trulybestfriends {
         // Stop queued writes and summons before touching disk so stale data
         // cannot recreate the entry after this deletion.
         pendingPetSaves.remove(petUUID);
+        PetHealingManager.clear(petUUID);
         removePendingRemovals(player.getUUID(), petUUID);
         localSyncCandidates.removeIf(candidate -> candidate.entityUUID().equals(petUUID));
         TeleportPetToPlayerPacket.cancelPendingSummons(player.getUUID(), petUUID);
