@@ -132,19 +132,10 @@ public class TeleportPetToPlayerPacket {
             // loading), so we queue the request and process it in onServerTick.
             // ChunkX/ChunkZ are derived from the entity's Pos (vanilla NBT stores
             // only world coordinates, not chunk coordinates).
-            int cx = Integer.MIN_VALUE;
-            int cz = Integer.MIN_VALUE;
-            if (nbt.contains("ChunkX", 3) && nbt.contains("ChunkZ", 3)) {
-                cx = nbt.getInt("ChunkX");
-                cz = nbt.getInt("ChunkZ");
-            } else if (nbt.contains("Pos", 9)) {
-                var posList = nbt.getList("Pos", 6);
-                if (posList.size() >= 3) {
-                    cx = net.minecraft.util.Mth.floor(posList.getDouble(0)) >> 4;
-                    cz = net.minecraft.util.Mth.floor(posList.getDouble(2)) >> 4;
-                }
-            }
-            if (cx != Integer.MIN_VALUE && cz != Integer.MIN_VALUE) {
+            var storedChunk = PetIOUtil.getStoredChunk(nbt);
+            if (storedChunk != null) {
+                int cx = storedChunk.x;
+                int cz = storedChunk.z;
                 // If the chunk is already loaded but the entity wasn't found,
                 // it truly doesn't exist — don't waste time in the pending queue.
                 if (petLevel.hasChunk(cx, cz)) {
@@ -361,14 +352,7 @@ public class TeleportPetToPlayerPacket {
     /** Resolve the ServerLevel where the pet was last saved, using NBT Dimension field. */
     private static ServerLevel resolvePetLevel(MinecraftServer server, CompoundTag nbt) {
         if (!nbt.contains("Dimension", 8)) return null;
-        ResourceLocation dimRl = ResourceLocation.tryParse(nbt.getString("Dimension"));
-        if (dimRl == null) return null;
-        for (ServerLevel sl : server.getAllLevels()) {
-            if (sl.dimension().location().equals(dimRl)) {
-                return sl;
-            }
-        }
-        return null;
+        return PetIOUtil.getLevel(server, nbt.getString("Dimension"));
     }
 
     // ---- Pending summon queue for pets in unloaded chunks ----

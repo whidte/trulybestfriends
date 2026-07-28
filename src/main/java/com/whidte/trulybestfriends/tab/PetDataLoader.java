@@ -44,8 +44,8 @@ final class PetDataLoader {
 		Path petDir = getPetSaveDir(mc);
 		if (petDir == null || !Files.exists(petDir)) return;
 
-		try {
-			Files.list(petDir).filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
+		try (var files = Files.list(petDir)) {
+			files.filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
 				try {
 					CompoundTag nbt = NbtFileIO.readCompressed(file.toFile());
 					String uuidStr = file.getFileName().toString().replace(".nbt", "");

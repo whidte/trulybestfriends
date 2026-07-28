@@ -116,17 +116,8 @@ public class RecallPetPacket {
             if (PetDeathState.isDeadSnapshot(nbt)) return;
 
             // Resolve the pet's last known dimension from NBT
-            ServerLevel petLevel = playerLevel;
-            if (nbt.contains("Dimension")) {
-                String dim = nbt.getString("Dimension");
-                ResourceLocation dimRl = ResourceLocation.tryParse(dim);
-                if (dimRl != null) {
-                    var dimKey = net.minecraft.resources.ResourceKey.create(
-                            net.minecraft.core.registries.Registries.DIMENSION, dimRl);
-                    ServerLevel resolved = player.server.getLevel(dimKey);
-                    if (resolved != null) petLevel = resolved;
-                }
-            }
+            ServerLevel resolved = PetIOUtil.getLevel(player.server, nbt.getString("Dimension"));
+            ServerLevel petLevel = resolved != null ? resolved : playerLevel;
 
             // --- Case 2: pet is alive in its stored dimension (same or different from player) ---
             Entity petEntity = petLevel.getEntity(packet.petUuid);
@@ -150,19 +141,10 @@ public class RecallPetPacket {
             }
 
             // --- Case 3: pet not found in stored dimension → check chunk load status ---
-            int cx = Integer.MIN_VALUE;
-            int cz = Integer.MIN_VALUE;
-            if (nbt.contains("ChunkX", 99) && nbt.contains("ChunkZ", 99)) {
-                cx = nbt.getInt("ChunkX");
-                cz = nbt.getInt("ChunkZ");
-            } else if (nbt.contains("Pos", 9)) {
-                var posList = nbt.getList("Pos", 6);
-                if (posList.size() >= 3) {
-                    cx = net.minecraft.util.Mth.floor(posList.getDouble(0)) >> 4;
-                    cz = net.minecraft.util.Mth.floor(posList.getDouble(2)) >> 4;
-                }
-            }
-            if (cx == Integer.MIN_VALUE || cz == Integer.MIN_VALUE) return;  // no position info
+            var storedChunk = PetIOUtil.getStoredChunk(nbt);
+            if (storedChunk == null) return;  // no position info
+            int cx = storedChunk.x;
+            int cz = storedChunk.z;
 
             // If the chunk IS loaded but the entity wasn't found, the pet truly
             // doesn't exist (was removed/died). Warn the player and keep the disk

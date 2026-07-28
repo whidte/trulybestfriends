@@ -1,11 +1,17 @@
 package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -17,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 /**
  * Shared utilities for pet I/O operations extracted from the various packet handlers.
@@ -52,6 +59,36 @@ public final class PetIOUtil {
 
     public static Path getOwnerDir(ServerPlayer player) {
         return getModDir(player).resolve(player.getUUID().toString());
+    }
+
+    public static Entity findEntity(MinecraftServer server, UUID entityUuid) {
+        return findEntity(server, entityUuid, entity -> true);
+    }
+
+    public static Entity findEntity(MinecraftServer server, UUID entityUuid, Predicate<Entity> filter) {
+        for (ServerLevel level : server.getAllLevels()) {
+            Entity entity = level.getEntity(entityUuid);
+            if (entity != null && filter.test(entity)) return entity;
+        }
+        return null;
+    }
+
+    public static ServerLevel getLevel(MinecraftServer server, String dimension) {
+        ResourceLocation id = ResourceLocation.tryParse(dimension);
+        return id == null ? null : server.getLevel(ResourceKey.create(Registries.DIMENSION, id));
+    }
+
+    static ChunkPos getStoredChunk(CompoundTag nbt) {
+        if (nbt.contains("ChunkX", Tag.TAG_ANY_NUMERIC)
+                && nbt.contains("ChunkZ", Tag.TAG_ANY_NUMERIC)) {
+            return new ChunkPos(nbt.getInt("ChunkX"), nbt.getInt("ChunkZ"));
+        }
+        if (!nbt.contains("Pos", Tag.TAG_LIST)) return null;
+        var position = nbt.getList("Pos", Tag.TAG_DOUBLE);
+        return position.size() >= 3
+                ? new ChunkPos(net.minecraft.util.Mth.floor(position.getDouble(0)) >> 4,
+                        net.minecraft.util.Mth.floor(position.getDouble(2)) >> 4)
+                : null;
     }
 
     // ---- Safe Y search ----

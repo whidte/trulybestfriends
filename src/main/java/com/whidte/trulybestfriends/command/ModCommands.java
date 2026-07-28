@@ -181,30 +181,10 @@ public class ModCommands {
             return 0;
         }
 
-        Component entityName = pointed.getDisplayName();
-        UUID petUUID = pointed.getUUID();
         trulybestfriends.LoadResult result = trulybestfriends.tryForceLoadPet(pointed, player, player.serverLevel());
-        switch (result) {
-            case OK -> {
-                Component hoverableEntityName = entityName.copy().withStyle(style -> style.withHoverEvent(
-                        new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(petUUID.toString()))));
-                source.sendSuccess(() -> Component.translatable(
-                        "trulybestfriends.load.master.success", hoverableEntityName), true);
-                return 1;
-            }
-            case NOT_A_PET -> source.sendFailure(Component.translatable(
-                    "trulybestfriends.load.master.not_living"));
-            case UNKNOWN_OWNER -> source.sendFailure(Component.translatable(
-                    "trulybestfriends.load.unknown_owner"));
-            case TYPE_BLACKLISTED -> source.sendFailure(Component.translatable(
-                    "trulybestfriends.load.type_blacklisted"));
-            case LIMIT_REACHED -> source.sendFailure(Component.translatable(
-                    "trulybestfriends.load.limit_reached", Config.maxPets));
-            case UNBLACKLIST_FAILED -> source.sendFailure(Component.translatable(
-                    "trulybestfriends.load.unblacklist_failed"));
-            case SAVE_FAILED -> source.sendFailure(Component.translatable("trulybestfriends.load.save_failed"));
-        }
-        return 0;
+        return reportLoadResult(source, pointed, result,
+                "trulybestfriends.load.master.success",
+                "trulybestfriends.load.master.not_living", true);
     }
 
     private static int loadPet(CommandSourceStack source, ServerPlayer player, Entity pointed,
@@ -219,27 +199,31 @@ public class ModCommands {
             return 0;
         }
 
-        Component entityName = pointed.getDisplayName();
-        UUID petUUID = pointed.getUUID();
-
         trulybestfriends.LoadResult result = trulybestfriends.tryLoadPet(pointed, level);
-        switch (result) {
-            case OK -> {
-                Component hoverableEntityName = entityName.copy().withStyle(style -> style.withHoverEvent(
-                        new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(petUUID.toString()))));
-                source.sendSuccess(() -> Component.translatable(
-                        "trulybestfriends.load.success", hoverableEntityName), informAdmins);
-                return 1;
-            }
-            case NOT_A_PET -> source.sendFailure(Component.translatable("trulybestfriends.load.not_a_pet"));
-            case UNKNOWN_OWNER -> source.sendFailure(Component.translatable("trulybestfriends.load.unknown_owner"));
-            case TYPE_BLACKLISTED -> source.sendFailure(Component.translatable("trulybestfriends.load.type_blacklisted"));
-            case LIMIT_REACHED -> source.sendFailure(Component.translatable(
-                    "trulybestfriends.load.limit_reached", Config.maxPets));
-            case UNBLACKLIST_FAILED -> source.sendFailure(Component.translatable(
-                    "trulybestfriends.load.unblacklist_failed"));
-            case SAVE_FAILED -> source.sendFailure(Component.translatable("trulybestfriends.load.save_failed"));
+        return reportLoadResult(source, pointed, result,
+                "trulybestfriends.load.success", "trulybestfriends.load.not_a_pet", informAdmins);
+    }
+
+    private static int reportLoadResult(CommandSourceStack source, Entity entity,
+                                        trulybestfriends.LoadResult result, String successKey,
+                                        String notPetKey, boolean informAdmins) {
+        if (result == trulybestfriends.LoadResult.OK) {
+            Component entityName = entity.getDisplayName().copy().withStyle(style -> style.withHoverEvent(
+                    new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(entity.getUUID().toString()))));
+            source.sendSuccess(() -> Component.translatable(successKey, entityName), informAdmins);
+            return 1;
         }
+
+        Component failure = switch (result) {
+            case NOT_A_PET -> Component.translatable(notPetKey);
+            case UNKNOWN_OWNER -> Component.translatable("trulybestfriends.load.unknown_owner");
+            case TYPE_BLACKLISTED -> Component.translatable("trulybestfriends.load.type_blacklisted");
+            case LIMIT_REACHED -> Component.translatable("trulybestfriends.load.limit_reached", Config.maxPets);
+            case UNBLACKLIST_FAILED -> Component.translatable("trulybestfriends.load.unblacklist_failed");
+            case SAVE_FAILED -> Component.translatable("trulybestfriends.load.save_failed");
+            case OK -> throw new IllegalStateException("handled above");
+        };
+        source.sendFailure(failure);
         return 0;
     }
 

@@ -1026,22 +1026,9 @@ public class trulybestfriends {
 
         try {
             CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
-            String uuid = petUUID.toString();
-            for (String playerName : indexTag.getAllKeys()) {
-                if (!indexTag.contains(playerName, Tag.TAG_COMPOUND)) continue;
-                CompoundTag playerTag = indexTag.getCompound(playerName);
-                for (String typeKey : playerTag.getAllKeys()) {
-                    if (!playerTag.contains(typeKey, Tag.TAG_COMPOUND)) continue;
-                    CompoundTag typeTag = playerTag.getCompound(typeKey);
-                    if (!typeTag.contains(uuid, Tag.TAG_COMPOUND)) continue;
-                    CompoundTag state = typeTag.getCompound(uuid);
-                    if (!PetIndexState.setRecalled(state, recalled)) return;
-                    typeTag.put(uuid, state);
-                    playerTag.put(typeKey, typeTag);
-                    indexTag.put(playerName, playerTag);
-                    NbtFileIO.writeCompressed(indexTag, indexFile);
-                    return;
-                }
+            CompoundTag state = PetIndexState.find(indexTag, petUUID);
+            if (state != null && PetIndexState.setRecalled(state, recalled)) {
+                NbtFileIO.writeCompressed(indexTag, indexFile);
             }
         } catch (IOException e) {
             LOGGER.error("Failed to update recalled state in pet index for {}: {}", petUUID, e.getMessage());
@@ -1272,11 +1259,8 @@ public class trulybestfriends {
     }
 
     private static boolean isLoadedOwnedPet(ServerPlayer player, UUID petUUID) {
-        for (ServerLevel level : player.getServer().getAllLevels()) {
-            Entity entity = level.getEntity(petUUID);
-            if (entity != null && isOwnedBy(entity, player.getUUID())) return true;
-        }
-        return false;
+        return PetIOUtil.findEntity(player.getServer(), petUUID,
+                entity -> isOwnedBy(entity, player.getUUID())) != null;
     }
 
     private boolean discardIfStoredDead(Entity entity, ServerLevel level) {
@@ -1325,13 +1309,9 @@ public class trulybestfriends {
 
     private void syncTrackedPets(MinecraftServer server) {
         for (UUID petUUID : new ArrayList<>(trackedPetUUIDs)) {
-            for (ServerLevel level : server.getAllLevels()) {
-                Entity entity = level.getEntity(petUUID);
-                if (entity == null) continue;
-                UUID ownerUUID = getCompatOwnerUUID(entity);
-                if (ownerUUID != null) savePetData(ownerUUID, entity, level);
-                break;
-            }
+            Entity entity = PetIOUtil.findEntity(server, petUUID);
+            UUID ownerUUID = entity != null ? getCompatOwnerUUID(entity) : null;
+            if (ownerUUID != null) savePetData(ownerUUID, entity, (ServerLevel) entity.level());
         }
     }
 
@@ -1403,15 +1383,17 @@ public class trulybestfriends {
 
             if (Files.exists(ownerDir)) {
                 int[] counts = new int[2]; // [0]=success, [1]=failed
-                Files.list(ownerDir).filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
-                    try {
-                        NbtFileIO.readCompressed(file.toFile());
-                        counts[0]++;
-                    } catch (IOException e) {
-                        counts[1]++;
-                        LOGGER.error("Failed to load pet data {}: {}", file.getFileName(), e.getMessage());
-                    }
-                });
+                try (var files = Files.list(ownerDir)) {
+                    files.filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
+                        try {
+                            NbtFileIO.readCompressed(file.toFile());
+                            counts[0]++;
+                        } catch (IOException e) {
+                            counts[1]++;
+                            LOGGER.error("Failed to load pet data {}: {}", file.getFileName(), e.getMessage());
+                        }
+                    });
+                }
                 if (counts[0] + counts[1] > 0) {
                     LOGGER.info("Loaded {} pet data file(s), {} failed", counts[0], counts[1]);
                 }
@@ -1424,8 +1406,8 @@ public class trulybestfriends {
 	private int countOwnerPets(ServerLevel level, UUID ownerUUID) {
 		Path ownerDir = PetIOUtil.getOwnerDir(level, ownerUUID);
 		if (!Files.exists(ownerDir)) return 0;
-		try {
-			return (int) Files.list(ownerDir).filter(p -> p.toString().endsWith(".nbt")).count();
+		try (var files = Files.list(ownerDir)) {
+			return (int) files.filter(p -> p.toString().endsWith(".nbt")).count();
 		} catch (IOException e) {
 			return 0;
 		}
