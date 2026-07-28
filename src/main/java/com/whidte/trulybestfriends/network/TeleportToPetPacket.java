@@ -61,16 +61,7 @@ public class TeleportToPetPacket implements CustomPacketPayload {
             if (!player.hasPermissions(2) || !player.isCreative()) return;
 
             // Resolve the dimension
-            ServerLevel targetLevel = null;
-            ResourceLocation dimRl = ResourceLocation.tryParse(packet.dimKey);
-            if (dimRl != null) {
-                for (ServerLevel sl : player.server.getAllLevels()) {
-                    if (sl.dimension().location().equals(dimRl)) {
-                        targetLevel = sl;
-                        break;
-                    }
-                }
-            }
+            ServerLevel targetLevel = PetIOUtil.getLevel(player.server, packet.dimKey);
             if (targetLevel == null) return; // unknown dimension
 
             // Transform SubLevel-local coordinates to world coordinates.

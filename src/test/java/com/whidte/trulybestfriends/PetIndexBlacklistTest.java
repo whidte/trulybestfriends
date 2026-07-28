@@ -45,7 +45,20 @@ public final class PetIndexBlacklistTest {
         require(state.contains("Healing"),
                 "updating recalled state removed healing data");
 
-        System.out.println("PetIndexBlacklistTest: 13/13 passed");
+        UUID indexedPet = UUID.randomUUID();
+        CompoundTag type = new CompoundTag();
+        type.put(indexedPet.toString(), state);
+        existingPlayerData.put("minecraft:wolf", type);
+        require(PetIndexState.find(index, indexedPet) == state,
+                "nested pet state was not found");
+        int[] visits = {0};
+        PetIndexState.visit(index, (uuid, visitedState) -> {
+            visits[0]++;
+            return false;
+        });
+        require(visits[0] == 1, "index traversal included metadata or skipped pet state");
+
+        System.out.println("PetIndexBlacklistTest: 15/15 passed");
     }
 
     private static void require(boolean condition, String message) {

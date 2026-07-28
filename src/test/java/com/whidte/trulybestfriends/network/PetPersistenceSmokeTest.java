@@ -2,9 +2,11 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.compat.DeathInterceptionCompat;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.level.ChunkPos;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -17,6 +19,7 @@ public final class PetPersistenceSmokeTest {
 
     public static void main(String[] args) throws Exception {
         testAtomicNbtReplacement();
+        testStoredChunkResolution();
         testSnapshotFieldPreservation();
         testTotemEffectNbtKey();
         testSummonClearsSittingState();
@@ -26,7 +29,26 @@ public final class PetPersistenceSmokeTest {
         testStoredDeathIsNotLost();
         testDirectDieCompatibilityGuard();
         testThreeStateInventoryRestore();
-        System.out.println("PetPersistenceSmokeTest: 10/10 passed");
+        System.out.println("PetPersistenceSmokeTest: 11/11 passed");
+    }
+
+    private static void testStoredChunkResolution() {
+        CompoundTag explicit = new CompoundTag();
+        explicit.putInt("ChunkX", 12);
+        explicit.putInt("ChunkZ", -4);
+        require(new ChunkPos(12, -4).equals(PetIOUtil.getStoredChunk(explicit)),
+                "explicit stored chunk coordinates were not resolved");
+
+        CompoundTag positionOnly = new CompoundTag();
+        ListTag position = new ListTag();
+        position.add(DoubleTag.valueOf(33.5));
+        position.add(DoubleTag.valueOf(70.0));
+        position.add(DoubleTag.valueOf(-0.5));
+        positionOnly.put("Pos", position);
+        require(new ChunkPos(2, -1).equals(PetIOUtil.getStoredChunk(positionOnly)),
+                "entity position was not converted to chunk coordinates");
+        require(PetIOUtil.getStoredChunk(new CompoundTag()) == null,
+                "missing position data produced a chunk");
     }
 
     private static void testSummonClearsSittingState() {

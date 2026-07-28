@@ -1,6 +1,7 @@
 package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.Config;
+import com.whidte.trulybestfriends.PetIndexState;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -165,7 +166,7 @@ public final class PetHealingManager {
         long now = server.overworld().getGameTime();
         boolean persistenceRequired = false;
         for (HealingEntry entry : new ArrayList<>(ENTRIES.values())) {
-            Entity any = findEntity(server, entry.petUuid);
+            Entity any = PetIOUtil.findEntity(server, entry.petUuid);
             if (any != null && (!(any instanceof LivingEntity living)
                     || !living.isAlive()
                     || !trulybestfriends.isOwnedBy(living, entry.ownerUuid))) {
@@ -330,16 +331,8 @@ public final class PetHealingManager {
         return Float.intBitsToFloat(clientData(nbt, PENDING_INDEX));
     }
 
-    public static int getHungerCost(CompoundTag nbt) {
-        return getHungerCost(nbt, false);
-    }
-
     public static int getHungerCost(CompoundTag nbt, boolean advanced) {
         return clientData(nbt, advanced ? ADVANCED_HUNGER_COST_INDEX : NORMAL_HUNGER_COST_INDEX);
-    }
-
-    public static int getPulseInterval(CompoundTag nbt) {
-        return getPulseInterval(nbt, false);
     }
 
     public static int getPulseInterval(CompoundTag nbt, boolean advanced) {
@@ -352,14 +345,6 @@ public final class PetHealingManager {
 
     public static int getMaxDuration(CompoundTag nbt) {
         return clientData(nbt, MAX_DURATION_INDEX);
-    }
-
-    public static float getFlatAmount(CompoundTag nbt) {
-        return Float.intBitsToFloat(clientData(nbt, FLAT_AMOUNT_INDEX));
-    }
-
-    public static float getMaxHealthFraction(CompoundTag nbt) {
-        return Float.intBitsToFloat(clientData(nbt, MAX_HEALTH_FRACTION_INDEX));
     }
 
     private static int clientData(CompoundTag nbt, int index) {
@@ -417,16 +402,8 @@ public final class PetHealingManager {
         return true;
     }
 
-    private static Entity findEntity(MinecraftServer server, UUID petUuid) {
-        for (ServerLevel level : server.getAllLevels()) {
-            Entity entity = level.getEntity(petUuid);
-            if (entity != null) return entity;
-        }
-        return null;
-    }
-
     private static LivingEntity findLoadedPet(MinecraftServer server, UUID petUuid) {
-        Entity entity = findEntity(server, petUuid);
+        Entity entity = PetIOUtil.findEntity(server, petUuid);
         return entity instanceof LivingEntity living ? living : null;
     }
 
@@ -452,10 +429,11 @@ public final class PetHealingManager {
     }
 
     private static void loadEntries(CompoundTag indexRoot) {
-        forEachPetState(indexRoot, (petUuid, state) -> {
-            if (!state.contains(HEALING_TAG, Tag.TAG_COMPOUND)) return;
+        PetIndexState.visit(indexRoot, (petUuid, state) -> {
+            if (!state.contains(HEALING_TAG, Tag.TAG_COMPOUND)) return false;
             HealingEntry entry = HealingEntry.load(state.getCompound(HEALING_TAG), petUuid);
             if (entry != null) ENTRIES.put(petUuid, entry);
+            return false;
         });
     }
 
@@ -464,7 +442,7 @@ public final class PetHealingManager {
         Set<UUID> unmatched = new HashSet<>(healingByPet.keySet());
         // Remove the short-lived top-level format from development builds without reading it.
         indexRoot.remove("TBF_HealingEntries");
-        forEachPetState(indexRoot, (petUuid, state) -> {
+        PetIndexState.visit(indexRoot, (petUuid, state) -> {
             CompoundTag healing = healingByPet.get(petUuid);
             if (healing == null) {
                 state.remove(HEALING_TAG);
@@ -472,26 +450,9 @@ public final class PetHealingManager {
                 state.put(HEALING_TAG, healing);
                 unmatched.remove(petUuid);
             }
+            return false;
         });
         return unmatched;
-    }
-
-    private static void forEachPetState(CompoundTag indexRoot, PetStateConsumer consumer) {
-        for (String playerName : indexRoot.getAllKeys()) {
-            if (!indexRoot.contains(playerName, Tag.TAG_COMPOUND)) continue;
-            CompoundTag playerTag = indexRoot.getCompound(playerName);
-            for (String typeKey : playerTag.getAllKeys()) {
-                if (!playerTag.contains(typeKey, Tag.TAG_COMPOUND)) continue;
-                CompoundTag typeTag = playerTag.getCompound(typeKey);
-                for (String uuidText : typeTag.getAllKeys()) {
-                    if (!typeTag.contains(uuidText, Tag.TAG_COMPOUND)) continue;
-                    try {
-                        consumer.accept(UUID.fromString(uuidText), typeTag.getCompound(uuidText));
-                    } catch (IllegalArgumentException ignored) {
-                    }
-                }
-            }
-        }
     }
 
     private static boolean save() {
@@ -515,11 +476,6 @@ public final class PetHealingManager {
             trulybestfriends.LOGGER.error("Failed to save pet healing state in pet index", e);
             return false;
         }
-    }
-
-    @FunctionalInterface
-    private interface PetStateConsumer {
-        void accept(UUID petUuid, CompoundTag state);
     }
 
     private static final class HealingTimer {

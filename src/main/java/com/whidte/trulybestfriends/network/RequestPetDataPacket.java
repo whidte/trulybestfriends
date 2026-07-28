@@ -3,7 +3,6 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.trulybestfriends;
 import com.whidte.trulybestfriends.compat.SableCompat;
 import com.whidte.trulybestfriends.Config;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
@@ -13,7 +12,6 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -197,22 +195,13 @@ public class RequestPetDataPacket implements CustomPacketPayload {
      *  without the overhead of building the full GUI NBT. */
     private static boolean isPetLoaded(ServerPlayer player, UUID petUuid) {
         if (PetIOUtil.getShoulderEntity(player, petUuid) != null) return true;
-        for (ServerLevel level : player.server.getAllLevels()) {
-            Entity entity = level.getEntity(petUuid);
-            if (entity instanceof OwnableEntity ownable
-                    && player.getUUID().equals(ownable.getOwnerUUID())) {
-                return true;
-            }
-        }
-        return false;
+        return PetIOUtil.findEntity(player.server, petUuid, entity ->
+                entity instanceof OwnableEntity ownable
+                        && player.getUUID().equals(ownable.getOwnerUUID())) != null;
     }
 
     private static ServerLevel getStoredLevel(ServerPlayer player, CompoundTag storedNbt) {
-        String dimension = storedNbt.getString("Dimension");
-        if (dimension.isEmpty()) return null;
-        ResourceLocation location = ResourceLocation.tryParse(dimension);
-        if (location == null) return null;
-        return player.server.getLevel(ResourceKey.create(Registries.DIMENSION, location));
+        return PetIOUtil.getLevel(player.server, storedNbt.getString("Dimension"));
     }
 
     private static CompoundTag getLoadedPetNbtFromLevel(ServerPlayer player, UUID petUuid, ServerLevel level, CompoundTag storedNbt) {

@@ -79,12 +79,8 @@ public final class FtbTeamsCompat {
 
         try (var ownerDirs = Files.list(modDir)) {
             for (Path ownerDir : ownerDirs.filter(Files::isDirectory).toList()) {
-                UUID ownerUUID;
-                try {
-                    ownerUUID = UUID.fromString(ownerDir.getFileName().toString());
-                } catch (IllegalArgumentException ignored) {
-                    continue;
-                }
+                UUID ownerUUID = ownerUuid(ownerDir);
+                if (ownerUUID == null) continue;
                 try (var petFiles = Files.list(ownerDir)) {
                     for (Path path : petFiles.filter(Files::isRegularFile).toList()) {
                         String fileName = path.getFileName().toString();
@@ -109,12 +105,8 @@ public final class FtbTeamsCompat {
         if (!Files.isDirectory(modDir)) return null;
         try (var ownerDirs = Files.list(modDir)) {
             for (Path ownerDir : ownerDirs.filter(Files::isDirectory).toList()) {
-                UUID ownerUUID;
-                try {
-                    ownerUUID = UUID.fromString(ownerDir.getFileName().toString());
-                } catch (IllegalArgumentException ignored) {
-                    continue;
-                }
+                UUID ownerUUID = ownerUuid(ownerDir);
+                if (ownerUUID == null) continue;
                 if (!Files.isRegularFile(petFile(modDir, ownerUUID, petUUID))) continue;
                 STORED_OWNERS.put(cacheKey, ownerUUID);
                 return ownerUUID;
@@ -128,6 +120,14 @@ public final class FtbTeamsCompat {
 
     private static Path petFile(Path modDir, UUID ownerUUID, UUID petUUID) {
         return PetIOUtil.getOwnerDir(modDir, ownerUUID).resolve(petUUID + ".nbt");
+    }
+
+    private static UUID ownerUuid(Path ownerDir) {
+        try {
+            return UUID.fromString(ownerDir.getFileName().toString());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private static final class Loaded {
