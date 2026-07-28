@@ -29,6 +29,23 @@ public final class PetDeathState {
                 || (nbt.contains("Health") && nbt.getFloat("Health") <= 0.0F);
     }
 
+    /** Whether deleting this stored snapshot should first restore it to the world. */
+    public static boolean shouldReleaseBeforeUntracking(CompoundTag nbt, boolean deleteStoredPetsDirectly) {
+        return shouldReleaseBeforeUntracking(nbt, deleteStoredPetsDirectly, false);
+    }
+
+    /**
+     * @param noReviveEntity true for legacy unmarked death snapshots whose entity type is currently no-revive
+     */
+    public static boolean shouldReleaseBeforeUntracking(CompoundTag nbt, boolean deleteStoredPetsDirectly,
+                                                        boolean noReviveEntity) {
+        if (nbt != null && isDeadSnapshot(nbt) && noReviveEntity) {
+            return false;
+        }
+        return nbt == null || !deleteStoredPetsDirectly
+                || (!nbt.getBoolean("Recalled") && !isDeadSnapshot(nbt));
+    }
+
     /** Creates a live release snapshot without mutating the revivable stored copy. */
     public static CompoundTag prepareForUntrackedRelease(CompoundTag nbt) {
         CompoundTag released = nbt.copy();

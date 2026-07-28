@@ -22,7 +22,30 @@ public final class PetIndexBlacklistTest {
         require(index.getList(PetIndexBlacklist.KEY, 8).size() == 1,
                 "blacklist did not persist as one UUID string");
 
-        System.out.println("PetIndexBlacklistTest: 5/5 passed");
+        UUID forcedPet = UUID.randomUUID();
+        UUID forcedOwner = UUID.randomUUID();
+        require(ForcedTrackingWhitelist.put(index, forcedPet, forcedOwner),
+                "new forced-tracking entry was not added");
+        require(forcedOwner.equals(ForcedTrackingWhitelist.get(index, forcedPet)),
+                "forced-tracking owner was not resolved");
+        require(forcedOwner.equals(ForcedTrackingWhitelist.readAll(index).get(forcedPet)),
+                "forced-tracking entry was not restored from the index");
+        require(!ForcedTrackingWhitelist.put(index, forcedPet, forcedOwner),
+                "unchanged forced-tracking entry was rewritten");
+        require(ForcedTrackingWhitelist.remove(index, forcedPet),
+                "forced-tracking entry was not removed");
+        require(ForcedTrackingWhitelist.get(index, forcedPet) == null,
+                "removed forced-tracking entry was still resolved");
+
+        CompoundTag state = new CompoundTag();
+        state.putBoolean("Recalled", false);
+        state.put("Healing", new CompoundTag());
+        require(PetIndexState.setRecalled(state, true),
+                "changed recalled state was not written");
+        require(state.contains("Healing"),
+                "updating recalled state removed healing data");
+
+        System.out.println("PetIndexBlacklistTest: 13/13 passed");
     }
 
     private static void require(boolean condition, String message) {

@@ -1,6 +1,13 @@
 package com.whidte.trulybestfriends.network;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
+import net.minecraft.nbt.Tag;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 public final class PetHealingSmokeTest {
     public static void main(String[] args) {
@@ -44,6 +51,46 @@ public final class PetHealingSmokeTest {
                 "compact client state must preserve advanced hunger cost");
         require(PetHealingManager.getPulseInterval(clientData, true) == 25,
                 "compact client state must preserve advanced pulse interval");
+
+        CompoundTag index = new CompoundTag();
+        UUID petUuid = UUID.randomUUID();
+        CompoundTag state = new CompoundTag();
+        state.putBoolean("Recalled", true);
+        state.putString("Marker", "preserved");
+        CompoundTag type = new CompoundTag();
+        type.put(petUuid.toString(), state);
+        CompoundTag player = new CompoundTag();
+        player.put("minecraft:wolf", type);
+        index.put("Player", player);
+        ListTag blacklist = new ListTag();
+        blacklist.add(StringTag.valueOf(UUID.randomUUID().toString()));
+        index.put("TBF_BlacklistedUUIDs", blacklist);
+        index.put("TBF_HealingEntries", new ListTag());
+        CompoundTag healing = new CompoundTag();
+        healing.putString("Marker", "healing");
+        Map<UUID, CompoundTag> healingByPet = new HashMap<>();
+        healingByPet.put(petUuid, healing);
+
+        require(PetHealingManager.syncPersistedEntries(index, healingByPet).isEmpty(),
+                "indexed healing entry was not matched to its pet UUID");
+        CompoundTag persistedState = index.getCompound("Player")
+                .getCompound("minecraft:wolf").getCompound(petUuid.toString());
+        require(persistedState.getBoolean("Recalled"),
+                "saving healing state must preserve recalled state");
+        require("preserved".equals(persistedState.getString("Marker")),
+                "saving healing state must preserve other UUID state");
+        require("healing".equals(persistedState.getCompound(PetHealingManager.HEALING_TAG)
+                        .getString("Marker")),
+                "healing state must be nested directly under the pet UUID");
+        require(index.getList("TBF_BlacklistedUUIDs", Tag.TAG_STRING).size() == 1,
+                "saving healing state must preserve blacklist data");
+        require(!index.contains("TBF_HealingEntries"),
+                "healing state must not use a top-level list");
+
+        PetHealingManager.syncPersistedEntries(index, Map.of());
+        require(!persistedState.contains(PetHealingManager.HEALING_TAG)
+                        && persistedState.getBoolean("Recalled"),
+                "clearing healing must preserve recalled state in the UUID node");
 
         CompoundTag dead = new CompoundTag();
         PetDeathState.markStoredDead(dead);
