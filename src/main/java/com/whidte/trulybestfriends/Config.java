@@ -15,13 +15,23 @@ public class Config
 {
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
+    public static final ModConfigSpec.BooleanValue PERFORMANCE_MODE = BUILDER
+            .comment("If true, disables automatic pet registration from tame events, entity joins, nearby scans, and full scans.",
+                    "Pets must be registered with /tbf load or the manual registration item.")
+            .define("performanceMode", false);
+
+    public static final ModConfigSpec.IntValue PERFORMANCE_MODE_SYNC_INTERVAL_TICKS = BUILDER
+            .comment("In performance mode, interval in ticks for updating loaded pets by their already tracked UUIDs.")
+            .defineInRange("performanceModeSyncIntervalTicks", 5, 1, 1200);
+
     public static final ModConfigSpec.ConfigValue<List<? extends String>> OWNER_NBT_FIELDS = BUILDER
-            .comment("Top-level NBT field names used to find an owner UUID on living entities that do not implement OwnableEntity.",
-                    "Fields are checked in order and may contain either a UUID tag or a UUID string. Names are case-sensitive.")
+            .comment("NBT paths used to find an owner UUID on living entities that do not implement OwnableEntity.",
+                    "Use dots to traverse nested compounds, for example ForgeData.Owner. Paths are checked in order.",
+                    "The final field may contain either a UUID tag or a UUID string. Path segments are case-sensitive.")
             .defineListAllowEmpty("ownerNbtFields", java.util.Arrays.asList(
                     "Owner",
                     "OwnerUUID"
-            ), s -> s instanceof String && !((String) s).isEmpty());
+            ), s -> s instanceof String path && OwnerNbtResolver.isValidPath(path));
 
     public static final ModConfigSpec.IntValue SYNC_INTERVAL_TICKS = BUILDER
             .comment("Interval in ticks for full fallback scan of all loaded owned entities and caching their latest pet data.",
@@ -48,6 +58,11 @@ public class Config
             .comment("Maximum number of pets a player can have tracked at once (1-512, default 64)")
             .defineInRange("maxPets", 64, 1, 512);
 
+    public static final ModConfigSpec.BooleanValue DELETE_STORED_PETS_DIRECTLY = BUILDER
+            .comment("If true, deleting a recalled or dead pet from tracking permanently removes its stored data",
+                    "without releasing the entity into the world. Default false preserves the existing release behavior.")
+            .define("deleteStoredPetsDirectly", false);
+
     public static final ModConfigSpec.IntValue AREA_RECALL_DEFAULT_RANGE = BUILDER
             .comment("Default range (blocks) for area recall when holding Shift. Adjustable with scroll wheel (1-16).")
             .defineInRange("areaRecallDefaultRange", 8, 1, 16);
@@ -63,8 +78,17 @@ public class Config
     public static final ModConfigSpec.ConfigValue<String> MANUAL_REGISTER_ITEM = BUILDER
             .comment("Item used to manually register a pet by right-clicking the entity.",
                     "The registration uses the same checks and behavior as /tbf load.")
-            .define("manualRegisterItem", "minecraft:stick",
+            .define("manualRegisterItem", "minecraft:feather",
                     value -> value instanceof String && ResourceLocation.tryParse((String) value) != null);
+
+    public static final ModConfigSpec.BooleanValue CONSUME_MANUAL_REGISTER_ITEM = BUILDER
+            .comment("If true, a successful manual pet registration consumes the configured number of items.",
+                    "Items are not consumed when registration fails or when the player is in creative mode.")
+            .define("consumeManualRegisterItem", false);
+
+    public static final ModConfigSpec.IntValue MANUAL_REGISTER_ITEM_CONSUME_COUNT = BUILDER
+            .comment("Number of held manual registration items consumed after a successful registration.")
+            .defineInRange("manualRegisterItemConsumeCount", 1, 1, 64);
 
     public static final ModConfigSpec.IntValue REVIVE_ITEM_COUNT = BUILDER
             .comment("Number of revive items required to revive a dead pet.")
@@ -125,6 +149,7 @@ public class Config
                     "irons_spellbooks:summoned_rapier",
                     "irons_spellbooks:spectral_hammer",
                     "irons_spellbooks:wisp",
+                    "touhou_little_maid:broom",
                     "touhou_little_maid:chair"
             ), s -> s instanceof String && (((String) s).contains(":") || ((String) s).endsWith(":*")));
 
@@ -133,7 +158,6 @@ public class Config
                     "Format: entity id, e.g. \"minecraft:villager\". Pets of these types will still be tracked,",
                     "but on death they drop loot normally and the revive button is disabled for them.")
             .defineListAllowEmpty("noReviveWhitelist", java.util.Arrays.asList(
-                    "touhou_little_maid:maid",
                     "modulargolems:metal_golem",
                     "modulargolems:humanoid_golem",
                     "modulargolems:dog_golem"
@@ -145,12 +169,67 @@ public class Config
                     "Use this for disposable or summon-only entities that should leave no trace after death.",
                     "Format: entity id, e.g. \"minecraft:horse\".")
             .defineListAllowEmpty("clearOnDeathWhitelist", java.util.Arrays.asList(
+                    "touhou_little_maid:maid",
                     "goety:vex_servant",
                     "goety:wither_skeleton_servant",
                     "goety:border_wraith_servant",
                     "goety:haunted_armor_servant",
                     "goety:blackguard_servant",
-                    "goety:vanguard_servant"
+                    "goety:vanguard_servant",
+                    "goety:doppelganger",
+                    "goety:guardian_servant",
+                    "goety:stone_ministrosity",
+                    "goety:redstone_ministrosity",
+                    "goety:ice_golem",
+                    "goety:blaze_servant",
+                    "goety:inferno",
+                    "goety:mini_ghast",
+                    "goety:ghast_servant",
+                    "goety:malghast",
+                    "goety:blastling_servant",
+                    "goety:snareling_servant",
+                    "goety:watchling_servant",
+                    "goety:haunted_skull",
+                    "goety:phantom_servant",
+                    "goety:reaper_servant",
+                    "goety:wraith_servant",
+                    "goety:muck_wraith_servant",
+                    "goety:zombie_servant",
+                    "goety:zombie_villager_servant",
+                    "goety:husk_servant",
+                    "goety:drowned_servant",
+                    "goety:frozen_zombie_servant",
+                    "goety:jungle_zombie_servant",
+                    "goety:frayed_servant",
+                    "goety:zpiglin_servant",
+                    "goety:zpiglin_brute_servant",
+                    "goety:zombie_vindicator",
+                    "goety:skeleton_servant",
+                    "goety:stray_servant",
+                    "goety:mossy_skeleton_servant",
+                    "goety:sunken_skeleton_servant",
+                    "goety:rattled_servant",
+                    "goety:skeleton_pillager",
+                    "goety:carrion_fly",
+                    "goety:carrion_maggot",
+                    "goety:black_wolf",
+                    "goety:skeleton_wolf",
+                    "goety:winter_wolf",
+                    "goety:stormhound",
+                    "goety:hellhound",
+                    "goety:twilight_goat",
+                    "goety:snapper",
+                    "goety:bear_servant",
+                    "goety:polar_bear_servant",
+                    "goety:hoglin_servant",
+                    "goety:gnasher",
+                    "goety:leapleaf",
+                    "goety:slime_servant",
+                    "goety:magma_cube_servant",
+                    "goety:crypt_slime_servant",
+                    "goety:tropical_slime_servant",
+                    "goety:whisperer",
+                    "goety:wavewhisperer"
             ), s -> s instanceof String && ((String) s).contains(":"));
 
 
@@ -158,16 +237,22 @@ public class Config
 
     public static final java.util.List<String> ownerNbtFields = new java.util.ArrayList<>(java.util.Arrays.asList(
             "Owner", "OwnerUUID"));
+    static volatile java.util.List<String[]> ownerNbtPaths = OwnerNbtResolver.parsePaths(ownerNbtFields);
+    public static boolean performanceMode;
+    public static int performanceModeSyncIntervalTicks;
     public static int syncIntervalTicks;
     public static int localSyncIntervalTicks;
     public static int savePetDataCooldownTicks;
     public static double recallRange;
     public static int recallCooldownMs;
     public static int maxPets;
+    public static boolean deleteStoredPetsDirectly;
     public static int areaRecallDefaultRange;
     public static int maxPendingSummons;
     public static String reviveItem;
     public static String manualRegisterItem;
+    public static boolean consumeManualRegisterItem;
+    public static int manualRegisterItemConsumeCount;
     public static int reviveItemCount;
     public static int reviveCooldownSeconds;
     public static int healHungerCost;
@@ -185,21 +270,55 @@ public class Config
     /** Entity type ids that, on death, additionally clear NBT data and in-memory cache. Also treated as no-revive. */
     public static java.util.Set<String> clearOnDeathWhitelist = new java.util.HashSet<>();
 
+    public enum EntityTypeList {
+        AUTO_REGISTER_BLACKLIST,
+        NO_REVIVE_WHITELIST,
+        CLEAR_ON_DEATH_WHITELIST
+    }
+
+    /** Adds an entity type to the selected runtime list and persists the common config. */
+    public static synchronized boolean addEntityType(EntityTypeList list, String entityTypeId) {
+        ModConfigSpec.ConfigValue<List<? extends String>> configValue = switch (list) {
+            case AUTO_REGISTER_BLACKLIST -> AUTO_REGISTER_BLACKLIST;
+            case NO_REVIVE_WHITELIST -> NO_REVIVE_WHITELIST;
+            case CLEAR_ON_DEATH_WHITELIST -> CLEAR_ON_DEATH_WHITELIST;
+        };
+        java.util.Set<String> runtimeValues = switch (list) {
+            case AUTO_REGISTER_BLACKLIST -> autoRegisterBlacklist;
+            case NO_REVIVE_WHITELIST -> noReviveWhitelist;
+            case CLEAR_ON_DEATH_WHITELIST -> clearOnDeathWhitelist;
+        };
+
+        List<String> updated = new java.util.ArrayList<>(configValue.get());
+        if (updated.contains(entityTypeId)) return false;
+        updated.add(entityTypeId);
+        configValue.set(updated);
+        configValue.save();
+        runtimeValues.add(entityTypeId);
+        return true;
+    }
+
     static void onLoad(final ModConfigEvent event)
     {
         ownerNbtFields.clear();
         ownerNbtFields.addAll(OWNER_NBT_FIELDS.get());
+        ownerNbtPaths = OwnerNbtResolver.parsePaths(ownerNbtFields);
 
+        performanceMode = PERFORMANCE_MODE.get();
+        performanceModeSyncIntervalTicks = PERFORMANCE_MODE_SYNC_INTERVAL_TICKS.get();
         syncIntervalTicks = SYNC_INTERVAL_TICKS.get();
         localSyncIntervalTicks = LOCAL_SYNC_INTERVAL_TICKS.get();
         savePetDataCooldownTicks = SAVE_PET_DATA_COOLDOWN_TICKS.get();
         recallRange = RECALL_RANGE.get();
         recallCooldownMs = RECALL_COOLDOWN_MS.get();
         maxPets = MAX_PETS.get();
+        deleteStoredPetsDirectly = DELETE_STORED_PETS_DIRECTLY.get();
         areaRecallDefaultRange = AREA_RECALL_DEFAULT_RANGE.get();
         maxPendingSummons = MAX_PENDING_SUMMONS.get();
         reviveItem = REVIVE_ITEM.get();
         manualRegisterItem = MANUAL_REGISTER_ITEM.get();
+        consumeManualRegisterItem = CONSUME_MANUAL_REGISTER_ITEM.get();
+        manualRegisterItemConsumeCount = MANUAL_REGISTER_ITEM_CONSUME_COUNT.get();
         reviveItemCount = REVIVE_ITEM_COUNT.get();
         reviveCooldownSeconds = REVIVE_COOLDOWN_SECONDS.get();
         healHungerCost = HEAL_HUNGER_COST.get();

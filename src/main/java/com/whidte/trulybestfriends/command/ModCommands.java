@@ -6,8 +6,11 @@ import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
@@ -40,6 +43,9 @@ public class ModCommands {
 
     /** 实体射线检测的最大距离（与创造模式交互距离一致）。 */
     private static final double PICK_REACH = 5.0D;
+    private static final long CLEAR_CONFIRMATION_TIMEOUT_MS = 30_000L;
+    private static final java.util.Map<java.util.UUID, Long> pendingClearConfirmations =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
@@ -49,8 +55,103 @@ public class ModCommands {
                         .then(Commands.literal("load")
                                 .requires(source -> source.hasPermission(2))
                                 .executes(ctx -> loadPointedPet(ctx.getSource()))
+                                .then(Commands.literal("master")
+                                        .requires(source -> source.hasPermission(2))
+                                        .executes(ctx -> forceLoadPointedPet(ctx.getSource())))
                         )
+                        .then(Commands.literal("autoRegisterBlacklist")
+                                .requires(source -> source.hasPermission(2))
+                                .executes(ctx -> addPointedEntityType(ctx.getSource(),
+                                        Config.EntityTypeList.AUTO_REGISTER_BLACKLIST)))
+                        .then(Commands.literal("noReviveWhitelist")
+                                .requires(source -> source.hasPermission(2))
+                                .executes(ctx -> addPointedEntityType(ctx.getSource(),
+                                        Config.EntityTypeList.NO_REVIVE_WHITELIST)))
+                        .then(Commands.literal("clearOnDeathWhitelist")
+                                .requires(source -> source.hasPermission(2))
+                                .executes(ctx -> addPointedEntityType(ctx.getSource(),
+                                        Config.EntityTypeList.CLEAR_ON_DEATH_WHITELIST)))
+                        .then(Commands.literal("clear")
+                                .requires(source -> source.hasPermission(2))
+                                .executes(ctx -> requestClear(ctx.getSource()))
+                                .then(Commands.literal("confirm")
+                                        .executes(ctx -> confirmClear(ctx.getSource()))))
         );
+    }
+
+    private static int addPointedEntityType(CommandSourceStack source, Config.EntityTypeList list)
+            throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        Entity pointed = pickPointedEntity(player);
+        if (pointed == null) {
+            source.sendFailure(Component.translatable("trulybestfriends.command.no_entity"));
+            return 0;
+        }
+
+        var entityTypeId = BuiltInRegistries.ENTITY_TYPE.getKey(pointed.getType());
+        if (entityTypeId == null) {
+            source.sendFailure(Component.translatable("trulybestfriends.command.unknown_entity_type"));
+            return 0;
+        }
+
+        String id = entityTypeId.toString();
+        String listKey = switch (list) {
+            case AUTO_REGISTER_BLACKLIST -> "trulybestfriends.command.list.auto_register_blacklist";
+            case NO_REVIVE_WHITELIST -> "trulybestfriends.command.list.no_revive_whitelist";
+            case CLEAR_ON_DEATH_WHITELIST -> "trulybestfriends.command.list.clear_on_death_whitelist";
+        };
+        try {
+            if (!Config.addEntityType(list, id)) {
+                source.sendFailure(Component.translatable(
+                        "trulybestfriends.command.list.already_present", id, Component.translatable(listKey)));
+                return 0;
+            }
+        } catch (RuntimeException e) {
+            trulybestfriends.LOGGER.error("Failed to add {} to {}", id, list, e);
+            source.sendFailure(Component.translatable("trulybestfriends.command.list.save_failed", id));
+            return 0;
+        }
+
+        source.sendSuccess(() -> Component.translatable(
+                "trulybestfriends.command.list.added", id, Component.translatable(listKey)), true);
+        return 1;
+    }
+
+    private static int requestClear(CommandSourceStack source) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        long now = System.currentTimeMillis();
+        pendingClearConfirmations.entrySet().removeIf(entry -> entry.getValue() < now);
+        pendingClearConfirmations.put(player.getUUID(), now + CLEAR_CONFIRMATION_TIMEOUT_MS);
+
+        Component confirm = Component.translatable("trulybestfriends.command.clear.confirm")
+                .withStyle(style -> style
+                        .withColor(ChatFormatting.GREEN)
+                        .withBold(true)
+                        .withUnderlined(true)
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/tbf clear confirm"))
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                Component.translatable("trulybestfriends.command.clear.confirm_hover"))));
+        source.sendSuccess(() -> Component.translatable(
+                "trulybestfriends.command.clear.warning", confirm), false);
+        return 1;
+    }
+
+    private static int confirmClear(CommandSourceStack source) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        Long expiresAt = pendingClearConfirmations.remove(player.getUUID());
+        if (expiresAt == null || expiresAt < System.currentTimeMillis()) {
+            source.sendFailure(Component.translatable("trulybestfriends.command.clear.expired"));
+            return 0;
+        }
+
+        int cleared = trulybestfriends.clearAllPetData(player);
+        if (cleared < 0) {
+            source.sendFailure(Component.translatable("trulybestfriends.command.clear.failed"));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.translatable(
+                "trulybestfriends.command.clear.success", cleared), false);
+        return 1;
     }
 
     @SubscribeEvent
@@ -59,7 +160,17 @@ public class ModCommands {
         var heldItemId = BuiltInRegistries.ITEM.getKey(event.getItemStack().getItem());
         if (heldItemId == null || !heldItemId.toString().equals(Config.manualRegisterItem)) return;
 
-        loadPet(player.createCommandSourceStack(), player, event.getTarget(), false);
+        CommandSourceStack source = player.createCommandSourceStack();
+        boolean shouldConsume = Config.consumeManualRegisterItem && !player.getAbilities().instabuild;
+        if (shouldConsume && event.getItemStack().getCount() < Config.manualRegisterItemConsumeCount) {
+            source.sendFailure(Component.translatable(
+                    "trulybestfriends.load.not_enough_register_items", Config.manualRegisterItemConsumeCount));
+        } else {
+            int result = loadPet(source, player, event.getTarget(), false);
+            if (result > 0 && shouldConsume) {
+                event.getItemStack().shrink(Config.manualRegisterItemConsumeCount);
+            }
+        }
         event.setCancellationResult(InteractionResult.SUCCESS);
         event.setCanceled(true);
     }
@@ -74,6 +185,40 @@ public class ModCommands {
         }
 
         return loadPet(source, player, pointed, true);
+    }
+
+    private static int forceLoadPointedPet(CommandSourceStack source) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        Entity pointed = pickPointedEntity(player);
+        if (pointed == null) {
+            source.sendFailure(Component.translatable("trulybestfriends.load.no_entity"));
+            return 0;
+        }
+
+        Component entityName = pointed.getDisplayName();
+        java.util.UUID petUUID = pointed.getUUID();
+        trulybestfriends.LoadResult result = trulybestfriends.tryForceLoadPet(pointed, player, player.serverLevel());
+        switch (result) {
+            case OK -> {
+                Component hoverableEntityName = entityName.copy().withStyle(style -> style.withHoverEvent(
+                        new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(petUUID.toString()))));
+                source.sendSuccess(() -> Component.translatable(
+                        "trulybestfriends.load.master.success", hoverableEntityName), true);
+                return 1;
+            }
+            case NOT_A_PET -> source.sendFailure(Component.translatable(
+                    "trulybestfriends.load.master.not_living"));
+            case UNKNOWN_OWNER -> source.sendFailure(Component.translatable(
+                    "trulybestfriends.load.unknown_owner"));
+            case TYPE_BLACKLISTED -> source.sendFailure(Component.translatable(
+                    "trulybestfriends.load.type_blacklisted"));
+            case LIMIT_REACHED -> source.sendFailure(Component.translatable(
+                    "trulybestfriends.load.limit_reached", Config.maxPets));
+            case UNBLACKLIST_FAILED -> source.sendFailure(Component.translatable(
+                    "trulybestfriends.load.unblacklist_failed"));
+            case SAVE_FAILED -> source.sendFailure(Component.translatable("trulybestfriends.load.save_failed"));
+        }
+        return 0;
     }
 
     private static int loadPet(CommandSourceStack source, ServerPlayer player, Entity pointed,
@@ -97,8 +242,10 @@ public class ModCommands {
         trulybestfriends.LoadResult result = trulybestfriends.tryLoadPet(pointed, level);
         switch (result) {
             case OK -> {
+                Component hoverableEntityName = entityName.copy().withStyle(style -> style.withHoverEvent(
+                        new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(petUUID.toString()))));
                 source.sendSuccess(() -> Component.translatable(
-                        "trulybestfriends.load.success", entityName, petUUID.toString()), informAdmins);
+                        "trulybestfriends.load.success", hoverableEntityName), informAdmins);
                 return 1;
             }
             case NOT_A_PET -> source.sendFailure(Component.translatable("trulybestfriends.load.not_a_pet"));

@@ -125,6 +125,7 @@ tasks.register('reviveCooldownSmokeTest', JavaExec) {
 tasks.named('check') {
     dependsOn tasks.named('configDimensionSmokeTest')
     dependsOn tasks.named('reviveCooldownSmokeTest')
+    dependsOn tasks.named('ownerNbtResolverSmokeTest')
     dependsOn tasks.named('petPersistenceSmokeTest')
     dependsOn tasks.named('multipartRotationSmokeTest')
     dependsOn tasks.named('petGuiNbtSmokeTest')
@@ -132,6 +133,14 @@ tasks.named('check') {
     dependsOn tasks.named('reviveProtectionSmokeTest')
     dependsOn tasks.named('petIndexBlacklistTest')
     dependsOn tasks.named('petHealingSmokeTest')
+}
+
+tasks.register('ownerNbtResolverSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates top-level and nested owner NBT path resolution.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.OwnerNbtResolverSmokeTest'
 }
 
 tasks.register('petHealingSmokeTest', JavaExec) {

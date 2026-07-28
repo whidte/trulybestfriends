@@ -656,4 +656,11 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             }
         }
     }
+
+    /** Cancel every queued summon belonging to one player. */
+    public static void cancelPendingSummons(UUID playerUuid) {
+        for (PendingSummon pending : new ArrayList<>(pendingSummons)) {
+            if (pending.playerUuid.equals(playerUuid)) finishPendingSummon(pending);
+        }
+    }
 }

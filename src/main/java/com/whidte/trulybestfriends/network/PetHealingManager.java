@@ -3,7 +3,6 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -16,7 +15,9 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** Server-authoritative healing state that remains active while pets are unloaded or recalled. */
@@ -35,9 +36,11 @@ public final class PetHealingManager {
     private static final int FLAT_AMOUNT_INDEX = 9;
     private static final int MAX_HEALTH_FRACTION_INDEX = 10;
 
-    private static final String FILE_NAME = "pet_healing.nbt";
+    static final String HEALING_TAG = "Healing";
+    private static final String INDEX_FILE_NAME = "pets_index.nbt";
     private static final Map<UUID, HealingEntry> ENTRIES = new HashMap<>();
-    private static File stateFile;
+    private static final Set<UUID> PENDING_APPLY_ATTEMPTED = new HashSet<>();
+    private static File indexFile;
 
     private PetHealingManager() {}
 
@@ -47,23 +50,24 @@ public final class PetHealingManager {
 
     public static void load(MinecraftServer server) {
         ENTRIES.clear();
-        stateFile = PetIOUtil.getModDir(server.overworld()).resolve(FILE_NAME).toFile();
-        if (!stateFile.exists()) return;
-        try {
-            CompoundTag root = NbtFileIO.readCompressed(stateFile);
-            for (Tag raw : root.getList("Entries", Tag.TAG_COMPOUND)) {
-                HealingEntry entry = HealingEntry.load((CompoundTag) raw);
-                if (entry != null) ENTRIES.put(entry.petUuid, entry);
+        PENDING_APPLY_ATTEMPTED.clear();
+        File modDir = PetIOUtil.getModDir(server.overworld()).toFile();
+        indexFile = new File(modDir, INDEX_FILE_NAME);
+        if (indexFile.exists()) {
+            try {
+                CompoundTag root = NbtFileIO.readCompressed(indexFile);
+                loadEntries(root);
+            } catch (IOException | RuntimeException e) {
+                trulybestfriends.LOGGER.error("Failed to load pet healing state from pet index", e);
             }
-        } catch (IOException | RuntimeException e) {
-            trulybestfriends.LOGGER.error("Failed to load pet healing state", e);
         }
     }
 
     public static void shutdown() {
         save();
         ENTRIES.clear();
-        stateFile = null;
+        PENDING_APPLY_ATTEMPTED.clear();
+        indexFile = null;
     }
 
     public static ActivationResult activate(ServerPlayer player, UUID petUuid, boolean advanced) {
@@ -159,50 +163,50 @@ public final class PetHealingManager {
     public static void tick(MinecraftServer server) {
         if (ENTRIES.isEmpty()) return;
         long now = server.overworld().getGameTime();
-        boolean changed = false;
+        boolean persistenceRequired = false;
         for (HealingEntry entry : new ArrayList<>(ENTRIES.values())) {
             Entity any = findEntity(server, entry.petUuid);
             if (any != null && (!(any instanceof LivingEntity living)
                     || !living.isAlive()
                     || !trulybestfriends.isOwnedBy(living, entry.ownerUuid))) {
                 ENTRIES.remove(entry.petUuid);
-                changed = true;
+                PENDING_APPLY_ATTEMPTED.remove(entry.petUuid);
+                persistenceRequired = true;
                 continue;
             }
 
             LivingEntity living = any instanceof LivingEntity value ? value : null;
-            if (living != null && entry.pendingHeal > 0.0F) {
-                applyPending(entry, living);
-                changed = true;
+            if (living != null && entry.pendingHeal > 0.0F
+                    && PENDING_APPLY_ATTEMPTED.add(entry.petUuid)) {
+                // Normally handled by onEntityLoaded; this covers entities discovered first by tick().
+                persistenceRequired |= applyPendingDurably(entry, living);
             }
 
-            changed |= processTimer(entry, entry.advancedTimer,
+            processTimer(entry, entry.advancedTimer,
                     Config.advancedHealPulseIntervalTicks, now, living, true);
-            changed |= processTimer(entry, entry.normalTimer,
+            processTimer(entry, entry.normalTimer,
                     Config.healPulseIntervalTicks, now, living, false);
 
             if (entry.normalTimer.expired(now)
                     && entry.advancedTimer.expired(now)
                     && !shouldRetainExpired(entry.pendingHeal)) {
                 ENTRIES.remove(entry.petUuid);
-                changed = true;
+                PENDING_APPLY_ATTEMPTED.remove(entry.petUuid);
+                persistenceRequired = true;
             }
         }
-        if (changed) save();
+        if (persistenceRequired) save();
     }
 
-    private static boolean processTimer(HealingEntry entry, HealingTimer timer, int interval,
-                                        long now, LivingEntity living, boolean advanced) {
-        boolean changed = false;
+    private static void processTimer(HealingEntry entry, HealingTimer timer, int interval,
+                                     long now, LivingEntity living, boolean advanced) {
         while (timer.nextPulseTick <= now && timer.nextPulseTick <= timer.endTick) {
             long pulseTick = timer.nextPulseTick;
             timer.nextPulseTick += interval;
-            changed = true;
 
             if (!advanced && entry.advancedTimer.activeAt(pulseTick)) continue;
             applyPulse(entry, living);
         }
-        return changed;
     }
 
     private static void applyPulse(HealingEntry entry, LivingEntity living) {
@@ -221,14 +225,24 @@ public final class PetHealingManager {
         entry.projectedHealth += increase;
     }
 
-    public static void onEntityLoaded(LivingEntity living, UUID ownerUuid) {
+    /**
+     * Applies pending healing and durably stores the healed snapshot before clearing it from the index.
+     *
+     * @return whether this call already persisted the current live pet snapshot
+     */
+    public static boolean onEntityLoaded(LivingEntity living, UUID ownerUuid) {
         HealingEntry entry = ENTRIES.get(living.getUUID());
-        if (entry == null) return;
+        if (entry == null) return false;
         if (!entry.ownerUuid.equals(ownerUuid) || living.getHealth() <= 0.0F) {
             clear(living.getUUID());
-            return;
+            return false;
         }
-        applyPending(entry, living);
+        PENDING_APPLY_ATTEMPTED.remove(entry.petUuid);
+        boolean snapshotPersisted = false;
+        if (entry.pendingHeal > 0.0F) {
+            snapshotPersisted = applyPendingDurably(entry, living);
+            if (!snapshotPersisted) PENDING_APPLY_ATTEMPTED.add(entry.petUuid);
+        }
         entry.projectedHealth = living.getHealth();
         entry.maxHealthSnapshot = (float) living.getAttributeValue(Attributes.MAX_HEALTH);
         long now = living.level().getServer().overworld().getGameTime();
@@ -236,8 +250,10 @@ public final class PetHealingManager {
                 && entry.advancedTimer.expired(now)
                 && !shouldRetainExpired(entry.pendingHeal)) {
             ENTRIES.remove(entry.petUuid);
+            PENDING_APPLY_ATTEMPTED.remove(entry.petUuid);
         }
         save();
+        return snapshotPersisted;
     }
 
     public static void onEntityUnloaded(LivingEntity living, UUID ownerUuid) {
@@ -250,6 +266,7 @@ public final class PetHealingManager {
         }
         entry.projectedHealth = living.getHealth();
         entry.maxHealthSnapshot = (float) living.getAttributeValue(Attributes.MAX_HEALTH);
+        PENDING_APPLY_ATTEMPTED.remove(entry.petUuid);
         save();
     }
 
@@ -259,7 +276,17 @@ public final class PetHealingManager {
     }
 
     public static void clear(UUID petUuid) {
+        PENDING_APPLY_ATTEMPTED.remove(petUuid);
         if (ENTRIES.remove(petUuid) != null) save();
+    }
+
+    public static void clearAll(Iterable<UUID> petUuids) {
+        boolean changed = false;
+        for (UUID petUuid : petUuids) {
+            PENDING_APPLY_ATTEMPTED.remove(petUuid);
+            changed |= ENTRIES.remove(petUuid) != null;
+        }
+        if (changed) save();
     }
 
     /** Adds transient healing fields and theoretical unloaded health to a client-only NBT copy. */
@@ -374,11 +401,20 @@ public final class PetHealingManager {
         return pendingHeal > 0.0F;
     }
 
-    private static void applyPending(HealingEntry entry, LivingEntity living) {
-        if (entry.pendingHeal > 0.0F) living.heal(entry.pendingHeal);
-        entry.pendingHeal = 0.0F;
+    private static boolean applyPendingDurably(HealingEntry entry, LivingEntity living) {
+        if (entry.pendingHeal <= 0.0F) return false;
+        float originalHealth = living.getHealth();
+        living.heal(entry.pendingHeal);
         entry.projectedHealth = living.getHealth();
         entry.maxHealthSnapshot = (float) living.getAttributeValue(Attributes.MAX_HEALTH);
+        if (!trulybestfriends.persistRestoredPet(
+                entry.ownerUuid, living, (ServerLevel) living.level())) {
+            living.setHealth(originalHealth);
+            entry.projectedHealth = originalHealth;
+            return false;
+        }
+        entry.pendingHeal = 0.0F;
+        return true;
     }
 
     private static Entity findEntity(MinecraftServer server, UUID petUuid) {
@@ -415,17 +451,75 @@ public final class PetHealingManager {
         return maxHealth > 0.0F ? maxHealth : 20.0F;
     }
 
-    private static void save() {
-        if (stateFile == null) return;
-        CompoundTag root = new CompoundTag();
-        ListTag list = new ListTag();
-        for (HealingEntry entry : ENTRIES.values()) list.add(entry.save());
-        root.put("Entries", list);
-        try {
-            NbtFileIO.writeCompressed(root, stateFile);
-        } catch (IOException e) {
-            trulybestfriends.LOGGER.error("Failed to save pet healing state", e);
+    private static void loadEntries(CompoundTag indexRoot) {
+        forEachPetState(indexRoot, (petUuid, state) -> {
+            if (!state.contains(HEALING_TAG, Tag.TAG_COMPOUND)) return;
+            HealingEntry entry = HealingEntry.load(state.getCompound(HEALING_TAG), petUuid);
+            if (entry != null) ENTRIES.put(petUuid, entry);
+        });
+    }
+
+    static Set<UUID> syncPersistedEntries(CompoundTag indexRoot,
+                                          Map<UUID, CompoundTag> healingByPet) {
+        Set<UUID> unmatched = new HashSet<>(healingByPet.keySet());
+        // Remove the short-lived top-level format from development builds without reading it.
+        indexRoot.remove("TBF_HealingEntries");
+        forEachPetState(indexRoot, (petUuid, state) -> {
+            CompoundTag healing = healingByPet.get(petUuid);
+            if (healing == null) {
+                state.remove(HEALING_TAG);
+            } else {
+                state.put(HEALING_TAG, healing);
+                unmatched.remove(petUuid);
+            }
+        });
+        return unmatched;
+    }
+
+    private static void forEachPetState(CompoundTag indexRoot, PetStateConsumer consumer) {
+        for (String playerName : indexRoot.getAllKeys()) {
+            if (!indexRoot.contains(playerName, Tag.TAG_COMPOUND)) continue;
+            CompoundTag playerTag = indexRoot.getCompound(playerName);
+            for (String typeKey : playerTag.getAllKeys()) {
+                if (!playerTag.contains(typeKey, Tag.TAG_COMPOUND)) continue;
+                CompoundTag typeTag = playerTag.getCompound(typeKey);
+                for (String uuidText : typeTag.getAllKeys()) {
+                    if (!typeTag.contains(uuidText, Tag.TAG_COMPOUND)) continue;
+                    try {
+                        consumer.accept(UUID.fromString(uuidText), typeTag.getCompound(uuidText));
+                    } catch (IllegalArgumentException ignored) {
+                    }
+                }
+            }
         }
+    }
+
+    private static boolean save() {
+        if (indexFile == null) return false;
+        Map<UUID, CompoundTag> healingByPet = new HashMap<>();
+        for (HealingEntry entry : ENTRIES.values()) {
+            healingByPet.put(entry.petUuid, entry.save());
+        }
+        try {
+            CompoundTag indexRoot = indexFile.exists()
+                    ? NbtFileIO.readCompressed(indexFile)
+                    : new CompoundTag();
+            Set<UUID> unmatched = syncPersistedEntries(indexRoot, healingByPet);
+            if (!unmatched.isEmpty()) {
+                trulybestfriends.LOGGER.warn(
+                        "Could not persist healing state for pets missing from pet index: {}", unmatched);
+            }
+            NbtFileIO.writeCompressed(indexRoot, indexFile);
+            return true;
+        } catch (IOException | RuntimeException e) {
+            trulybestfriends.LOGGER.error("Failed to save pet healing state in pet index", e);
+            return false;
+        }
+    }
+
+    @FunctionalInterface
+    private interface PetStateConsumer {
+        void accept(UUID petUuid, CompoundTag state);
     }
 
     private static final class HealingTimer {
@@ -507,7 +601,6 @@ public final class PetHealingManager {
         private CompoundTag save() {
             CompoundTag nbt = new CompoundTag();
             nbt.putUUID("Owner", ownerUuid);
-            nbt.putUUID("Pet", petUuid);
             normalTimer.save(nbt, "Normal");
             advancedTimer.save(nbt, "Advanced");
             nbt.putFloat("PendingHeal", pendingHeal);
@@ -516,8 +609,8 @@ public final class PetHealingManager {
             return nbt;
         }
 
-        private static HealingEntry load(CompoundTag nbt) {
-            if (!nbt.hasUUID("Owner") || !nbt.hasUUID("Pet")) return null;
+        private static HealingEntry load(CompoundTag nbt, UUID petUuid) {
+            if (!nbt.hasUUID("Owner")) return null;
 
             HealingTimer normal;
             if (nbt.contains("NormalEndTick")) {
@@ -532,7 +625,7 @@ public final class PetHealingManager {
             HealingTimer advanced = nbt.contains("AdvancedEndTick")
                     ? HealingTimer.load(nbt, "Advanced")
                     : new HealingTimer();
-            return new HealingEntry(nbt.getUUID("Owner"), nbt.getUUID("Pet"),
+            return new HealingEntry(nbt.getUUID("Owner"), petUuid,
                     normal, advanced,
                     nbt.getFloat("PendingHeal"), nbt.getFloat("ProjectedHealth"),
                     nbt.getFloat("MaxHealth"));

@@ -21,11 +21,12 @@ public final class PetPersistenceSmokeTest {
         testTotemEffectNbtKey();
         testSummonClearsSittingState();
         testStoredDeathState();
+        testStoredPetDeleteReleasePolicy();
         testPassengerTreesAreExcluded();
         testStoredDeathIsNotLost();
         testDirectDieCompatibilityGuard();
         testThreeStateInventoryRestore();
-        System.out.println("PetPersistenceSmokeTest: 9/9 passed");
+        System.out.println("PetPersistenceSmokeTest: 10/10 passed");
     }
 
     private static void testSummonClearsSittingState() {
@@ -75,6 +76,33 @@ public final class PetPersistenceSmokeTest {
             Files.deleteIfExists(target.toPath());
             Files.deleteIfExists(directory);
         }
+    }
+
+    private static void testStoredPetDeleteReleasePolicy() {
+        CompoundTag normal = new CompoundTag();
+        normal.putFloat("Health", 20.0F);
+        CompoundTag recalled = normal.copy();
+        recalled.putBoolean("Recalled", true);
+        CompoundTag dead = normal.copy();
+        PetDeathState.markStoredDead(dead);
+
+        require(PetDeathState.shouldReleaseBeforeUntracking(recalled, false),
+                "default policy stopped recalled pet release");
+        require(PetDeathState.shouldReleaseBeforeUntracking(dead, false),
+                "default policy stopped dead pet release");
+        require(PetDeathState.shouldReleaseBeforeUntracking(normal, true),
+                "direct-delete policy affected a normal world pet");
+        require(!PetDeathState.shouldReleaseBeforeUntracking(recalled, true),
+                "direct-delete policy released a recalled pet");
+        require(!PetDeathState.shouldReleaseBeforeUntracking(dead, true),
+                "direct-delete policy released a dead pet");
+
+        CompoundTag legacyNoReviveDeath = new CompoundTag();
+        legacyNoReviveDeath.putFloat("Health", 0.0F);
+        require(!PetDeathState.shouldReleaseBeforeUntracking(legacyNoReviveDeath, false, true),
+                "legacy no-revive death snapshot was released and duplicated");
+        require(PetDeathState.shouldReleaseBeforeUntracking(legacyNoReviveDeath, false, false),
+                "legacy revivable death snapshot stopped being released");
     }
 
     private static void testPassengerTreesAreExcluded() {

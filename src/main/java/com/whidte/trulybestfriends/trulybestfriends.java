@@ -82,6 +82,7 @@ public class trulybestfriends {
     private static final Map<String, List<UUID>> indexCache = new ConcurrentHashMap<>();
     private static final Set<UUID> trackedPetUUIDs = ConcurrentHashMap.newKeySet();
     private static final Set<UUID> blacklistedPetUUIDs = ConcurrentHashMap.newKeySet();
+    private static final Map<UUID, UUID> forcedTrackingOwners = new ConcurrentHashMap<>();
     private static final Set<PendingRemoval> pendingRemovals = ConcurrentHashMap.newKeySet();
     private static final Map<ForcedChunk, Integer> forcedChunkReferences = new ConcurrentHashMap<>();
     private static final Set<ForcedChunk> chunksForcedByMod = ConcurrentHashMap.newKeySet();
@@ -97,6 +98,7 @@ public class trulybestfriends {
 
     private int syncTickCounter = 0;
     private int localSyncTickCounter = 0;
+    private int performanceModeSyncTickCounter = 0;
     private int saveTickCounter = 0;
 
     private static trulybestfriends INSTANCE;
@@ -184,8 +186,25 @@ public class trulybestfriends {
         if (!(entity instanceof LivingEntity living)) return LoadResult.NOT_A_PET;
         UUID ownerUUID = getCompatOwnerUUID(living);
         if (ownerUUID == null) return LoadResult.NOT_A_PET;
+        return tryLoadPet(living, ownerUUID, level, false);
+    }
+
+    /**
+     * Uses the normal /tbf load policy while taking ownership from the executing player instead
+     * of OwnableEntity or configured owner NBT paths.
+     */
+    public static LoadResult tryForceLoadPet(Entity entity, ServerPlayer owner, ServerLevel level) {
+        if (INSTANCE == null) return LoadResult.SAVE_FAILED;
+        if (!(entity instanceof LivingEntity living) || entity instanceof PartEntity<?>) {
+            return LoadResult.NOT_A_PET;
+        }
+        return tryLoadPet(living, owner.getUUID(), level, true);
+    }
+
+    private static LoadResult tryLoadPet(LivingEntity living, UUID ownerUUID, ServerLevel level,
+                                         boolean forceTracking) {
         if (!isKnownPlayer(level.getServer(), ownerUUID)) return LoadResult.UNKNOWN_OWNER;
-        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(living.getType());
         String entityTypeKey = entityType != null ? entityType.toString() : null;
         if (entityTypeKey != null && Config.isAutoRegisterBlacklisted(entityTypeKey)) {
             return LoadResult.TYPE_BLACKLISTED;
@@ -197,16 +216,44 @@ public class trulybestfriends {
         }
 
         if (!INSTANCE.savePetData(ownerUUID, living, level)) return LoadResult.SAVE_FAILED;
+        if (forceTracking && !persistForcedTrackingOwner(level, living.getUUID(), ownerUUID)) {
+            pendingPetSaves.remove(living.getUUID());
+            return LoadResult.SAVE_FAILED;
+        }
         INSTANCE.updatePetIndex(living, ownerUUID);
         flushPendingPetSaves(ownerUUID);
         return LoadResult.OK;
     }
 
+    private static boolean persistForcedTrackingOwner(ServerLevel level, UUID petUUID, UUID ownerUUID) {
+        loadPetIndex(level);
+        UUID previousOwner = forcedTrackingOwners.get(petUUID);
+        try {
+            Path modDir = PetIOUtil.getModDir(level);
+            Files.createDirectories(modDir);
+            File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
+            CompoundTag indexTag = indexFile.exists() ? NbtFileIO.readCompressed(indexFile) : new CompoundTag();
+            ForcedTrackingWhitelist.put(indexTag, petUUID, ownerUUID);
+            NbtFileIO.writeCompressed(indexTag, indexFile);
+            forcedTrackingOwners.put(petUUID, ownerUUID);
+            trackedPetUUIDs.add(petUUID);
+            return true;
+        } catch (IOException e) {
+            if (previousOwner == null) forcedTrackingOwners.remove(petUUID);
+            else forcedTrackingOwners.put(petUUID, previousOwner);
+            LOGGER.error("Failed to persist forced tracking entry for {}: {}", petUUID, e.getMessage());
+            return false;
+        }
+    }
+
     /** Replace a join-time pending save with the fully restored live snapshot. */
     public static boolean persistRestoredPet(UUID ownerUUID, Entity pet, ServerLevel level) {
-        return INSTANCE != null
-                && INSTANCE.savePetData(ownerUUID, pet, level)
-                && flushPendingPetSave(pet.getUUID());
+        if (INSTANCE == null || !INSTANCE.savePetData(ownerUUID, pet, level)) return false;
+        // Moving a pet between owner directories may have flushed this snapshot inside savePetData.
+        if (!pendingPetSaves.containsKey(pet.getUUID())) return true;
+        if (flushPendingPetSave(pet.getUUID())) return true;
+        pendingPetSaves.remove(pet.getUUID());
+        return false;
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {
@@ -228,7 +275,7 @@ public class trulybestfriends {
     @SubscribeEvent
     public void onAnimalTamed(AnimalTameEvent event) {
         Entity animal = event.getAnimal();
-        if (animal.level().isClientSide()) return;
+        if (animal.level().isClientSide() || Config.performanceMode) return;
         UUID owner = getCompatOwnerUUID(animal);
         if (owner != null) {
             if (isPetUUIDBlacklisted((ServerLevel) animal.level(), animal.getUUID())) return;
@@ -253,20 +300,31 @@ public class trulybestfriends {
     public void onEntityJoinLevel(EntityJoinLevelEvent event) {
         if (event.getLevel().isClientSide() || !(event.getLevel() instanceof ServerLevel level)) return;
         Entity entity = event.getEntity();
+        if (Config.performanceMode) {
+            if (!petIndexLoaded) loadPetIndex(level);
+            if (!trackedPetUUIDs.contains(entity.getUUID())) return;
+        }
         if (TeleportPetToPlayerPacket.isReleasingUntrackedDeath(entity.getUUID())) return;
         if (discardIfStoredDead(entity, level)) return;
         if (discardIfRecalled(entity, level)) return;
         UUID ownerUUID = getCompatOwnerUUID(entity);
+        if (Config.performanceMode) {
+            if (ownerUUID != null && entity instanceof LivingEntity living) {
+                PetHealingManager.onEntityLoaded(living, ownerUUID);
+            }
+            return;
+        }
         if (ownerUUID != null) {
             // Save tracked pets on (re)join — covers cross-dimension portal travel
             // (e.g. End portal) where the entity is recreated with the same UUID.
             // registerUntrackedOwnedPet handles first-time registration + index update.
             if (trackedPetUUIDs.contains(entity.getUUID())
                     || registerUntrackedOwnedPet(entity, ownerUUID, level)) {
+                boolean healingSnapshotPersisted = false;
                 if (entity instanceof LivingEntity living) {
-                    PetHealingManager.onEntityLoaded(living, ownerUUID);
+                    healingSnapshotPersisted = PetHealingManager.onEntityLoaded(living, ownerUUID);
                 }
-                savePetData(ownerUUID, entity, level);
+                if (!healingSnapshotPersisted) savePetData(ownerUUID, entity, level);
             }
         }
     }
@@ -274,8 +332,17 @@ public class trulybestfriends {
     @SubscribeEvent
     public void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
         if (event.getLevel().isClientSide() || !(event.getEntity() instanceof LivingEntity living)) return;
+        boolean tracked = trackedPetUUIDs.contains(living.getUUID());
+        if (Config.performanceMode && !tracked) return;
         UUID ownerUUID = getCompatOwnerUUID(living);
-        if (ownerUUID != null) PetHealingManager.onEntityUnloaded(living, ownerUUID);
+        if (ownerUUID == null) return;
+
+        // Capture the last live state before a chunk unload. Other removal reasons
+        // have dedicated persistence paths or may recreate the entity elsewhere.
+        if (tracked && living.getRemovalReason() == Entity.RemovalReason.UNLOADED_TO_CHUNK) {
+            savePetData(ownerUUID, living, (ServerLevel) event.getLevel());
+        }
+        PetHealingManager.onEntityUnloaded(living, ownerUUID);
     }
 
     @SubscribeEvent
@@ -317,27 +384,41 @@ public class trulybestfriends {
         indexCache.clear();
         trackedPetUUIDs.clear();
         blacklistedPetUUIDs.clear();
+        forcedTrackingOwners.clear();
         petIndexLoaded = false;
     }
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
-            if (Config.syncIntervalTicks > 0) syncTickCounter++;
-            else syncTickCounter = 0;
-            localSyncTickCounter++;
             saveTickCounter++;
-            processLocalSyncCandidates(event.getServer());
             processPendingRemovals(event.getServer());
             TeleportPetToPlayerPacket.tickPendingSummons(event.getServer());
             ReviveProtection.tick(event.getServer());
             PetHealingManager.tick(event.getServer());
-            if (localSyncTickCounter >= Config.localSyncIntervalTicks) {
-                localSyncTickCounter = 0;
-                collectLocalSyncCandidates(event.getServer());
-            }
-            if (Config.syncIntervalTicks > 0 && syncTickCounter >= Config.syncIntervalTicks) {
+
+            if (Config.performanceMode) {
                 syncTickCounter = 0;
-                syncAllPets(event.getServer());
+                localSyncTickCounter = 0;
+                if (!localSyncCandidates.isEmpty()) localSyncCandidates.clear();
+                performanceModeSyncTickCounter++;
+                if (performanceModeSyncTickCounter >= Config.performanceModeSyncIntervalTicks) {
+                    performanceModeSyncTickCounter = 0;
+                    syncTrackedPets(event.getServer());
+                }
+            } else {
+                performanceModeSyncTickCounter = 0;
+                if (Config.syncIntervalTicks > 0) syncTickCounter++;
+                else syncTickCounter = 0;
+                localSyncTickCounter++;
+                processLocalSyncCandidates(event.getServer());
+                if (localSyncTickCounter >= Config.localSyncIntervalTicks) {
+                    localSyncTickCounter = 0;
+                    collectLocalSyncCandidates(event.getServer());
+                }
+                if (Config.syncIntervalTicks > 0 && syncTickCounter >= Config.syncIntervalTicks) {
+                    syncTickCounter = 0;
+                    syncAllPets(event.getServer());
+                }
             }
             if (saveTickCounter >= Config.savePetDataCooldownTicks) {
                 saveTickCounter = 0;
@@ -454,6 +535,7 @@ public class trulybestfriends {
             return false;
         }
         PetHealingManager.onPetSaved(pet.getUUID(), ownerUUID);
+        String entityTypeKey = BuiltInRegistries.ENTITY_TYPE.getKey(pet.getType()).toString();
         CompoundTag nbt;
         try {
             nbt = PetEntitySnapshot.capture(pet, ownerUUID, level);
@@ -471,7 +553,7 @@ public class trulybestfriends {
                 worldPath,
                 nbt,
                 resolvePlayerName(level, ownerUUID),
-                BuiltInRegistries.ENTITY_TYPE.getKey(pet.getType()).toString()));
+                entityTypeKey));
 
         if (hasPetFileInOtherOwnerDir(PetIOUtil.getModDir(level), ownerUUID, pet.getUUID())) {
             flushPendingPetSaves(ownerUUID);
@@ -657,28 +739,34 @@ public class trulybestfriends {
         boolean isLoadedOwnedPet = isLoadedOwnedPet(player, petUUID);
         if (!Files.exists(petFile) && !ownsPendingSave && !isShoulderPet && !isLoadedOwnedPet) return false;
 
-        CompoundTag deadSnapshot = null;
+        CompoundTag storedSnapshot = null;
         if (Files.exists(petFile)) {
             try {
-                CompoundTag stored = NbtFileIO.readCompressed(petFile.toFile());
-                if (PetDeathState.isDeadSnapshot(stored)) deadSnapshot = stored;
+                storedSnapshot = NbtFileIO.readCompressed(petFile.toFile());
             } catch (IOException e) {
                 LOGGER.error("Failed to inspect pet NBT before deletion for {}: {}", petUUID, e.getMessage());
                 return false;
             }
         }
 
+        CompoundTag deadSnapshot = storedSnapshot != null && PetDeathState.isDeadSnapshot(storedSnapshot)
+                ? storedSnapshot : null;
+        boolean noReviveSnapshot = storedSnapshot != null
+                && Config.isNoReviveEntity(storedSnapshot.getString("EntityType"));
         Entity releasedDeadEntity = null;
-        if (deadSnapshot != null) {
-            releasedDeadEntity = TeleportPetToPlayerPacket.releaseDeadPetForUntracking(
-                    deadSnapshot, petUUID, player, player.serverLevel());
-            if (releasedDeadEntity == null) {
-                LOGGER.warn("Aborted deletePetData for {}: dead pet could not be released", petUUID);
+        if (PetDeathState.shouldReleaseBeforeUntracking(
+                storedSnapshot, Config.deleteStoredPetsDirectly, noReviveSnapshot)) {
+            if (deadSnapshot != null) {
+                releasedDeadEntity = TeleportPetToPlayerPacket.releaseDeadPetForUntracking(
+                        deadSnapshot, petUUID, player, player.serverLevel());
+                if (releasedDeadEntity == null) {
+                    LOGGER.warn("Aborted deletePetData for {}: dead pet could not be released", petUUID);
+                    return false;
+                }
+            } else if (!RecallPetPacket.releaseRecalledPet(player, petUUID, player.serverLevel())) {
+                LOGGER.warn("Aborted deletePetData for {}: recalled pet could not be released", petUUID);
                 return false;
             }
-        } else if (!RecallPetPacket.releaseRecalledPet(player, petUUID, player.serverLevel())) {
-            LOGGER.warn("Aborted deletePetData for {}: recalled pet could not be released", petUUID);
-            return false;
         }
 
         // Stop queued writes and summons before touching disk so stale data
@@ -702,6 +790,106 @@ public class trulybestfriends {
             if (releasedDeadEntity != null) releasedDeadEntity.discard();
             LOGGER.error("Failed to delete pet data for {}: {}", petUUID, e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Removes every stored pet entry belonging to one player without UUID-blacklisting it.
+     * Loaded pets remain in the world and may be registered again by the normal tracking pass.
+     *
+     * @return the number of distinct pet UUIDs cleared, or {@code -1} when storage could not be updated
+     */
+    public static int clearAllPetData(ServerPlayer player) {
+        UUID ownerUUID = player.getUUID();
+        Path modDir = PetIOUtil.getModDir(player);
+        Path ownerDir = PetIOUtil.getOwnerDir(player);
+        File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
+        Set<UUID> petUUIDs = new HashSet<>();
+        List<Path> petFiles = new ArrayList<>();
+
+        try {
+            CompoundTag indexTag = indexFile.exists()
+                    ? NbtFileIO.readCompressed(indexFile)
+                    : new CompoundTag();
+            collectIndexedPetUUIDs(indexTag.getCompound(player.getGameProfile().getName()), petUUIDs);
+
+            for (PendingPetSave pending : pendingPetSaves.values()) {
+                if (ownerUUID.equals(pending.ownerUUID())) petUUIDs.add(pending.petUUID());
+            }
+            for (Map.Entry<UUID, UUID> forcedEntry : forcedTrackingOwners.entrySet()) {
+                if (ownerUUID.equals(forcedEntry.getValue())) petUUIDs.add(forcedEntry.getKey());
+            }
+            for (PendingRemoval pending : pendingRemovals) {
+                if (ownerUUID.equals(pending.ownerUUID())) petUUIDs.add(pending.petUUID());
+            }
+            for (ServerLevel level : player.getServer().getAllLevels()) {
+                for (Entity entity : level.getEntities().getAll()) {
+                    if (trackedPetUUIDs.contains(entity.getUUID()) && isOwnedBy(entity, ownerUUID)) {
+                        petUUIDs.add(entity.getUUID());
+                    }
+                }
+            }
+            if (Files.isDirectory(ownerDir)) {
+                try (var files = Files.list(ownerDir)) {
+                    for (Path file : files.filter(Files::isRegularFile).toList()) {
+                        String fileName = file.getFileName().toString();
+                        if (!fileName.endsWith(".nbt")) continue;
+                        petFiles.add(file);
+                        try {
+                            petUUIDs.add(UUID.fromString(fileName.substring(0, fileName.length() - 4)));
+                        } catch (IllegalArgumentException ignored) {
+                            // The command still removes malformed or legacy NBT filenames.
+                        }
+                    }
+                }
+            }
+
+            // Stop queued work first so it cannot recreate files while this command is clearing them.
+            pendingPetSaves.entrySet().removeIf(entry -> ownerUUID.equals(entry.getValue().ownerUUID()));
+            for (PendingRemoval pending : new ArrayList<>(pendingRemovals)) {
+                if (ownerUUID.equals(pending.ownerUUID())) removePendingRemoval(pending);
+            }
+            TeleportPetToPlayerPacket.cancelPendingSummons(ownerUUID);
+
+            for (UUID petUUID : petUUIDs) {
+                removePetIndexEntry(indexTag, petUUID);
+                ForcedTrackingWhitelist.remove(indexTag, petUUID);
+            }
+            indexTag.remove(player.getGameProfile().getName());
+            if (indexFile.exists() || !indexTag.isEmpty()) {
+                NbtFileIO.writeCompressed(indexTag, indexFile);
+            }
+            for (Path petFile : petFiles) Files.deleteIfExists(petFile);
+
+            PetHealingManager.clearAll(petUUIDs);
+            for (UUID petUUID : petUUIDs) {
+                pendingPetSaves.remove(petUUID);
+                localSyncCandidates.removeIf(candidate -> candidate.entityUUID().equals(petUUID));
+                ReviveProtection.remove(petUUID);
+                trackedPetUUIDs.remove(petUUID);
+                forcedTrackingOwners.remove(petUUID);
+                petDeathTimes.remove(petUUID);
+            }
+            indexCache.values().forEach(uuids -> uuids.removeAll(petUUIDs));
+            indexCache.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+            PetSyncTracker.clearPlayer(ownerUUID);
+            return petUUIDs.size();
+        } catch (IOException | RuntimeException e) {
+            LOGGER.error("Failed to clear all pet data for {}: {}", ownerUUID, e.getMessage(), e);
+            return -1;
+        }
+    }
+
+    private static void collectIndexedPetUUIDs(CompoundTag playerTag, Set<UUID> destination) {
+        for (String typeKey : playerTag.getAllKeys()) {
+            if (!playerTag.contains(typeKey, Tag.TAG_COMPOUND)) continue;
+            CompoundTag typeTag = playerTag.getCompound(typeKey);
+            for (String uuidString : typeTag.getAllKeys()) {
+                try {
+                    destination.add(UUID.fromString(uuidString));
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
         }
     }
 
@@ -753,23 +941,16 @@ public class trulybestfriends {
         // onEntityJoinLevel / syncAllPets on its own.  Returning null here
         // causes all tracking entry points to skip sub-parts.
         if (entity instanceof PartEntity<?>) return null;
+        UUID forcedOwner = forcedTrackingOwners.get(entity.getUUID());
+        if (forcedOwner != null) return forcedOwner;
         // Fast path: standard vanilla/Forge ownership interface
         if (entity instanceof OwnableEntity ownable) {
-            return ownable.getOwnerUUID();
+            UUID ownerUUID = ownable.getOwnerUUID();
+            if (ownerUUID != null) return ownerUUID;
         }
-        // Compatibility: read ownership from configured top-level NBT fields.
+        // Compatibility: read ownership from configured top-level or nested NBT paths.
         CompoundTag nbt = entity.saveWithoutId(new CompoundTag());
-        for (String field : Config.ownerNbtFields) {
-            if (nbt.hasUUID(field)) {
-                return nbt.getUUID(field);
-            }
-            if (nbt.contains(field, Tag.TAG_STRING)) {
-                try {
-                    return UUID.fromString(nbt.getString(field));
-                } catch (IllegalArgumentException ignored) {}
-            }
-        }
-        return null;
+        return OwnerNbtResolver.resolve(nbt, Config.ownerNbtPaths);
     }
 
     public static boolean isOwnedBy(Entity entity, UUID ownerUUID) {
@@ -786,22 +967,30 @@ public class trulybestfriends {
 
     private static void removePetFromIndex(Path modDir, UUID petUUID) throws IOException {
         File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
-        if (!indexFile.exists()) return;
+        if (!indexFile.exists()) {
+            forcedTrackingOwners.remove(petUUID);
+            return;
+        }
 
         CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
-        if (removePetIndexEntry(indexTag, petUUID)) {
+        boolean changed = removePetIndexEntry(indexTag, petUUID);
+        changed |= ForcedTrackingWhitelist.remove(indexTag, petUUID);
+        if (changed) {
             NbtFileIO.writeCompressed(indexTag, indexFile);
         }
+        forcedTrackingOwners.remove(petUUID);
     }
 
     private static void blacklistPetUUID(Path modDir, UUID petUUID) throws IOException {
-        blacklistedPetUUIDs.add(petUUID);
         Files.createDirectories(modDir);
         File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
         CompoundTag indexTag = indexFile.exists() ? NbtFileIO.readCompressed(indexFile) : new CompoundTag();
         removePetIndexEntry(indexTag, petUUID);
+        ForcedTrackingWhitelist.remove(indexTag, petUUID);
         addBlacklistEntry(indexTag, petUUID);
         NbtFileIO.writeCompressed(indexTag, indexFile);
+        forcedTrackingOwners.remove(petUUID);
+        blacklistedPetUUIDs.add(petUUID);
     }
 
     private static void deletePetFiles(Path modDir, UUID petUUID) throws IOException {
@@ -849,6 +1038,8 @@ public class trulybestfriends {
         String uuid = petUUID.toString();
         boolean changed = false;
         for (String playerName : new ArrayList<>(indexTag.getAllKeys())) {
+            if (BLACKLISTED_UUIDS_KEY.equals(playerName)
+                    || ForcedTrackingWhitelist.KEY.equals(playerName)) continue;
             if (!indexTag.contains(playerName, Tag.TAG_COMPOUND)) continue;
             CompoundTag playerTag = indexTag.getCompound(playerName);
             for (String typeKey : new ArrayList<>(playerTag.getAllKeys())) {
@@ -884,8 +1075,7 @@ public class trulybestfriends {
                     CompoundTag typeTag = playerTag.getCompound(typeKey);
                     if (!typeTag.contains(uuid, Tag.TAG_COMPOUND)) continue;
                     CompoundTag state = typeTag.getCompound(uuid);
-                    if (state.contains("Recalled") && state.getBoolean("Recalled") == recalled) return;
-                    state.putBoolean("Recalled", recalled);
+                    if (!PetIndexState.setRecalled(state, recalled)) return;
                     typeTag.put(uuid, state);
                     playerTag.put(typeKey, typeTag);
                     indexTag.put(playerName, playerTag);
@@ -914,17 +1104,17 @@ public class trulybestfriends {
         CompoundTag playerTag = indexTag.getCompound(playerName);
         CompoundTag typeTag = playerTag.getCompound(typeKey);
         boolean alreadyInPlace = typeTag.contains(uuid, Tag.TAG_COMPOUND);
+        CompoundTag state;
         if (alreadyInPlace) {
-            CompoundTag state = typeTag.getCompound(uuid);
-            if (state.contains("Recalled") && state.getBoolean("Recalled") == recalled) return false;
+            state = typeTag.getCompound(uuid);
         } else {
             removePetIndexEntry(indexTag, petUUID);
             playerTag = indexTag.getCompound(playerName);
             typeTag = playerTag.getCompound(typeKey);
+            state = new CompoundTag();
         }
 
-        CompoundTag state = new CompoundTag();
-        state.putBoolean("Recalled", recalled);
+        if (!PetIndexState.setRecalled(state, recalled)) return false;
         typeTag.put(uuid, state);
         playerTag.put(typeKey, typeTag);
         indexTag.put(playerName, playerTag);
@@ -1128,8 +1318,13 @@ public class trulybestfriends {
                         LOGGER.warn("Invalid UUID in pet blacklist: {}", blacklist.getString(i));
                     }
                 }
+                Map<UUID, UUID> loadedForcedOwners = ForcedTrackingWhitelist.readAll(indexTag);
+                loadedForcedOwners.keySet().removeAll(blacklistedPetUUIDs);
+                forcedTrackingOwners.putAll(loadedForcedOwners);
+                trackedPetUUIDs.addAll(forcedTrackingOwners.keySet());
                 for (String playerName : indexTag.getAllKeys()) {
-                    if (BLACKLISTED_UUIDS_KEY.equals(playerName)) continue;
+                    if (BLACKLISTED_UUIDS_KEY.equals(playerName)
+                            || ForcedTrackingWhitelist.KEY.equals(playerName)) continue;
                     if (!indexTag.contains(playerName, Tag.TAG_COMPOUND)) continue;
                     CompoundTag playerTag = indexTag.getCompound(playerName);
                     for (String typeKey : playerTag.getAllKeys()) {
@@ -1168,6 +1363,18 @@ public class trulybestfriends {
         for (ServerLevel level : server.getAllLevels()) {
             for (Entity entity : level.getEntities().getAll()) {
                 syncOwnedEntity(entity, level);
+            }
+        }
+    }
+
+    private void syncTrackedPets(MinecraftServer server) {
+        for (UUID petUUID : new ArrayList<>(trackedPetUUIDs)) {
+            for (ServerLevel level : server.getAllLevels()) {
+                Entity entity = level.getEntity(petUUID);
+                if (entity == null) continue;
+                UUID ownerUUID = getCompatOwnerUUID(entity);
+                if (ownerUUID != null) savePetData(ownerUUID, entity, level);
+                break;
             }
         }
     }
