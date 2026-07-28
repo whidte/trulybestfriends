@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 
 /** Provides atomic compressed-NBT writes for the Forge 1.20.1 File API. */
 public final class NbtFileIO {
@@ -37,7 +38,19 @@ public final class NbtFileIO {
                     Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
                 } catch (IOException replacementFailure) {
                     replacementFailure.addSuppressed(atomicFailure);
-                    throw replacementFailure;
+                    // An open reader may deny the replacement semantics used by both
+                    // move variants on Windows. Stream the completed temp file into the
+                    // existing target only as a last, non-atomic fallback.
+                    try {
+                        try (var output = Files.newOutputStream(target,
+                                StandardOpenOption.WRITE,
+                                StandardOpenOption.TRUNCATE_EXISTING)) {
+                            Files.copy(temporary, output);
+                        }
+                    } catch (IOException copyFailure) {
+                        copyFailure.addSuppressed(replacementFailure);
+                        throw copyFailure;
+                    }
                 }
             }
         } finally {
