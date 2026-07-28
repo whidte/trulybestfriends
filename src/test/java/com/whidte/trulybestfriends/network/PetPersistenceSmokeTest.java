@@ -9,6 +9,7 @@ import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.level.ChunkPos;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ public final class PetPersistenceSmokeTest {
 
     public static void main(String[] args) throws Exception {
         testAtomicNbtReplacement();
+        testNbtReplacementWithOpenReader();
         testStoredChunkResolution();
         testSnapshotFieldPreservation();
         testTotemEffectNbtKey();
@@ -29,7 +31,7 @@ public final class PetPersistenceSmokeTest {
         testStoredDeathIsNotLost();
         testDirectDieCompatibilityGuard();
         testThreeStateInventoryRestore();
-        System.out.println("PetPersistenceSmokeTest: 11/11 passed");
+        System.out.println("PetPersistenceSmokeTest: 12/12 passed");
     }
 
     private static void testStoredChunkResolution() {
@@ -248,6 +250,28 @@ public final class PetPersistenceSmokeTest {
             CompoundTag released = NbtFileIO.readCompressed(target);
             require(released.getInt("Priority") == 3, "priority changed while clearing recalled state");
             require(!released.contains("Recalled"), "explicit recalled state was not cleared");
+        } finally {
+            Files.deleteIfExists(target.toPath());
+            Files.deleteIfExists(directory);
+        }
+    }
+
+    private static void testNbtReplacementWithOpenReader() throws Exception {
+        Path directory = Files.createTempDirectory("tbf-open-nbt-test-");
+        File target = directory.resolve("pet.nbt").toFile();
+        try {
+            CompoundTag first = new CompoundTag();
+            first.putInt("Value", 1);
+            NbtFileIO.writeCompressed(first, target);
+
+            CompoundTag second = new CompoundTag();
+            second.putInt("Value", 2);
+            try (FileInputStream ignored = new FileInputStream(target)) {
+                NbtFileIO.writeCompressed(second, target);
+            }
+
+            require(NbtFileIO.readCompressed(target).getInt("Value") == 2,
+                    "replacement failed while another reader held the target open");
         } finally {
             Files.deleteIfExists(target.toPath());
             Files.deleteIfExists(directory);
