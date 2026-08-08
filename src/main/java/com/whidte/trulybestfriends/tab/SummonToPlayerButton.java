@@ -3,13 +3,16 @@ package com.whidte.trulybestfriends.tab;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import com.whidte.trulybestfriends.Config;
+import com.whidte.trulybestfriends.network.DirectTeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
+import com.whidte.trulybestfriends.network.ReleaseRecalledPetPacket;
 import com.whidte.trulybestfriends.network.RevivePetPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -87,6 +90,7 @@ class SummonToPlayerButton extends AbstractWidget {
     private boolean hasReviveItems() {
         var player = screen.getMinecraft().player;
         if (player == null) return false;
+        if (!Config.isReviveItemRequired()) return true;
         if (player.isCreative()) return true;
         var item = BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(Config.reviveItem));
         if (item == null) return false;
@@ -134,6 +138,8 @@ class SummonToPlayerButton extends AbstractWidget {
             label = Component.translatable("trulybestfriends.revive.cooldown", (reviveCooldownRemainingMs + 999) / 1000);
         } else if (dead) {
             label = Component.translatable("trulybestfriends.revive.label");
+        } else if (screen.canSwapToSelectedPet() && !Screen.hasShiftDown()) {
+            label = Component.translatable("trulybestfriends.ride_swap.label");
         } else {
             label = Component.translatable("trulybestfriends.summon_to_player.label");
         }
@@ -174,6 +180,7 @@ class SummonToPlayerButton extends AbstractWidget {
     @Override
     public void onClick(double mouseX, double mouseY) {
         if (!screen.hasSelection()) return;
+        boolean directTeleport = Screen.hasShiftDown() && screen.canSwapToSelectedPet();
 
         if (isPetDead()) {
             // Whitelisted entity types cannot be revived
@@ -211,7 +218,9 @@ class SummonToPlayerButton extends AbstractWidget {
             if (nbt != null) {
                 nbt.remove("Recalled");
             }
-            PacketDistributor.sendToServer(new RecallPetPacket(screen.getSelectedUuid()));
+            PacketDistributor.sendToServer(directTeleport
+                    ? new ReleaseRecalledPetPacket(screen.getSelectedUuid())
+                    : new RecallPetPacket(screen.getSelectedUuid()));
             return;
         }
 
@@ -219,7 +228,9 @@ class SummonToPlayerButton extends AbstractWidget {
         if (screen.getMinecraft().level != null) {
             lastClickTick = screen.getMinecraft().level.getGameTime();
         }
-        PacketDistributor.sendToServer(new TeleportPetToPlayerPacket(screen.getSelectedUuid()));
+        PacketDistributor.sendToServer(directTeleport
+                ? new DirectTeleportPetToPlayerPacket(screen.getSelectedUuid())
+                : new TeleportPetToPlayerPacket(screen.getSelectedUuid()));
     }
 
     @Override

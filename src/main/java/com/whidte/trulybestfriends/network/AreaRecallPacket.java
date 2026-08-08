@@ -51,7 +51,7 @@ public class AreaRecallPacket implements CustomPacketPayload {
                 return;
             }
 
-            File[] files = ownerDir.toFile().listFiles((f, n) -> n.endsWith(".nbt"));
+            File[] files = ownerDir.toFile().listFiles((f, n) -> PetIOUtil.isPetDataFileName(n));
             if (files == null) {
 
                 return;

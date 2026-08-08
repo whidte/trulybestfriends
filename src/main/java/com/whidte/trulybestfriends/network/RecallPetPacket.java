@@ -42,6 +42,14 @@ public class RecallPetPacket implements CustomPacketPayload {
      *  Mirrors TeleportPetToPlayerPacket's strict entity-existence checks:
      *  searches the pet's stored dimension before falling back to chunk force-load. */
     public static void handle(RecallPetPacket packet, IPayloadContext context) {
+        handle(packet, context, true);
+    }
+
+    static void handleWithoutRideSwap(UUID petUuid, IPayloadContext context) {
+        handle(new RecallPetPacket(petUuid), context, false);
+    }
+
+    private static void handle(RecallPetPacket packet, IPayloadContext context, boolean allowRideSwap) {
         context.enqueueWork(() -> {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
@@ -107,6 +115,11 @@ public class RecallPetPacket implements CustomPacketPayload {
             if (nbt.getBoolean("Recalled")) {
                 if (trulybestfriends.isPendingRemoval(player.getUUID(), packet.petUuid)) {
                     PetWarningPacket.send(player, 2, packet.petUuid);
+                    return;
+                }
+                if (allowRideSwap && !PetDeathState.isDeadSnapshot(nbt)
+                        && TeleportPetToPlayerPacket.trySwapRecalledPet(
+                        player, packet.petUuid, nbt, nbtFile, playerLevel)) {
                     return;
                 }
                 if (!releaseRecalledPet(player, packet.petUuid, playerLevel)) {

@@ -20,12 +20,12 @@ public final class PetListFilterSmokeTest {
         require(!TrulyScreen.matchesPetFilter(wolf, "minecraft:wolf", "cat", "Buddy"),
                 "non-matching name search was accepted");
 
-        require(SpeciesDropdown.visibleOptionCount(14) == 14,
-                "13 species plus the all option should fit without scrolling");
-        require(SpeciesDropdown.maxScrollOffset(14) == 0,
-                "the species dropdown scrolled before the 13-species limit");
-        require(SpeciesDropdown.maxScrollOffset(15) == 1,
-                "the species dropdown did not scroll after the 13-species limit");
+        require(SpeciesDropdown.visibleOptionCount(7) == 7,
+                "six species plus the all option should fit without scrolling");
+        require(SpeciesDropdown.maxScrollOffset(7) == 0,
+                "the species dropdown scrolled before the lower-panel limit");
+        require(SpeciesDropdown.maxScrollOffset(8) == 1,
+                "the species dropdown did not scroll after the lower-panel limit");
 
         System.out.println("PetListFilterSmokeTest: passed");
     }

@@ -1,13 +1,10 @@
 package com.whidte.trulybestfriends.network;
 
-import com.whidte.trulybestfriends.compat.SableCompat;
 import com.whidte.trulybestfriends.trulybestfriends;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
 
@@ -54,12 +51,8 @@ public class SableSubLevelSyncPacket implements CustomPacketPayload {
         return new SableSubLevelSyncPacket(subLevelId, buf.readDouble(), buf.readDouble(), buf.readDouble());
     }
 
-    public static void handle(SableSubLevelSyncPacket packet, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            var player = Minecraft.getInstance().player;
-            if (player == null) return;
-            SableCompat.applyClientTracking(player, packet.subLevelId,
-                    packet.worldX, packet.worldY, packet.worldZ);
-        });
-    }
+    public UUID getSubLevelId() { return subLevelId; }
+    public double getWorldX() { return worldX; }
+    public double getWorldY() { return worldY; }
+    public double getWorldZ() { return worldZ; }
 }

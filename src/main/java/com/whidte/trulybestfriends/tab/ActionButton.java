@@ -68,7 +68,9 @@ class ActionButton extends AbstractWidget {
 		}
 		boolean recalled = isPetRecalled();
 		if (recalled) {
-			return Component.translatable("trulybestfriends.action.summon");
+			return Component.translatable(screen.canSwapToSelectedPet()
+					? "trulybestfriends.ride_swap.label"
+					: "trulybestfriends.action.summon");
 		}
 		UUID uuid = screen.getSelectedUuid();
 		CompoundTag nbt = screen.getSelectedNbt();

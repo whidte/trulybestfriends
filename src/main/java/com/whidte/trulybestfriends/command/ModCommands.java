@@ -15,6 +15,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -192,6 +193,10 @@ public class ModCommands {
         Entity pointed = pickPointedEntity(player);
         if (pointed == null) {
             source.sendFailure(Component.translatable("trulybestfriends.load.no_entity"));
+            return 0;
+        }
+        if (pointed instanceof Player) {
+            source.sendFailure(Component.translatable("trulybestfriends.load.master.not_living"));
             return 0;
         }
 

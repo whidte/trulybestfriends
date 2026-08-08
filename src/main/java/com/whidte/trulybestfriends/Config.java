@@ -68,11 +68,15 @@ public class Config
             .defineInRange("areaRecallDefaultRange", 8, 1, 16);
 
     public static final ModConfigSpec.IntValue MAX_PENDING_SUMMONS = BUILDER
-            .comment("Max simultaneous pending summons per player for pets in unloaded chunks. NOTE: this value will also serve as the upper limit on the number of pets summonable at once in the future formation/party mode. Effective pending cap = this value + 2 buffer (1-32, default 6).")
+            .comment("Max simultaneous pending summons per player for pets in unloaded chunks.",
+                    "Also defines the number of numbered member slots in each of the eight formation teams.",
+                    "Team slot numbers range from 1 to this value. Effective pending cap = this value + 2 buffer (1-32, default 6).")
             .defineInRange("maxPendingSummons", 6, 1, 32);
 
     public static final ModConfigSpec.ConfigValue<String> REVIVE_ITEM = BUILDER
-            .comment("Item ID required to revive a dead pet (e.g. \"minecraft:totem_of_undying\").")
+            .comment("Item ID required to revive a dead pet (e.g. \"minecraft:totem_of_undying\").",
+                    "Set this to an empty string (reviveItem = \"\") to require no item.",
+                    "When empty, the item prompt is hidden and revival is available as soon as the cooldown expires.")
             .define("reviveItem", "minecraft:totem_of_undying");
 
     public static final ModConfigSpec.ConfigValue<String> MANUAL_REGISTER_ITEM = BUILDER
@@ -91,7 +95,8 @@ public class Config
             .defineInRange("manualRegisterItemConsumeCount", 1, 1, 64);
 
     public static final ModConfigSpec.IntValue REVIVE_ITEM_COUNT = BUILDER
-            .comment("Number of revive items required to revive a dead pet.")
+            .comment("Number of revive items required to revive a dead pet.",
+                    "Ignored when reviveItem is empty.")
             .defineInRange("reviveItemCount", 1, 1, 64);
 
     public static final ModConfigSpec.IntValue REVIVE_COOLDOWN_SECONDS = BUILDER
@@ -269,6 +274,11 @@ public class Config
     public static java.util.Set<String> noReviveWhitelist = new java.util.HashSet<>();
     /** Entity type ids that, on death, additionally clear NBT data and in-memory cache. Also treated as no-revive. */
     public static java.util.Set<String> clearOnDeathWhitelist = new java.util.HashSet<>();
+
+    /** Whether reviving a dead pet requires the configured item. */
+    public static boolean isReviveItemRequired() {
+        return reviveItem == null || !reviveItem.isBlank();
+    }
 
     public enum EntityTypeList {
         AUTO_REGISTER_BLACKLIST,

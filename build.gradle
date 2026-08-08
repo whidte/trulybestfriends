@@ -133,6 +133,7 @@ tasks.named('check') {
     dependsOn tasks.named('reviveProtectionSmokeTest')
     dependsOn tasks.named('petIndexBlacklistTest')
     dependsOn tasks.named('petHealingSmokeTest')
+    dependsOn tasks.named('petTeamDataTest')
 }
 
 tasks.register('ownerNbtResolverSmokeTest', JavaExec) {
@@ -157,6 +158,14 @@ tasks.register('petIndexBlacklistTest', JavaExec) {
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.PetIndexBlacklistTest'
+}
+
+tasks.register('petTeamDataTest', JavaExec) {
+    group = 'verification'
+    description = 'Validates the eight-team NBT schema, slots, capacity, and stale-member cleanup.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.PetTeamDataTest'
 }
 
 tasks.register('petPersistenceSmokeTest', JavaExec) {

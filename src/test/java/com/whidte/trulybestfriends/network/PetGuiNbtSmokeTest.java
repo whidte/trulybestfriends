@@ -16,9 +16,27 @@ public final class PetGuiNbtSmokeTest {
         testClientNbtFiltering();
         testFullListBatching();
         testPacketFragmentation();
+        testDirectSummonPacketCodecs();
         testUnchangedUpdateDeduplication();
         testShoulderEntityLookup();
         System.out.println("PetGuiNbtSmokeTest: passed");
+    }
+
+    private static void testDirectSummonPacketCodecs() {
+        UUID petUuid = UUID.randomUUID();
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            DirectTeleportPetToPlayerPacket.encode(new DirectTeleportPetToPlayerPacket(petUuid), buffer);
+            require(petUuid.equals(DirectTeleportPetToPlayerPacket.decode(buffer).petUuid()),
+                    "direct teleport packet lost the pet UUID");
+
+            buffer.clear();
+            ReleaseRecalledPetPacket.encode(new ReleaseRecalledPetPacket(petUuid), buffer);
+            require(petUuid.equals(ReleaseRecalledPetPacket.decode(buffer).petUuid()),
+                    "release recalled pet packet lost the pet UUID");
+        } finally {
+            buffer.release();
+        }
     }
 
     private static void testShoulderEntityLookup() {
@@ -45,6 +63,7 @@ public final class PetGuiNbtSmokeTest {
         storedNbt.putFloat("Health", 20.0f);
         storedNbt.putFloat("MaxHealth", 30.0f);
         storedNbt.putInt("Priority", 3);
+        storedNbt.putBoolean("Rideable", true);
         storedNbt.putInt("Variant", 769);
         storedNbt.putString("variant", "minecraft:calico");
         storedNbt.putString("Type", "red");
@@ -69,6 +88,7 @@ public final class PetGuiNbtSmokeTest {
         require(clientNbt.getFloat("Health") == 20.0f, "health was not copied");
         require(clientNbt.getFloat("MaxHealth") == 30.0f, "max health was not copied");
         require(clientNbt.getInt("Priority") == 3, "priority was not copied");
+        require(clientNbt.getBoolean("Rideable"), "rideable UI state was not copied");
         require(clientNbt.getInt("Variant") == 769, "numeric texture variant was not copied");
         require("minecraft:calico".equals(clientNbt.getString("variant")),
                 "resource-location texture variant was not copied");

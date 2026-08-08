@@ -16,10 +16,10 @@ import org.jetbrains.annotations.NotNull;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.BUTTON;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.BUTTON_HIGHLIGHTED;
 
-/** A compact species selector whose expanded list can show up to 13 species at once. */
+/** A compact species selector sized to remain inside the lower list panel. */
 final class SpeciesDropdown extends AbstractWidget {
     /** Maximum number of species shown before the expanded list becomes scrollable. */
-    static final int MAX_VISIBLE_SPECIES = 13;
+    static final int MAX_VISIBLE_SPECIES = 6;
     /** Height of one option in the expanded list. */
     private static final int OPTION_HEIGHT = 10;
     /** Width of the expanded list scrollbar. */

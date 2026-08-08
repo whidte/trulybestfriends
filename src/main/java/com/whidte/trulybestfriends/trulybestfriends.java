@@ -1,8 +1,10 @@
 package com.whidte.trulybestfriends;
 
 import com.mojang.logging.LogUtils;
+import com.whidte.trulybestfriends.client.ClientPacketHandlers;
 import com.whidte.trulybestfriends.network.AreaRecallPacket;
 import com.whidte.trulybestfriends.network.DeletePetDataPacket;
+import com.whidte.trulybestfriends.network.DirectTeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.HealPetPacket;
 import com.whidte.trulybestfriends.network.PetIOUtil;
 import com.whidte.trulybestfriends.network.NbtFileIO;
@@ -11,7 +13,9 @@ import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.PetEntitySnapshot;
 import com.whidte.trulybestfriends.network.PetDeathState;
 import com.whidte.trulybestfriends.network.PetHealingManager;
+import com.whidte.trulybestfriends.network.PetTeamData;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
+import com.whidte.trulybestfriends.network.ReleaseRecalledPetPacket;
 import com.whidte.trulybestfriends.network.RequestPetDataPacket;
 import com.whidte.trulybestfriends.network.SableSubLevelSyncPacket;
 import com.whidte.trulybestfriends.network.RevivePetPacket;
@@ -21,7 +25,6 @@ import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.TeleportToPetPacket;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.core.BlockPos;
@@ -34,6 +37,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -49,6 +53,7 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.entity.PartEntity;
+import net.neoforged.neoforge.event.entity.EntityMountEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
@@ -76,7 +81,7 @@ public class trulybestfriends {
     public static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
 
     private static final String PETS_INDEX_FILE = "pets_index.nbt";
-    private static final String BLACKLISTED_UUIDS_KEY = "TBF_BlacklistedUUIDs";
+    private static final String BLACKLISTED_UUIDS_KEY = PetIndexBlacklist.KEY;
     private static final ResourceLocation TRULY_BEST_FRIENDS_ADVANCEMENT = ResourceLocation.fromNamespaceAndPath("minecraft", "husbandry/tame_an_animal");
     private static final int LOCAL_SYNC_CHUNK_RADIUS = 2;
     private static final Map<String, List<UUID>> indexCache = new ConcurrentHashMap<>();
@@ -195,7 +200,9 @@ public class trulybestfriends {
      */
     public static LoadResult tryForceLoadPet(Entity entity, ServerPlayer owner, ServerLevel level) {
         if (INSTANCE == null) return LoadResult.SAVE_FAILED;
-        if (!(entity instanceof LivingEntity living) || entity instanceof PartEntity<?>) {
+        if (!(entity instanceof LivingEntity living)
+                || entity instanceof Player
+                || entity instanceof PartEntity<?>) {
             return LoadResult.NOT_A_PET;
         }
         return tryLoadPet(living, owner.getUUID(), level, true);
@@ -257,19 +264,34 @@ public class trulybestfriends {
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar registrar = event.registrar("3");
+        PayloadRegistrar registrar = event.registrar("4");
         registrar.playToServer(HealPetPacket.TYPE, HealPetPacket.STREAM_CODEC, HealPetPacket::handle);
         registrar.playToServer(RecallPetPacket.TYPE, RecallPetPacket.STREAM_CODEC, RecallPetPacket::handle);
         registrar.playToServer(TeleportToPetPacket.TYPE, TeleportToPetPacket.STREAM_CODEC, TeleportToPetPacket::handle);
         registrar.playToServer(TeleportPetToPlayerPacket.TYPE, TeleportPetToPlayerPacket.STREAM_CODEC, TeleportPetToPlayerPacket::handle);
         registrar.playToServer(AreaRecallPacket.TYPE, AreaRecallPacket.STREAM_CODEC, AreaRecallPacket::handle);
-        registrar.playToClient(PetWarningPacket.TYPE, PetWarningPacket.STREAM_CODEC, PetWarningPacket::handle);
+        // Server→client handlers live in the client-only ClientPacketHandlers class.
+        // The dist guard keeps the client class from being loaded on dedicated servers,
+        // where net.minecraft.client.* does not exist (loading it would mark the mod
+        // as a client-only mod and break server-client compatibility).
+        registrar.playToClient(PetWarningPacket.TYPE, PetWarningPacket.STREAM_CODEC,
+                (packet, ctx) -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
+                });
         registrar.playToServer(RequestPetDataPacket.TYPE, RequestPetDataPacket.STREAM_CODEC, RequestPetDataPacket::handle);
         registrar.playToServer(RevivePetPacket.TYPE, RevivePetPacket.STREAM_CODEC, RevivePetPacket::handle);
         registrar.playToServer(SetPriorityPacket.TYPE, SetPriorityPacket.STREAM_CODEC, SetPriorityPacket::handle);
-        registrar.playToClient(SableSubLevelSyncPacket.TYPE, SableSubLevelSyncPacket.STREAM_CODEC, SableSubLevelSyncPacket::handle);
-        registrar.playToClient(SyncPetDataPacket.TYPE, SyncPetDataPacket.STREAM_CODEC, SyncPetDataPacket::handle);
+        registrar.playToClient(SableSubLevelSyncPacket.TYPE, SableSubLevelSyncPacket.STREAM_CODEC,
+                (packet, ctx) -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
+                });
+        registrar.playToClient(SyncPetDataPacket.TYPE, SyncPetDataPacket.STREAM_CODEC,
+                (packet, ctx) -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
+                });
         registrar.playToServer(DeletePetDataPacket.TYPE, DeletePetDataPacket.STREAM_CODEC, DeletePetDataPacket::handle);
+        registrar.playToServer(ReleaseRecalledPetPacket.TYPE, ReleaseRecalledPetPacket.STREAM_CODEC, ReleaseRecalledPetPacket::handle);
+        registrar.playToServer(DirectTeleportPetToPlayerPacket.TYPE, DirectTeleportPetToPlayerPacket.STREAM_CODEC, DirectTeleportPetToPlayerPacket::handle);
     }
 
     @SubscribeEvent
@@ -329,6 +351,18 @@ public class trulybestfriends {
         }
     }
 
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public void onEntityMount(EntityMountEvent event) {
+        if (!event.isMounting()
+                || !(event.getLevel() instanceof ServerLevel level)
+                || !(event.getEntityMounting() instanceof ServerPlayer player)
+                || !(event.getEntityBeingMounted() instanceof LivingEntity mount)) return;
+        UUID mountUUID = mount.getUUID();
+        if (isTrackedPet(mountUUID) && isOwnedBy(mount, player.getUUID())) {
+            updatePetRideableState(level, mountUUID);
+        }
+    }
+
     @SubscribeEvent
     public void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
         if (event.getLevel().isClientSide() || !(event.getEntity() instanceof LivingEntity living)) return;
@@ -347,8 +381,14 @@ public class trulybestfriends {
 
     @SubscribeEvent
     public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player && Config.enableLoginLoadDiagnostics) {
-            loadPlayerPetsData(player);
+        if (event.getEntity() instanceof ServerPlayer player) {
+            try {
+                PetTeamData.ensureAndPrune(PetIOUtil.getOwnerDir(player));
+            } catch (IOException e) {
+                LOGGER.error("Failed to initialize team data for {}: {}",
+                        player.getUUID(), e.getMessage(), e);
+            }
+            if (Config.enableLoginLoadDiagnostics) loadPlayerPetsData(player);
         }
     }
 
@@ -595,6 +635,7 @@ public class trulybestfriends {
                 Path oldOwnerFile = findPetFileInOtherOwnerDir(modDir, pending.ownerUUID(), pending.petUUID());
                 if (oldOwnerFile != null) {
                     Files.move(oldOwnerFile, nbtFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    removePetFromTeam(oldOwnerFile.getParent(), pending.petUUID());
                     ownerChanged = true;
                     LOGGER.debug("Moved pet NBT {} to new owner {}", pending.petUUID(), pending.ownerUUID());
                 }
@@ -714,6 +755,7 @@ public class trulybestfriends {
         Path petFile = ownerDir.resolve(petUUID + ".nbt");
         try {
             Files.deleteIfExists(petFile);
+            removePetFromTeam(ownerDir, petUUID);
         } catch (IOException e) {
             LOGGER.warn("Failed to delete pet NBT for {}: {}", petUUID, e.getMessage());
         }
@@ -782,7 +824,7 @@ public class trulybestfriends {
 
         try {
             Path modDir = PetIOUtil.getModDir(player);
-            blacklistPetUUID(modDir, petUUID);
+            removePetTracking(modDir, petUUID);
             deletePetFiles(modDir, petUUID);
             killReleasedPetWithVoidDamage(releasedDeadEntity);
             return true;
@@ -833,7 +875,7 @@ public class trulybestfriends {
                 try (var files = Files.list(ownerDir)) {
                     for (Path file : files.filter(Files::isRegularFile).toList()) {
                         String fileName = file.getFileName().toString();
-                        if (!fileName.endsWith(".nbt")) continue;
+                        if (!PetIOUtil.isPetDataFileName(fileName)) continue;
                         petFiles.add(file);
                         try {
                             petUUIDs.add(UUID.fromString(fileName.substring(0, fileName.length() - 4)));
@@ -860,6 +902,7 @@ public class trulybestfriends {
                 NbtFileIO.writeCompressed(indexTag, indexFile);
             }
             for (Path petFile : petFiles) Files.deleteIfExists(petFile);
+            removeMissingPetsFromTeams(ownerDir);
 
             PetHealingManager.clearAll(petUUIDs);
             for (UUID petUUID : petUUIDs) {
@@ -981,16 +1024,16 @@ public class trulybestfriends {
         forcedTrackingOwners.remove(petUUID);
     }
 
-    private static void blacklistPetUUID(Path modDir, UUID petUUID) throws IOException {
+    private static void removePetTracking(Path modDir, UUID petUUID) throws IOException {
         Files.createDirectories(modDir);
         File indexFile = modDir.resolve(PETS_INDEX_FILE).toFile();
         CompoundTag indexTag = indexFile.exists() ? NbtFileIO.readCompressed(indexFile) : new CompoundTag();
         removePetIndexEntry(indexTag, petUUID);
-        ForcedTrackingWhitelist.remove(indexTag, petUUID);
-        addBlacklistEntry(indexTag, petUUID);
+        boolean blacklisted = ForcedTrackingWhitelist.applyRemovalBlacklistPolicy(indexTag, petUUID);
         NbtFileIO.writeCompressed(indexTag, indexFile);
         forcedTrackingOwners.remove(petUUID);
-        blacklistedPetUUIDs.add(petUUID);
+        if (blacklisted) blacklistedPetUUIDs.add(petUUID);
+        else blacklistedPetUUIDs.remove(petUUID);
     }
 
     private static void deletePetFiles(Path modDir, UUID petUUID) throws IOException {
@@ -999,38 +1042,38 @@ public class trulybestfriends {
         try (var entries = Files.list(modDir)) {
             for (Path ownerDir : entries.filter(Files::isDirectory).toList()) {
                 Files.deleteIfExists(ownerDir.resolve(fileName));
+                removePetFromTeam(ownerDir, petUUID);
             }
         }
     }
 
-    static boolean addBlacklistEntry(CompoundTag indexTag, UUID petUUID) {
-        ListTag blacklist = indexTag.getList(BLACKLISTED_UUIDS_KEY, Tag.TAG_STRING);
-        String uuid = petUUID.toString();
-        for (int i = 0; i < blacklist.size(); i++) {
-            if (uuid.equals(blacklist.getString(i))) return false;
+    private static void removePetFromTeam(Path ownerDir, UUID petUUID) {
+        try {
+            PetTeamData.removePet(ownerDir, petUUID);
+        } catch (IOException e) {
+            LOGGER.warn("Failed to remove pet {} from team data in {}: {}",
+                    petUUID, ownerDir, e.getMessage());
         }
-        blacklist.add(StringTag.valueOf(uuid));
-        indexTag.put(BLACKLISTED_UUIDS_KEY, blacklist);
-        return true;
+    }
+
+    private static void removeMissingPetsFromTeams(Path ownerDir) {
+        try {
+            PetTeamData.ensureAndPrune(ownerDir);
+        } catch (IOException e) {
+            LOGGER.warn("Failed to prune team data in {}: {}", ownerDir, e.getMessage());
+        }
+    }
+
+    static boolean addBlacklistEntry(CompoundTag indexTag, UUID petUUID) {
+        return PetIndexBlacklist.add(indexTag, petUUID);
     }
 
     static boolean isBlacklistEntry(CompoundTag indexTag, UUID petUUID) {
-        String uuid = petUUID.toString();
-        ListTag blacklist = indexTag.getList(BLACKLISTED_UUIDS_KEY, Tag.TAG_STRING);
-        for (int i = 0; i < blacklist.size(); i++) {
-            if (uuid.equals(blacklist.getString(i))) return true;
-        }
-        return false;
+        return PetIndexBlacklist.contains(indexTag, petUUID);
     }
 
     private static void removeBlacklistEntry(CompoundTag indexTag, UUID petUUID) {
-        ListTag blacklist = indexTag.getList(BLACKLISTED_UUIDS_KEY, Tag.TAG_STRING);
-        String uuid = petUUID.toString();
-        for (int i = blacklist.size() - 1; i >= 0; i--) {
-            if (uuid.equals(blacklist.getString(i))) blacklist.remove(i);
-        }
-        if (blacklist.isEmpty()) indexTag.remove(BLACKLISTED_UUIDS_KEY);
-        else indexTag.put(BLACKLISTED_UUIDS_KEY, blacklist);
+        PetIndexBlacklist.remove(indexTag, petUUID);
         blacklistedPetUUIDs.remove(petUUID);
     }
 
@@ -1351,6 +1394,40 @@ public class trulybestfriends {
         }
     }
 
+    public static boolean isPetRideable(ServerLevel level, UUID petUUID) {
+        return getRideablePetUUIDs(level).contains(petUUID);
+    }
+
+    public static Set<UUID> getRideablePetUUIDs(ServerLevel level) {
+        File indexFile = PetIOUtil.getModDir(level).resolve(PETS_INDEX_FILE).toFile();
+        if (!indexFile.exists()) return Set.of();
+        try {
+            Set<UUID> rideable = new HashSet<>();
+            PetIndexState.visit(NbtFileIO.readCompressed(indexFile), (uuid, state) -> {
+                if (state.getBoolean("Rideable")) rideable.add(uuid);
+                return false;
+            });
+            return rideable;
+        } catch (IOException e) {
+            LOGGER.error("Failed to read rideable pet states: {}", e.getMessage());
+            return Set.of();
+        }
+    }
+
+    private static void updatePetRideableState(ServerLevel level, UUID petUUID) {
+        File indexFile = PetIOUtil.getModDir(level).resolve(PETS_INDEX_FILE).toFile();
+        if (!indexFile.exists()) return;
+        try {
+            CompoundTag indexTag = NbtFileIO.readCompressed(indexFile);
+            CompoundTag state = PetIndexState.find(indexTag, petUUID);
+            if (state != null && PetIndexState.setRideable(state)) {
+                NbtFileIO.writeCompressed(indexTag, indexFile);
+            }
+        } catch (IOException e) {
+            LOGGER.error("Failed to update rideable state for {}: {}", petUUID, e.getMessage());
+        }
+    }
+
     private void syncTrackedPets(MinecraftServer server) {
         for (UUID petUUID : new ArrayList<>(trackedPetUUIDs)) {
             Entity entity = PetIOUtil.findEntity(server, petUUID);
@@ -1428,7 +1505,7 @@ public class trulybestfriends {
             if (Files.exists(ownerDir)) {
                 int[] counts = new int[2]; // [0]=success, [1]=failed
                 try (var files = Files.list(ownerDir)) {
-                    files.filter(p -> p.toString().endsWith(".nbt")).forEach(file -> {
+                    files.filter(PetIOUtil::isPetDataFile).forEach(file -> {
                         try {
                             NbtFileIO.readCompressed(file.toFile());
                             counts[0]++;
@@ -1451,7 +1528,7 @@ public class trulybestfriends {
 		Path ownerDir = PetIOUtil.getOwnerDir(level, ownerUUID);
 		if (!Files.exists(ownerDir)) return 0;
 		try (var files = Files.list(ownerDir)) {
-			return (int) files.filter(p -> p.toString().endsWith(".nbt")).count();
+			return (int) files.filter(PetIOUtil::isPetDataFile).count();
 		} catch (IOException e) {
 			return 0;
 		}

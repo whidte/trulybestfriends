@@ -84,7 +84,7 @@ public final class FtbTeamsCompat {
                 try (var petFiles = Files.list(ownerDir)) {
                     for (Path path : petFiles.filter(Files::isRegularFile).toList()) {
                         String fileName = path.getFileName().toString();
-                        if (!fileName.endsWith(".nbt")) continue;
+                        if (!PetIOUtil.isPetDataFileName(fileName)) continue;
                         try {
                             UUID petUUID = UUID.fromString(fileName.substring(0, fileName.length() - 4));
                             STORED_OWNERS.put(new OwnerCacheKey(modDir, petUUID), ownerUUID);

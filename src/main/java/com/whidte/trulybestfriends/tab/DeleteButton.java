@@ -11,8 +11,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
 
-import static com.whidte.trulybestfriends.tab.TrulyConstants.DELETE_BUTTON_HEIGHT;
-import static com.whidte.trulybestfriends.tab.TrulyConstants.DELETE_BUTTON_WIDTH;
+import static com.whidte.trulybestfriends.tab.TrulyConstants.DELETE_BUTTON_SIZE;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.DELETE_ICON;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.DELETE_ICON_HIGHLIGHTED;
 
@@ -21,7 +20,7 @@ final class DeleteButton extends AbstractWidget {
     private final TrulyScreen screen;
 
     DeleteButton(int x, int y, TrulyScreen screen) {
-        super(x, y, DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT, Component.empty());
+        super(x, y, DELETE_BUTTON_SIZE, DELETE_BUTTON_SIZE, Component.empty());
         this.screen = screen;
     }
 

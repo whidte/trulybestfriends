@@ -25,6 +25,7 @@ import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.pathfinder.Path;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.capabilities.Capabilities;
@@ -47,6 +48,8 @@ import java.util.function.UnaryOperator;
 
 /** Server-side: teleport a released (non-recalled) pet to the player's current position. */
 public class TeleportPetToPlayerPacket implements CustomPacketPayload {
+    private enum RideSwapResult { SUCCESS, NO_SPACE, FAILED }
+
     private static final Set<UUID> UNTRACKED_DEATH_RELEASES = ConcurrentHashMap.newKeySet();
     public static final Type<TeleportPetToPlayerPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "teleport_pet_to_player"));
     public static final StreamCodec<FriendlyByteBuf, TeleportPetToPlayerPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), TeleportPetToPlayerPacket::decode);
@@ -66,16 +69,36 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     }
 
     public static void handle(TeleportPetToPlayerPacket packet, IPayloadContext context) {
+        handle(packet, context, true);
+    }
+
+    static void handleWithoutRideSwap(UUID petUuid, IPayloadContext context) {
+        handle(new TeleportPetToPlayerPacket(petUuid), context, false);
+    }
+
+    private static void handle(TeleportPetToPlayerPacket packet, IPayloadContext context,
+                               boolean allowRideSwap) {
         context.enqueueWork(() -> {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
             ServerLevel playerLevel = player.serverLevel();
+            LivingEntity rideSwapMount = allowRideSwap
+                    ? getRideSwapMount(player, packet.petUuid, null)
+                    : null;
+            UUID rideSwapMountUuid = rideSwapMount != null ? rideSwapMount.getUUID() : null;
 
             // Case 1: pet is alive in player's current dimension — teleport it directly
             Entity entity = playerLevel.getEntity(packet.petUuid);
             if (entity instanceof LivingEntity living && living.isAlive()) {
                 if (!trulybestfriends.isTrackedPet(packet.petUuid)
                         || !trulybestfriends.isOwnedBy(living, player.getUUID())) return;
+                if (rideSwapMountUuid != null) {
+                    RideSwapResult result = swapToLoadedTarget(player, living, rideSwapMountUuid);
+                    if (result != RideSwapResult.SUCCESS) {
+                        PetWarningPacket.send(player, result == RideSwapResult.NO_SPACE ? 4 : 1, packet.petUuid);
+                    }
+                    return;
+                }
                 teleportEntityToPlayer(living, player, playerLevel);
                 return;
             }
@@ -119,6 +142,13 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             if (petEntity instanceof LivingEntity living && living.isAlive()) {
                 if (!trulybestfriends.isTrackedPet(packet.petUuid)
                         || !trulybestfriends.isOwnedBy(living, player.getUUID())) return;
+                if (rideSwapMountUuid != null) {
+                    RideSwapResult result = swapFromOtherLevel(player, living, petLevel, rideSwapMountUuid);
+                    if (result != RideSwapResult.SUCCESS) {
+                        PetWarningPacket.send(player, result == RideSwapResult.NO_SPACE ? 4 : 1, packet.petUuid);
+                    }
+                    return;
+                }
                 if (!RecallPetPacket.savePetToDisk(player.getUUID(), living, petLevel, false)) {
                     PetWarningPacket.send(player, 1, packet.petUuid);
                     return;
@@ -171,7 +201,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                 trulybestfriends.flushPendingPetSaves(player.getUUID());
                 trulybestfriends.retainForcedChunk(petLevel, cx, cz);
                 pendingSummons.add(new PendingSummon(
-                        packet.petUuid, player.getUUID(), cx, cz, petLevel));
+                        packet.petUuid, player.getUUID(), cx, cz, petLevel, rideSwapMountUuid));
             } else {
                 PetWarningPacket.send(player, 1, packet.petUuid);
             }
@@ -211,6 +241,152 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         entity.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
     }
 
+    private static LivingEntity getRideSwapMount(ServerPlayer player, UUID targetPetUuid,
+                                                  UUID expectedMountUuid) {
+        if (!trulybestfriends.isTrackedPet(targetPetUuid)
+                || !trulybestfriends.isPetRideable(player.serverLevel(), targetPetUuid)) return null;
+        if (!(player.getVehicle() instanceof LivingEntity mount)
+                || mount.getUUID().equals(targetPetUuid)
+                || expectedMountUuid != null && !mount.getUUID().equals(expectedMountUuid)
+                || !trulybestfriends.isTrackedPet(mount.getUUID())
+                || !trulybestfriends.isOwnedBy(mount, player.getUUID())) return null;
+        return mount;
+    }
+
+    private static RideSwapResult swapToLoadedTarget(ServerPlayer player, LivingEntity target,
+                                                      UUID expectedMountUuid) {
+        LivingEntity currentMount = getRideSwapMount(player, target.getUUID(), expectedMountUuid);
+        if (currentMount == null) return RideSwapResult.FAILED;
+        if (!hasRideSwapSpace(player.serverLevel(), target, currentMount.position())) {
+            return RideSwapResult.NO_SPACE;
+        }
+        Vec3 oldPosition = target.position();
+        float oldYRot = target.getYRot();
+        float oldXRot = target.getXRot();
+        forceTrackedTeleport(player.serverLevel(), target, currentMount.position(),
+                currentMount.getYRot(), currentMount.getXRot());
+        if (finishRideSwap(player, currentMount, target)) return RideSwapResult.SUCCESS;
+        forceTrackedTeleport(player.serverLevel(), target, oldPosition, oldYRot, oldXRot);
+        return RideSwapResult.FAILED;
+    }
+
+    private static void forceTrackedTeleport(ServerLevel level, LivingEntity target, Vec3 position,
+                                             float yRot, float xRot) {
+        level.getChunkSource().removeEntity(target);
+        try {
+            target.teleportTo(position.x, position.y, position.z);
+            target.setYRot(yRot);
+            target.setXRot(xRot);
+            target.setYHeadRot(yRot);
+        } finally {
+            // Recreate the tracker so even a sub-threshold move is sent as an
+            // absolute spawn position before the passenger update.
+            level.getChunkSource().addEntity(target);
+        }
+    }
+
+    private static RideSwapResult swapFromOtherLevel(ServerPlayer player, LivingEntity originalTarget,
+                                                     ServerLevel targetLevel, UUID expectedMountUuid) {
+        LivingEntity currentMount = getRideSwapMount(player, originalTarget.getUUID(), expectedMountUuid);
+        if (currentMount == null) return RideSwapResult.FAILED;
+        if (!hasRideSwapSpace(player.serverLevel(), originalTarget, currentMount.position())) {
+            return RideSwapResult.NO_SPACE;
+        }
+        if (!RecallPetPacket.savePetToDisk(player.getUUID(), originalTarget, targetLevel, false)) {
+            return RideSwapResult.FAILED;
+        }
+
+        File nbtFile = PetIOUtil.getOwnerDir(player).resolve(originalTarget.getUUID() + ".nbt").toFile();
+        try {
+            CompoundTag snapshot = NbtFileIO.readCompressed(nbtFile);
+            Entity restored = summonFromDiskAt(snapshot, originalTarget.getUUID(), player,
+                    player.serverLevel(), currentMount.position(), currentMount.getYRot(), currentMount.getXRot());
+            if (restored == null) return RideSwapResult.FAILED;
+            if (finishRideSwap(player, currentMount, restored)) {
+                originalTarget.discard();
+                return RideSwapResult.SUCCESS;
+            }
+            restored.discard();
+            restoreRideSwapTargetSnapshot(nbtFile, snapshot, originalTarget.getUUID(), targetLevel);
+            return RideSwapResult.FAILED;
+        } catch (IOException e) {
+            trulybestfriends.LOGGER.error("Failed to prepare ride swap target {}: {}",
+                    originalTarget.getUUID(), e.getMessage());
+            return RideSwapResult.FAILED;
+        }
+    }
+
+    private static boolean hasRideSwapSpace(ServerLevel level, Entity target, Vec3 position) {
+        AABB box = target.getBoundingBox().move(
+                position.x - target.getX(), position.y - target.getY(), position.z - target.getZ());
+        return level.getWorldBorder().isWithinBounds(box)
+                && !level.getBlockCollisions(target, box.deflate(1.0E-7D)).iterator().hasNext();
+    }
+
+    private static void restoreRideSwapTargetSnapshot(File nbtFile, CompoundTag snapshot,
+                                                       UUID petUuid, ServerLevel level) {
+        try {
+            NbtFileIO.writeCompressed(snapshot, nbtFile);
+            trulybestfriends.updatePetRecalledState(level, petUuid, snapshot.getBoolean("Recalled"));
+        } catch (IOException e) {
+            trulybestfriends.LOGGER.error("Failed to roll back ride swap target {}: {}",
+                    petUuid, e.getMessage(), e);
+        }
+    }
+
+    private static boolean finishRideSwap(ServerPlayer player, LivingEntity currentMount, Entity target) {
+        ServerLevel level = player.serverLevel();
+        if (!RecallPetPacket.savePetToDisk(player.getUUID(), currentMount, level, true)) return false;
+        if (!player.startRiding(target, true)) {
+            RecallPetPacket.savePetToDisk(player.getUUID(), currentMount, level, false);
+            return false;
+        }
+        currentMount.ejectPassengers();
+        currentMount.stopRiding();
+        currentMount.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
+        currentMount.discard();
+        target.playSound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
+        return true;
+    }
+
+    public static boolean trySwapRecalledPet(ServerPlayer player, UUID petUuid, CompoundTag recalledNbt,
+                                             File nbtFile, ServerLevel level) {
+        LivingEntity currentMount = getRideSwapMount(player, petUuid, null);
+        if (currentMount == null) return false;
+
+        CompoundTag releasedNbt = recalledNbt.copy();
+        releasedNbt.remove("Recalled");
+        Entity spaceProbe = PetEntitySnapshot.restore(prepareSummonSnapshot(releasedNbt), petUuid, level);
+        if (spaceProbe != null) standPetUp(spaceProbe);
+        if (spaceProbe != null && !hasRideSwapSpace(level, spaceProbe, currentMount.position())) {
+            PetWarningPacket.send(player, 4, petUuid);
+            return true;
+        }
+        try {
+            NbtFileIO.writeCompressed(releasedNbt, nbtFile);
+            trulybestfriends.updatePetRecalledState(level, petUuid, false);
+        } catch (IOException e) {
+            trulybestfriends.LOGGER.error("Failed to prepare recalled ride swap target {}: {}",
+                    petUuid, e.getMessage());
+            PetWarningPacket.send(player, 3, petUuid);
+            return true;
+        }
+
+        Entity restored = summonFromDiskAt(releasedNbt, petUuid, player, level,
+                currentMount.position(), currentMount.getYRot(), currentMount.getXRot());
+        if (restored != null && finishRideSwap(player, currentMount, restored)) return true;
+        if (restored != null) restored.discard();
+        try {
+            NbtFileIO.writeCompressed(recalledNbt, nbtFile);
+            trulybestfriends.updatePetRecalledState(level, petUuid, true);
+        } catch (IOException rollbackError) {
+            trulybestfriends.LOGGER.error("Failed to roll back recalled ride swap target {}: {}",
+                    petUuid, rollbackError.getMessage(), rollbackError);
+        }
+        PetWarningPacket.send(player, 3, petUuid);
+        return true;
+    }
+
     /**
      * Find a safe, pathable BlockPos near the player for the pet to walk to.
      * Searches in expanding rings around the player's position.
@@ -245,6 +421,21 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             return true;
         }
         return false;
+    }
+
+    private static Entity summonFromDiskAt(CompoundTag nbt, UUID petUuid, ServerPlayer player,
+                                           ServerLevel level, Vec3 position, float yRot, float xRot) {
+        CompoundTag summonNbt = prepareSummonSnapshot(nbt);
+        Entity entity = PetEntitySnapshot.restore(summonNbt, petUuid, level);
+        if (entity == null) return null;
+        restoreChestInventory(entity, summonNbt);
+        standPetUp(entity);
+        entity.setPos(position);
+        entity.setYRot(yRot);
+        entity.setXRot(xRot);
+        if (!level.tryAddFreshEntityWithPassengers(entity)) return null;
+        finishRestoredEntity(entity, summonNbt, player, level);
+        return entity;
     }
 
     public static boolean isReleasingUntrackedDeath(UUID petUuid) {
@@ -506,14 +697,17 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         final int chunkX;
         final int chunkZ;
         final ServerLevel petLevel;
+        final UUID rideSwapMountUuid;
         int attempts;
 
-        PendingSummon(UUID petUuid, UUID playerUuid, int chunkX, int chunkZ, ServerLevel petLevel) {
+        PendingSummon(UUID petUuid, UUID playerUuid, int chunkX, int chunkZ, ServerLevel petLevel,
+                      UUID rideSwapMountUuid) {
             this.petUuid = petUuid;
             this.playerUuid = playerUuid;
             this.chunkX = chunkX;
             this.chunkZ = chunkZ;
             this.petLevel = petLevel;
+            this.rideSwapMountUuid = rideSwapMountUuid;
         }
     }
 
@@ -542,6 +736,23 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             }
             if (!trulybestfriends.isOwnedBy(living, player.getUUID())) {
                 finishPendingSummon(pending);
+                continue;
+            }
+            LivingEntity rideSwapMount = pending.rideSwapMountUuid != null
+                    ? getRideSwapMount(player, pending.petUuid, pending.rideSwapMountUuid)
+                    : null;
+            if (rideSwapMount != null) {
+                RideSwapResult result = pending.petLevel == player.serverLevel()
+                        ? swapToLoadedTarget(player, living, pending.rideSwapMountUuid)
+                        : swapFromOtherLevel(player, living, pending.petLevel, pending.rideSwapMountUuid);
+                if (result == RideSwapResult.SUCCESS) {
+                    finishPendingSummon(pending);
+                } else if (result == RideSwapResult.NO_SPACE) {
+                    finishPendingSummon(pending);
+                    PetWarningPacket.send(player, 4, pending.petUuid);
+                } else {
+                    failPendingSummon(pending, player);
+                }
                 continue;
             }
             if (pending.petLevel == player.serverLevel()) {
