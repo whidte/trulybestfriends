@@ -21,6 +21,7 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -81,8 +82,9 @@ public class RequestPetDataPacket {
                 trulybestfriends.flushPendingPetSaves(player.getUUID());
                 ListTag list = new ListTag();
                 Map<UUID, CompoundTag> sentSnapshot = new HashMap<>();
+                Set<UUID> rideablePetUuids = trulybestfriends.getRideablePetUUIDs(player.serverLevel());
                 if (petDir.toFile().exists()) {
-                    File[] files = petDir.toFile().listFiles((d, n) -> n.endsWith(".nbt"));
+                    File[] files = petDir.toFile().listFiles((d, n) -> PetIOUtil.isPetDataFileName(n));
                     if (files != null) {
                         int limit = Math.max(1, Config.maxPets);
                         for (File f : files) {
@@ -100,6 +102,7 @@ public class RequestPetDataPacket {
                                 trulybestfriends.injectDeathTimeIntoNbt(uuid, replyNbt);
                                 PetHealingManager.decorateClientNbt(
                                         player.server, player.getUUID(), uuid, storedNbt, replyNbt);
+                                replyNbt.putBoolean("Rideable", rideablePetUuids.contains(uuid));
                                 CompoundTag entry = new CompoundTag();
                                 entry.putUUID("UUID", uuid);
                                 entry.put("NBT", replyNbt);
@@ -134,6 +137,7 @@ public class RequestPetDataPacket {
                     trulybestfriends.injectDeathTimeIntoNbt(packet.petUuid, replyNbt);
                     PetHealingManager.decorateClientNbt(
                             player.server, player.getUUID(), packet.petUuid, storedNbt, replyNbt);
+                    decorateRideableState(player, packet.petUuid, replyNbt);
                     if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {
                         SyncPetDataPacket reply = SyncPetDataPacket.update(packet.petUuid, replyNbt);
                         SyncPetDataPacket.sendToPlayer(player, reply);
@@ -177,7 +181,12 @@ public class RequestPetDataPacket {
         trulybestfriends.injectDeathTimeIntoNbt(petUuid, replyNbt);
         PetHealingManager.decorateClientNbt(
                 player.server, player.getUUID(), petUuid, storedNbt, replyNbt);
+        decorateRideableState(player, petUuid, replyNbt);
         return replyNbt;
+    }
+
+    private static void decorateRideableState(ServerPlayer player, UUID petUuid, CompoundTag nbt) {
+        nbt.putBoolean("Rideable", trulybestfriends.isPetRideable(player.serverLevel(), petUuid));
     }
 
     static boolean shouldMarkLost(CompoundTag storedNbt, boolean loaded) {

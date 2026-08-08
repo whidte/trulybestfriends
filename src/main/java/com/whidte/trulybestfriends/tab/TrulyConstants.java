@@ -13,7 +13,7 @@ final class TrulyConstants {
 	/** 宠物列表一页最多显示的条目数量。 */
 	static final int MAX_VISIBLE = 8;
 	/** 宠物列表每行显示的列数。 */
-	static final int COLUMNS = 2;
+	static final int COLUMNS = 4;
 	/** 单个宠物条目在界面中的显示宽度，单位为像素。 */
 	static final int ENTRY_WIDTH = 40;
 	/** pet_entry.png 中单个条目的原始纹理宽度，单位为像素。 */
@@ -22,32 +22,36 @@ final class TrulyConstants {
 	static final int ENTRY_HEIGHT = 37;
 	/** 相邻两行宠物条目的纵向步长，比完整高度少 1 像素。 */
 	static final int ENTRY_ROW_STEP = ENTRY_HEIGHT - 1;
-	/** 同一行两个宠物条目之间的水平间距。 */
-	static final int ENTRY_GAP_X = 2;
+	/** 相邻宠物条目的横向步长；比条目宽度少 1 像素以共用边框。 */
+	static final int ENTRY_COLUMN_STEP = ENTRY_WIDTH - 1;
 	/** 宠物列表左边缘相对于标签页面板左边缘的 X 偏移。 */
-	static final int LIST_PANEL_OFFSET_X = 86;
+	static final int LIST_PANEL_OFFSET_X = 6;
 	/** 宠物列表上边缘相对于标签页面板上边缘的 Y 偏移。 */
-	static final int LIST_PANEL_OFFSET_Y = 17;
+	static final int LIST_PANEL_OFFSET_Y = 88;
 	/** 宠物列表区域总高度，包含首行完整高度和后续各行的纵向步长。 */
 	static final int LIST_PANEL_HEIGHT = ENTRY_HEIGHT + (MAX_VISIBLE / COLUMNS - 1) * ENTRY_ROW_STEP;
 	/** 宠物列表区域总宽度，包含所有列、列间距和右侧留白。 */
-	static final int LIST_PANEL_WIDTH = COLUMNS * (ENTRY_WIDTH + ENTRY_GAP_X) - ENTRY_GAP_X + 4;
-	/** 滚动条左边缘相对于标签页面板右边缘向左的距离。 */
-	static final int SCROLLBAR_RIGHT_OFFSET = 8;
-	/** 宠物列表滚动条的显示宽度。 */
-	static final int SCROLLBAR_WIDTH = 4;
+	static final int LIST_PANEL_WIDTH = ENTRY_WIDTH + (COLUMNS - 1) * ENTRY_COLUMN_STEP + 4;
+	/** 村民滚动条在右移后的深色列表框内的 X 偏移。 */
+	static final int SCROLLBAR_OFFSET_X = 164;
+	/** 村民交易界面滚动条的原生宽度。 */
+	static final int SCROLLBAR_WIDTH = 6;
+	/** 村民交易界面滚动滑块的原生高度。 */
+	static final int SCROLLBAR_THUMB_HEIGHT = 27;
 	/** 物种筛选器和搜索框相对于标签页面板上边缘的 Y 偏移。 */
-	static final int LIST_CONTROLS_OFFSET_Y = 4;
+	static final int LIST_CONTROLS_OFFSET_Y = 75;
 	/** 顶部列表模式控件的统一高度。 */
 	static final int LIST_CONTROL_HEIGHT = 12;
 	/** 放大镜模式切换按钮的正方形边长。 */
 	static final int SEARCH_TOGGLE_SIZE = 12;
+	/** 模式切换按钮与筛选或搜索控件之间的水平间距。 */
+	static final int LIST_CONTROL_GAP_X = 2;
 	/** 放大镜模式切换按钮相对于标签页面板左边缘的 X 偏移。 */
 	static final int SEARCH_TOGGLE_OFFSET_X = LIST_PANEL_OFFSET_X;
 	/** 物种筛选器或搜索框相对于标签页面板左边缘的共享 X 偏移。 */
-	static final int LIST_MODE_CONTROL_OFFSET_X = SEARCH_TOGGLE_OFFSET_X + SEARCH_TOGGLE_SIZE + ENTRY_GAP_X;
-	/** 物种筛选器或搜索框占用放大镜右侧剩余空间后的共享宽度。 */
-	static final int LIST_MODE_CONTROL_WIDTH = LIST_PANEL_WIDTH - SEARCH_TOGGLE_SIZE - ENTRY_GAP_X;
+	static final int LIST_MODE_CONTROL_OFFSET_X = SEARCH_TOGGLE_OFFSET_X + SEARCH_TOGGLE_SIZE + LIST_CONTROL_GAP_X;
+	/** 物种筛选器或搜索框的共享宽度。 */
+	static final int LIST_MODE_CONTROL_WIDTH = 60;
 	/** 让左侧已选宠物信息始终显示在实体预览上方的 Z 深度。 */
 	static final int PET_INFO_OVERLAY_Z = 100;
 	/** 让物种下拉栏始终显示在所有宠物列表实体预览上方的 Z 深度。 */
@@ -56,6 +60,10 @@ final class TrulyConstants {
 	static final int ENTITY_PREVIEW_OFFSET_X = 35;
 	/** 左侧已选宠物预览锚点相对于标签页面板上边缘的 Y 偏移。 */
 	static final int ENTITY_PREVIEW_OFFSET_Y = 50;
+	/** 左上宠物预览背景相对于标签页面板的坐标与尺寸。 */
+	static final int PET_PREVIEW_BACKGROUND_X = 10;
+	static final int PET_PREVIEW_BACKGROUND_Y = 10;
+	static final int PET_PREVIEW_BACKGROUND_SIZE = 50;
 	/** 生命恢复按钮相对于标签页面板左边缘的 X 坐标。 */
 	static final int HEAL_X = 61;
 	/** 生命恢复按钮相对于标签页面板上边缘的 Y 坐标。 */
@@ -70,16 +78,23 @@ final class TrulyConstants {
 	static final int HEART_Y = 62;
 	/** 三段式生命条中间可伸缩部分的宽度。 */
 	static final int BAR_MIDDLE_WIDTH = 50;
+	/** 已选宠物文字详情相对于标签页面板左边缘的 X 坐标。 */
+	static final int PET_INFO_OFFSET_X = 90;
+	/** 标签页右上角的正方形删除控件。 */
+	static final int DELETE_X = 157;
+	static final int DELETE_Y = 5;
+	static final int DELETE_BUTTON_SIZE = 14;
+	/** 滚动宠物名称与删除控件之间的水平间距。 */
+	static final int PET_NAME_DELETE_GAP = 2;
+	static final int PET_NAME_MAX_WIDTH = DELETE_X - PET_INFO_OFFSET_X - PET_NAME_DELETE_GAP;
 	/** 宠物名称信息相对于标签页面板上边缘的 Y 坐标。 */
-	static final int NAME_Y = 74;
-	/** 宠物物种信息相对于标签页面板上边缘的 Y 坐标。 */
-	static final int SPECIES_Y = 84;
+	static final int NAME_Y = 14;
 	/** 宠物位置或状态信息相对于标签页面板上边缘的 Y 坐标。 */
-	static final int LOCATION_Y = 98;
+	static final int LOCATION_Y = 28;
 	/** 召唤至玩家按钮相对于标签页面板左边缘的 X 坐标。 */
-	static final int SUMMON_TO_PLAYER_X = 17;
+	static final int SUMMON_TO_PLAYER_X = 90;
 	/** 召唤至玩家按钮相对于标签页面板上边缘的 Y 坐标。 */
-	static final int SUMMON_TO_PLAYER_Y = 134;
+	static final int SUMMON_TO_PLAYER_Y = 49;
 	/** 召唤至玩家按钮的宽度。 */
 	static final int SUMMON_TO_PLAYER_W = 60;
 
@@ -102,16 +117,13 @@ final class TrulyConstants {
 	static final int REFRESH_INTERVAL = 20;
 	/** 生命恢复按钮的正方形边长。 */
 	static final int HEAL_BUTTON_SIZE = 18;
-	/** Independent delete control at the upper-left corner of the main preview. */
-	static final int DELETE_X = 3;
-	static final int DELETE_Y = 3;
-	static final int DELETE_BUTTON_WIDTH = 7;
-	static final int DELETE_BUTTON_HEIGHT = 7;
-
 	// --- Textures ---
 	/** 标签页主面板背景纹理。 */
 	static final ResourceLocation TEXTURE =
 			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/empty.png");
+	/** 从主面板中拆分出的左上宠物预览背景。 */
+	static final ResourceLocation PET_PREVIEW_BACKGROUND =
+			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/pet_preview_background.png");
 	/** Vanilla recipe book texture containing the search icon used by the list mode toggle. */
 	static final ResourceLocation RECIPE_BOOK_TEXTURE =
 			ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/recipe_book.png");
@@ -131,10 +143,8 @@ final class TrulyConstants {
 	static final ResourceLocation ICONS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/icons.png");
 	/** 原版状态条纹理，其中包含三段式首领生命条。 */
 	static final ResourceLocation BARS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/bars.png");
-	/** 宠物列表滚动条轨道纹理。 */
-	static final ResourceLocation SCROLLBAR = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/scrollbar.png");
-	/** 宠物列表滚动条滑块纹理。 */
-	static final ResourceLocation SCROLLBAR_THUMB = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/scrollbar_thumb.png");
+	/** 1.20.1 村民交易界面纹理，其中包含 6x27 的滚动滑块。 */
+	static final ResourceLocation VILLAGER_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/container/villager2.png");
 	/** 宠物列表条目纹理，纵向包含普通态和选中态。 */
 	static final ResourceLocation PET_ENTRY = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/pet_entry.png");
 

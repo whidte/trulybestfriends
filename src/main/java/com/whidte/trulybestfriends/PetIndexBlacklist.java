@@ -32,4 +32,20 @@ final class PetIndexBlacklist {
         }
         return false;
     }
+
+    static boolean remove(CompoundTag indexTag, UUID petUUID) {
+        ListTag blacklist = indexTag.getList(KEY, Tag.TAG_STRING);
+        String uuid = petUUID.toString();
+        boolean changed = false;
+        for (int i = blacklist.size() - 1; i >= 0; i--) {
+            if (uuid.equals(blacklist.getString(i))) {
+                blacklist.remove(i);
+                changed = true;
+            }
+        }
+        if (!changed) return false;
+        if (blacklist.isEmpty()) indexTag.remove(KEY);
+        else indexTag.put(KEY, blacklist);
+        return true;
+    }
 }

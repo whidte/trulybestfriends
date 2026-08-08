@@ -16,6 +16,12 @@ public final class PetIndexState {
         return true;
     }
 
+    public static boolean setRideable(CompoundTag state) {
+        if (state.getBoolean("Rideable")) return false;
+        state.putBoolean("Rideable", true);
+        return true;
+    }
+
     public static CompoundTag find(CompoundTag index, UUID petUuid) {
         CompoundTag[] found = {null};
         visit(index, (uuid, state) -> {

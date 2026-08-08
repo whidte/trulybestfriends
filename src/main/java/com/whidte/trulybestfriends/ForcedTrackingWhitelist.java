@@ -36,6 +36,15 @@ final class ForcedTrackingWhitelist {
         return true;
     }
 
+    static boolean applyRemovalBlacklistPolicy(CompoundTag indexTag, UUID entityUUID) {
+        if (remove(indexTag, entityUUID)) {
+            PetIndexBlacklist.remove(indexTag, entityUUID);
+            return false;
+        }
+        PetIndexBlacklist.add(indexTag, entityUUID);
+        return true;
+    }
+
     static UUID get(CompoundTag indexTag, UUID entityUUID) {
         CompoundTag whitelist = indexTag.getCompound(KEY);
         String entityKey = entityUUID.toString();

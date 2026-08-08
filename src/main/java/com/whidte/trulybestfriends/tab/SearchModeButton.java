@@ -30,7 +30,7 @@ final class SearchModeButton extends AbstractButton {
 
     @Override
     protected void renderWidget(@NotNull GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        graphics.blit(RECIPE_BOOK_TEXTURE, getX(), getY() + 1, 11, 15,
+        graphics.blit(RECIPE_BOOK_TEXTURE, getX(), getY(), 11, 15,
                 SEARCH_TOGGLE_SIZE, SEARCH_TOGGLE_SIZE, 256, 256);
     }
 

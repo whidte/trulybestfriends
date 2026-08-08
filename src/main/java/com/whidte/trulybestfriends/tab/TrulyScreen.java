@@ -125,6 +125,20 @@ public class TrulyScreen extends Screen {
 		return uuid != null ? petNbtCache.get(uuid) : null;
 	}
 
+	boolean isTrackedPet(UUID uuid) {
+		return uuid != null && petNbtCache.containsKey(uuid);
+	}
+
+	boolean canSwapToSelectedPet() {
+		UUID targetUuid = getSelectedUuid();
+		CompoundTag nbt = getSelectedNbt();
+		var player = getMinecraft().player;
+		if (targetUuid == null || nbt == null || player == null
+				|| !nbt.getBoolean("Rideable") || isPetOnShoulder(targetUuid)
+				|| !(player.getVehicle() instanceof LivingEntity mount)) return false;
+		return !targetUuid.equals(mount.getUUID()) && isTrackedPet(mount.getUUID());
+	}
+
 	boolean hasSelection() {
 		return getSelectedUuid() != null;
 	}
@@ -272,10 +286,10 @@ public class TrulyScreen extends Screen {
 	private void addListControls() {
 		searchBox = new EditBox(
 				font(),
-				this.leftPos + LIST_MODE_CONTROL_OFFSET_X + 1,
-				this.topPos + LIST_CONTROLS_OFFSET_Y + 1,
-				LIST_MODE_CONTROL_WIDTH - 2,
-				LIST_CONTROL_HEIGHT - 2,
+				this.leftPos + LIST_MODE_CONTROL_OFFSET_X,
+				this.topPos + LIST_CONTROLS_OFFSET_Y,
+				LIST_MODE_CONTROL_WIDTH,
+				LIST_CONTROL_HEIGHT,
 				Component.translatable("trulybestfriends.search.name"));
 		searchBox.setHint(Component.translatable("trulybestfriends.search.hint"));
 		searchBox.setMaxLength(64);
@@ -682,7 +696,7 @@ public class TrulyScreen extends Screen {
 			UUID uuid = petUuids.get(i);
 			Component name = getPetDisplayName(uuid);
 			this.addRenderableWidget(new PetEntry(
-					listX + col * (ENTRY_WIDTH + ENTRY_GAP_X), listY + row * ENTRY_ROW_STEP,
+					listX + col * ENTRY_COLUMN_STEP, listY + row * ENTRY_ROW_STEP,
 					ENTRY_WIDTH, ENTRY_HEIGHT, name, i, this));
 		}
 	}
@@ -723,6 +737,12 @@ public class TrulyScreen extends Screen {
 		// Draw the panel first, then layer custom widgets and overlays on top.
 		this.renderBackground(g);
 		g.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
+		g.blit(PET_PREVIEW_BACKGROUND,
+				this.leftPos + PET_PREVIEW_BACKGROUND_X,
+				this.topPos + PET_PREVIEW_BACKGROUND_Y,
+				0, 0,
+				PET_PREVIEW_BACKGROUND_SIZE, PET_PREVIEW_BACKGROUND_SIZE,
+				PET_PREVIEW_BACKGROUND_SIZE, PET_PREVIEW_BACKGROUND_SIZE);
 		PetEntry selectedEntry = null;
 		SpeciesDropdown speciesDropdown = null;
 		for (GuiEventListener listener : this.children()) {
@@ -788,27 +808,23 @@ public class TrulyScreen extends Screen {
 	}
 
 	private void renderScrollBar(GuiGraphics g) {
-		if (petUuids.size() <= MAX_VISIBLE) return;
-
-		int barX = this.leftPos + this.imageWidth - SCROLLBAR_RIGHT_OFFSET;
+		int barX = this.leftPos + SCROLLBAR_OFFSET_X;
 		int barY = this.topPos + LIST_PANEL_OFFSET_Y;
 		int barH = LIST_PANEL_HEIGHT;
 		int barW = SCROLLBAR_WIDTH;
 
-		// Track: 3-segment blit (top border, stretched middle, bottom border)
-		g.blit(SCROLLBAR, barX, barY, barW, 1, 0, 0, 4, 1, 4, 3);
-		g.blit(SCROLLBAR, barX, barY + 1, barW, barH - 2, 0, 1, 4, 1, 4, 3);
-		g.blit(SCROLLBAR, barX, barY + barH - 1, barW, 1, 0, 2, 4, 1, 4, 3);
+		int thumbH = SCROLLBAR_THUMB_HEIGHT;
+		boolean canScroll = petUuids.size() > MAX_VISIBLE;
+		int thumbY = barY;
+		int thumbU = 6;
+		if (canScroll) {
+			float scrollRatio = (float) scrollOffset / Math.max(1, getMaxScrollOffset());
+			thumbY += (int) ((barH - thumbH) * scrollRatio);
+			thumbU = 0;
+		}
 
-		float ratio = (float) MAX_VISIBLE / petUuids.size();
-		int thumbH = Math.max(8, (int) (barH * ratio));
-		float scrollRatio = (float) scrollOffset / Math.max(1, getMaxScrollOffset());
-		int thumbY = barY + (int) ((barH - thumbH) * scrollRatio);
-
-		// Thumb: 3-segment blit (top, stretched middle, bottom)
-		g.blit(SCROLLBAR_THUMB, barX, thumbY, barW, 1, 0, 0, 4, 1, 4, 3);
-		g.blit(SCROLLBAR_THUMB, barX, thumbY + 1, barW, thumbH - 2, 0, 1, 4, 1, 4, 3);
-		g.blit(SCROLLBAR_THUMB, barX, thumbY + thumbH - 1, barW, 1, 0, 2, 4, 1, 4, 3);
+		g.blit(VILLAGER_TEXTURE, barX, thumbY, 0, (float) thumbU, 199.0F,
+				barW, thumbH, 512, 256);
 	}
 
 	private void renderPetPreview(GuiGraphics g) {
@@ -940,60 +956,18 @@ public class TrulyScreen extends Screen {
 	}
 
 	private void renderPetInfo(GuiGraphics g) {
-		CompoundTag nbt = getSelectedNbt();
-
-		int lx = this.leftPos + HEART_X;
+		int lx = this.leftPos + PET_INFO_OFFSET_X;
 		UUID uuid = getSelectedUuid();
-		int scissorWidth = this.leftPos + this.imageWidth - lx - 4;
-
-		// Name: prefix fixed, only the name suffix scrolls when it exceeds 50px
-		Component namePrefix = Component.translatable("trulybestfriends.info.name", Component.literal(""));
-		Component nameSuffix = getPetDisplayName(uuid);
-		int namePrefixW = this.font().width(namePrefix);
-		int nameSuffixW = this.font().width(nameSuffix);
-		int nameSuffixMaxW = 50;
 		int nameY = this.topPos + NAME_Y;
-		int nameSuffixX = lx + namePrefixW;
-		drawString(g, namePrefix, lx, nameY, 0x000000);
-		if (nameSuffixW <= nameSuffixMaxW) {
-			drawString(g, nameSuffix, nameSuffixX, nameY, 0x000000);
-		} else {
-			// Scroll the name within [nameSuffixX, nameSuffixX + 50]
-			int scroll = RenderHelper.scrollingOffset(nameSuffixW - nameSuffixMaxW + 12);
-			g.flush();
-			g.enableScissor(nameSuffixX, nameY, nameSuffixX + nameSuffixMaxW, nameY + 10);
-			drawString(g, nameSuffix, nameSuffixX - scroll, nameY, 0x000000);
-			g.flush();
-			g.disableScissor();
-		}
-
-		// Species
-		Component speciesName;
-		if (nbt != null) {
-			String typeKey = nbt.getString("EntityType");
-			if (!typeKey.isEmpty()) {
-				var entityType = getEntityType(typeKey);
-				speciesName = entityType != null ? entityType.getDescription() : Component.literal(typeKey);
-			} else {
-				speciesName = Component.translatable("trulybestfriends.location.unknown");
-			}
-		} else {
-			speciesName = Component.translatable("trulybestfriends.location.unknown");
-		}
-		Component speciesLabel = Component.translatable("trulybestfriends.info.species", speciesName);
-		int speciesPrefixW = this.font().width(Component.translatable("trulybestfriends.info.species", Component.literal("")));
-		int speciesMaxW = speciesPrefixW + 55;
-		int speciesY = this.topPos + SPECIES_Y;
-		g.enableScissor(lx, speciesY, lx + scissorWidth, speciesY + 10);
-		drawScrollingString(g, speciesLabel, lx, speciesY, speciesMaxW, 0x000000);
-		g.disableScissor();
+		drawClippedScrollingString(g, getPetDisplayName(uuid), lx, nameY,
+				PET_NAME_MAX_WIDTH, 0x000000);
 	}
 
 	private void renderPetLocation(GuiGraphics g, int mouseX, int mouseY) {
 		CompoundTag nbt = getSelectedNbt();
 		if (nbt == null) return;
 
-		int lx = this.leftPos + HEART_X;
+		int lx = this.leftPos + PET_INFO_OFFSET_X;
 		int ly = this.topPos + LOCATION_Y;
 
 		// Dead pet: show revive info with item icon
@@ -1004,24 +978,30 @@ public class TrulyScreen extends Screen {
 			if (nbt.contains("EntityType") && Config.isNoReviveEntity(nbt.getString("EntityType"))) {
 				Component warning = Component.translatable("trulybestfriends.revive.not_revivable")
 						.withStyle(net.minecraft.ChatFormatting.RED);
-				int infoRight = this.leftPos + LIST_PANEL_OFFSET_X - 4;
-				int maxW = Math.min(infoRight - lx, 72);
-				for (var line : font().split(warning, maxW)) {
-					g.drawString(font(), line, lx, ly, 0xFF0000);
-					ly += font().lineHeight;
-				}
+				int infoRight = this.leftPos + this.imageWidth - 4;
+				int maxW = Math.min(infoRight - lx, 82);
+				drawClippedScrollingString(g, warning, lx, ly, maxW, 0xFF0000);
 				return;
 			}
+			if (!Config.isReviveItemRequired()) return;
 			var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
 			if (item != null) {
-				Component prefixText = Component.translatable("trulybestfriends.revive.prefix");
-				drawString(g, prefixText, lx, ly, 0x000000);
-				int itemX = lx + font().width(prefixText) + 2;
-				ItemStack icon = new ItemStack(item, Config.reviveItemCount);
-				g.renderItem(icon, itemX, ly - 2);
-				g.renderItemDecorations(font(), icon, itemX, ly - 2);
-				Component suffixText = Component.translatable("trulybestfriends.revive.suffix");
-				drawString(g, suffixText, itemX + 20, ly, 0x000000);
+				int maxTextWidth = this.imageWidth - PET_INFO_OFFSET_X - 4;
+				g.flush();
+				g.enableScissor(lx, ly - 2, lx + maxTextWidth, ly + 14);
+				try {
+					Component prefixText = Component.translatable("trulybestfriends.revive.prefix");
+					drawString(g, prefixText, lx, ly, 0x000000);
+					int itemX = lx + font().width(prefixText) + 2;
+					ItemStack icon = new ItemStack(item, Config.reviveItemCount);
+					g.renderItem(icon, itemX, ly - 2);
+					g.renderItemDecorations(font(), icon, itemX, ly - 2);
+					Component suffixText = Component.translatable("trulybestfriends.revive.suffix");
+					drawString(g, suffixText, itemX + 20, ly, 0x000000);
+					g.flush();
+				} finally {
+					g.disableScissor();
+				}
 			}
 			return;
 		}
@@ -1032,8 +1012,10 @@ public class TrulyScreen extends Screen {
 		if (uuid != null && isPetOnShoulder(uuid)) {
 			coordsHovered = false;
 			tpDimKey = null;
-			drawString(g, Component.translatable("trulybestfriends.shoulder.on_shoulder"),
-					this.leftPos + HEART_X, this.topPos + LOCATION_Y, 0x000000);
+			int maxTextWidth = this.imageWidth - PET_INFO_OFFSET_X - 4;
+			drawClippedScrollingString(g,
+					Component.translatable("trulybestfriends.shoulder.on_shoulder"),
+					lx, ly, maxTextWidth, 0x000000);
 			return;
 		}
 
@@ -1045,14 +1027,16 @@ public class TrulyScreen extends Screen {
 		int z = (int) Math.round(pos.getDouble(2));
 		String dimKey = nbt.contains("Dimension") ? nbt.getString("Dimension") : "";
 		boolean isRecalled = nbt.getBoolean("Recalled");
-		int infoRight = this.leftPos + LIST_PANEL_OFFSET_X - 4;
+		int infoRight = this.leftPos + this.imageWidth - 4;
 		int maxTextWidth = infoRight - lx;
 
 		// Line 1 (ly): world name, or "已收回" for recalled pets
 		if (isRecalled) {
 			coordsHovered = false;
 			tpDimKey = null;
-			drawString(g, Component.translatable("trulybestfriends.coords.recalled"), lx, ly, 0xAA5555);
+			drawClippedScrollingString(g,
+					Component.translatable("trulybestfriends.coords.recalled"),
+					lx, ly, maxTextWidth, 0xAA5555);
 		} else {
 			Component dimText;
 			if (!dimKey.isEmpty()) {
@@ -1061,27 +1045,14 @@ public class TrulyScreen extends Screen {
 			} else {
 				dimText = Component.translatable("trulybestfriends.location.unknown");
 			}
-			g.enableScissor(lx, ly, lx + maxTextWidth, ly + 10);
-			drawScrollingString(g, dimText, lx, ly, maxTextWidth, 0x000000);
-			g.disableScissor();
+			drawClippedScrollingString(g, dimText, lx, ly, maxTextWidth, 0x000000);
 		}
 
 		// Line 2 (ly + 10): timed warning or coordinates
 		if (warningText != null && System.currentTimeMillis() < warningUntil
 				&& warningUuid != null && warningUuid.equals(getSelectedUuid())) {
-			int wrapWidth = Math.min(maxTextWidth, 72);
-			var lines = font().split(warningText, wrapWidth);
 			int warnColor = isRecalled ? 0xFFFF55 : 0xFF5555;
-			int lineY = ly + 10;
-			int totalHeight = lines.size() * 10;
-			g.enableScissor(lx, ly + 10, lx + maxTextWidth, ly + 10 + totalHeight);
-			for (var line : lines) {
-				font().drawInBatch(line, lx, lineY, warnColor, false,
-						g.pose().last().pose(), g.bufferSource(),
-						net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
-				lineY += 10;
-			}
-			g.disableScissor();
+			drawClippedScrollingString(g, warningText, lx, ly + 10, maxTextWidth, warnColor);
 			return;
 		}
 
@@ -1089,10 +1060,12 @@ public class TrulyScreen extends Screen {
 
 		String coordStr = x + " " + y + " " + z;
 		boolean canTp = !dimKey.isEmpty() && minecraft.player != null && minecraft.player.isCreative();
-		coordsHovered = canTp && mouseX >= lx && mouseX <= lx + font().width(coordStr)
+		int coordVisibleWidth = Math.min(font().width(coordStr), maxTextWidth);
+		coordsHovered = canTp && mouseX >= lx && mouseX <= lx + coordVisibleWidth
 				&& mouseY >= ly + 10 && mouseY <= ly + 20;
 		int color = coordsHovered ? 0xFFAA00 : 0x000000;
-		drawString(g, Component.literal(coordStr), lx, ly + 10, color);
+		drawClippedScrollingString(g, Component.literal(coordStr), lx, ly + 10,
+				maxTextWidth, color);
 
 		tpDimKey = dimKey;
 		tpX = x; tpY = y; tpZ = z;
@@ -1116,6 +1089,19 @@ public class TrulyScreen extends Screen {
 
 	private void drawScrollingString(GuiGraphics g, Component text, int x, int y, int maxWidth, int color) {
 		RenderHelper.drawScrollingString(g, font(), text, x, y, maxWidth, color);
+	}
+
+	private void drawClippedScrollingString(GuiGraphics g, Component text,
+	                                        int x, int y, int maxWidth, int color) {
+		if (maxWidth <= 0) return;
+		g.flush();
+		g.enableScissor(x, y, x + maxWidth, y + 10);
+		try {
+			drawScrollingString(g, text, x, y, maxWidth, color);
+			g.flush();
+		} finally {
+			g.disableScissor();
+		}
 	}
 
 	// ============================
@@ -1207,17 +1193,16 @@ public class TrulyScreen extends Screen {
 	}
 
 	private boolean clickScrollbar(double mx, double my) {
-		int barX = this.leftPos + this.imageWidth - SCROLLBAR_RIGHT_OFFSET;
+		int barX = this.leftPos + SCROLLBAR_OFFSET_X;
 		int barY = this.topPos + LIST_PANEL_OFFSET_Y;
 		int barH = LIST_PANEL_HEIGHT;
-		if (mx < barX || mx > barX + SCROLLBAR_WIDTH || my < barY || my > barY + barH) return false;
+		if (mx < barX || mx >= barX + SCROLLBAR_WIDTH || my < barY || my >= barY + barH) return false;
 
-		float ratio = (float) MAX_VISIBLE / petUuids.size();
-		int thumbH = Math.max(8, (int) (barH * ratio));
+		int thumbH = SCROLLBAR_THUMB_HEIGHT;
 		float scrollRatio = (float) scrollOffset / Math.max(1, getMaxScrollOffset());
 		int thumbY = barY + (int) ((barH - thumbH) * scrollRatio);
 
-		if (my >= thumbY && my <= thumbY + thumbH) {
+		if (my >= thumbY && my < thumbY + thumbH) {
 			isDraggingScrollbar = true;
 			return true;
 		}
@@ -1231,8 +1216,7 @@ public class TrulyScreen extends Screen {
 	private void dragScrollbar(double my) {
 		int barY = this.topPos + LIST_PANEL_OFFSET_Y;
 		int barH = LIST_PANEL_HEIGHT;
-		float ratio = (float) MAX_VISIBLE / petUuids.size();
-		int thumbH = Math.max(8, (int) (barH * ratio));
+		int thumbH = SCROLLBAR_THUMB_HEIGHT;
 		int maxThumbY = barH - thumbH;
 		if (maxThumbY > 0) {
 			float progress = Mth.clamp(((float) my - barY - thumbH / 2f) / maxThumbY, 0f, 1f);

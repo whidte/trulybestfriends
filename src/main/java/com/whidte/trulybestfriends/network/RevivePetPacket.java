@@ -131,29 +131,33 @@ public class RevivePetPacket {
     private static void writeSafePosNearPlayer(CompoundTag nbt, ServerPlayer player, ServerLevel level) {
         float bbW = 0.6f;
         float bbH = 1.8f;
+        Entity tempEntity = null;
 
         // Try to create a temp entity for accurate dimensions
         String typeKey = nbt.getString("EntityType");
         if (!typeKey.isEmpty()) {
             EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
             if (type != null) {
-                Entity temp = type.create(level);
-                if (temp instanceof LivingEntity le) {
+                tempEntity = type.create(level);
+                if (tempEntity instanceof LivingEntity le) {
                     bbW = le.getBbWidth();
                     bbH = le.getBbHeight();
                 }
-                if (temp != null) temp.discard();
             }
         }
 
         float halfWidth = bbW / 2f;
         int radius = Math.max(1, (int) Math.ceil(bbW));
-        Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(
-                level, player, halfWidth, bbH, radius, 6, 16);
+        Vec3 safePosition = tempEntity != null
+                ? PetIOUtil.findSafePositionNearPlayer(level, player, tempEntity, radius, 6, 16)
+                : PetIOUtil.findSafePositionNearPlayer(level, player, halfWidth, bbH, radius, 6, 16);
+        if (tempEntity != null) tempEntity.discard();
+
+        // Match summon fallback: do not move upward when no valid WALKABLE spot exists.
         double safeX = safePosition != null ? safePosition.x : player.getX();
         double safeY = safePosition != null
                 ? safePosition.y
-                : PetIOUtil.findSafeY(level, player.getX(), player.getY(), player.getZ(), halfWidth, bbH);
+                : player.getY();
         double safeZ = safePosition != null ? safePosition.z : player.getZ();
 
         net.minecraft.nbt.ListTag pos = new net.minecraft.nbt.ListTag();
@@ -207,6 +211,7 @@ public class RevivePetPacket {
     }
 
     private static boolean hasItems(ServerPlayer player) {
+        if (!Config.isReviveItemRequired()) return true;
         var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
         if (item == null) return false;
 
@@ -222,6 +227,7 @@ public class RevivePetPacket {
     }
 
     private static boolean consumeItems(ServerPlayer player) {
+        if (!Config.isReviveItemRequired()) return true;
         var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
         if (item == null || !hasItems(player)) return false;
 

@@ -1,16 +1,11 @@
 package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
-import com.whidte.trulybestfriends.tab.TrulyScreen;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Server → client: tells the GUI to show a transient warning at the coordinate
@@ -18,7 +13,7 @@ import java.util.function.Supplier;
  * pet is recalled, lost, or the summon queue is busy.
  */
 public class PetWarningPacket {
-    /** 0 = recalled, 1 = lost (summon context), 2 = busy, 3 = lost (recall context) */
+    /** 0 = recalled, 1 = lost (summon), 2 = busy, 3 = lost (recall), 4 = no swap space */
     private final int type;
     private final UUID petUuid;
 
@@ -41,19 +36,6 @@ public class PetWarningPacket {
                 PacketDistributor.PLAYER.with(() -> player), new PetWarningPacket(type, petUuid));
     }
 
-    public static void handle(PetWarningPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            Minecraft mc = Minecraft.getInstance();
-            if (mc.screen instanceof TrulyScreen screen) {
-                Component msg = Component.translatable(switch (packet.type) {
-                    case 0 -> "trulybestfriends.teleport.recalled_warning";
-                    case 2 -> "trulybestfriends.teleport.busy_warning";
-                    case 3 -> "trulybestfriends.recall.lost_warning";
-                    default -> "trulybestfriends.teleport.lost_warning";
-                });
-                screen.showWarning(msg, packet.petUuid);
-            }
-        });
-        ctx.get().setPacketHandled(true);
-    }
+    public int getType() { return type; }
+    public UUID getPetUuid() { return petUuid; }
 }

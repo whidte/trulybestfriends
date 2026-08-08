@@ -9,8 +9,12 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.pathfinder.BlockPathTypes;
+import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.AABB;
@@ -59,6 +63,21 @@ public final class PetIOUtil {
 
     public static Path getOwnerDir(ServerPlayer player) {
         return getModDir(player).resolve(player.getUUID().toString());
+    }
+
+    /** True only for a UUID-named pet snapshot, excluding metadata files such as team.nbt. */
+    public static boolean isPetDataFileName(String fileName) {
+        if (fileName == null || !fileName.endsWith(".nbt")) return false;
+        try {
+            UUID.fromString(fileName.substring(0, fileName.length() - 4));
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    public static boolean isPetDataFile(Path path) {
+        return Files.isRegularFile(path) && isPetDataFileName(path.getFileName().toString());
     }
 
     public static Entity findEntity(MinecraftServer server, UUID entityUuid) {
@@ -143,18 +162,60 @@ public final class PetIOUtil {
                 double angle = level.random.nextDouble() * Math.PI * 2;
                 double x = player.getX() + Math.cos(angle) * radius;
                 double z = player.getZ() + Math.sin(angle) * radius;
-                double y = entity != null
-                        ? findSafeY(level, x, player.getY(), z, entity)
-                        : findSafeY(level, x, player.getY(), z, halfWidth, height);
-                AABB box = new AABB(x - halfWidth, y, z - halfWidth,
-                        x + halfWidth, y + height, z + halfWidth);
-                boolean clear = entity != null
-                        ? level.noCollision(entity, box)
-                        : level.noCollision(box);
-                if (clear && !level.containsAnyLiquid(box)) return new Vec3(x, y, z);
+                for (int verticalDistance = 0; verticalDistance <= 5; verticalDistance++) {
+                    for (int direction : verticalDirections(verticalDistance)) {
+                        double y = player.getY() + direction * verticalDistance;
+                        if (!hasClearVerticalPath(level, entity, x, y, z, halfWidth, height, player.getY())) {
+                            continue;
+                        }
+                        AABB box = new AABB(x - halfWidth, y, z - halfWidth,
+                                x + halfWidth, y + height, z + halfWidth);
+                        boolean clear = entity != null
+                                ? level.noCollision(entity, box)
+                                : level.noCollision(box);
+                        if (!clear || level.containsAnyLiquid(box)) continue;
+
+                        // The summon/teleport paths pass the restored/live Mob, so use
+                        // the same block-level evaluator as vanilla pet teleportation.
+                        if (entity instanceof Mob
+                                && WalkNodeEvaluator.getBlockPathTypeStatic(level, BlockPos.containing(x, y, z).mutable())
+                                != BlockPathTypes.WALKABLE) continue;
+
+                        return new Vec3(x, y, z);
+                    }
+                }
             }
         }
         return null;
+    }
+
+    /** Returns the height search order: same level, then down/up by increasing distance. */
+    private static int[] verticalDirections(int distance) {
+        return distance == 0 ? new int[]{1} : new int[]{-1, 1};
+    }
+
+    /** Prevents a vertical teleport through a floor or ceiling into another level. */
+    private static boolean hasClearVerticalPath(ServerLevel level, Entity entity,
+                                                 double x, double y, double z,
+                                                 float halfWidth, float height,
+                                                 double playerY) {
+        double minY;
+        double maxY;
+        if (y < playerY) {
+            minY = y + height;
+            maxY = playerY;
+        } else {
+            minY = playerY;
+            maxY = y;
+        }
+        if (maxY - minY <= 1.0E-3) return true;
+
+        AABB passage = new AABB(x - halfWidth, minY, z - halfWidth,
+                x + halfWidth, maxY, z + halfWidth);
+        boolean clear = entity != null
+                ? level.noCollision(entity, passage)
+                : level.noCollision(passage);
+        return clear && !level.containsAnyLiquid(passage);
     }
 
     public static void writePetSnapshot(File nbtFile, CompoundTag snapshot, boolean recalled) throws IOException {

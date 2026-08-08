@@ -1,15 +1,12 @@
 package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
-import com.whidte.trulybestfriends.tab.TrulyScreen;
 import io.netty.buffer.Unpooled;
-import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
 
 import java.util.ArrayList;
@@ -17,7 +14,6 @@ import java.util.Map;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
 
 /**
  * Server → Client: pushes pet data to the client.
@@ -36,7 +32,7 @@ public class SyncPetDataPacket {
     public static final int MODE_UPDATE = 1;
     public static final int MODE_DELETE = 2;
     /** Transport-only mode used when a logical packet exceeds the wire limit. */
-    private static final int MODE_FRAGMENT = 3;
+    public static final int MODE_FRAGMENT = 3;
     public static final int MAX_FULL_LIST_ENTRIES = 1;
     /** Maximum encoded payload size for one custom packet (30 KiB). */
     public static final int MAX_PACKET_BYTES = 30 * 1024;
@@ -261,29 +257,9 @@ public class SyncPetDataPacket {
         };
     }
 
-    // --- Handler (client side) ---
+    // --- Fragment assembly (used by the client-only handler) ---
 
-    public static void handle(SyncPetDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        final SyncPetDataPacket received = packet;
-        ctx.get().enqueueWork(() -> {
-            SyncPetDataPacket applyPacket = received;
-            if (applyPacket.mode == MODE_FRAGMENT) {
-                SyncPetDataPacket complete = collectFragment(applyPacket);
-                if (complete == null) return;
-                applyPacket = complete;
-            }
-            Minecraft mc = Minecraft.getInstance();
-            if (mc.screen instanceof TrulyScreen screen) {
-                screen.applySyncPacket(applyPacket);
-            } else {
-                // Cache for later use when the screen opens
-                TrulyScreen.cacheSyncPacket(applyPacket);
-            }
-        });
-        ctx.get().setPacketHandled(true);
-    }
-
-    static SyncPetDataPacket collectFragment(SyncPetDataPacket packet) {
+    public static SyncPetDataPacket collectFragment(SyncPetDataPacket packet) {
         FragmentAccumulator accumulator = CLIENT_FRAGMENTS.compute(packet.fragmentId, (id, existing) -> {
             if (existing == null || existing.count != packet.fragmentCount
                     || existing.originalMode != packet.originalMode) {

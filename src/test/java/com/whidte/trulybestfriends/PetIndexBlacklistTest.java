@@ -37,6 +37,22 @@ public final class PetIndexBlacklistTest {
         require(ForcedTrackingWhitelist.get(index, forcedPet) == null,
                 "removed forced-tracking entry was still resolved");
 
+        UUID normallyTrackedPet = UUID.randomUUID();
+        require(ForcedTrackingWhitelist.applyRemovalBlacklistPolicy(index, normallyTrackedPet),
+                "normally tracked pet did not request blacklisting on removal");
+        require(PetIndexBlacklist.contains(index, normallyTrackedPet),
+                "normally tracked pet was not blacklisted on removal");
+
+        UUID forceTrackedRemoval = UUID.randomUUID();
+        require(ForcedTrackingWhitelist.put(index, forceTrackedRemoval, forcedOwner),
+                "forced-tracking removal fixture was not added");
+        require(!ForcedTrackingWhitelist.applyRemovalBlacklistPolicy(index, forceTrackedRemoval),
+                "force-tracked pet requested blacklisting on removal");
+        require(!PetIndexBlacklist.contains(index, forceTrackedRemoval),
+                "force-tracked pet was blacklisted on removal");
+        require(ForcedTrackingWhitelist.get(index, forceTrackedRemoval) == null,
+                "force-tracking entry remained after removal");
+
         CompoundTag state = new CompoundTag();
         state.putBoolean("Recalled", false);
         state.put("Healing", new CompoundTag());
@@ -44,6 +60,14 @@ public final class PetIndexBlacklistTest {
                 "changed recalled state was not written");
         require(state.contains("Healing"),
                 "updating recalled state removed healing data");
+        require(PetIndexState.setRideable(state),
+                "new rideable state was not written");
+        require(state.getBoolean("Rideable"),
+                "rideable state was not persisted");
+        require(!PetIndexState.setRideable(state),
+                "unchanged rideable state was rewritten");
+        require(state.contains("Healing") && state.getBoolean("Recalled"),
+                "updating rideable state damaged existing pet state");
 
         UUID indexedPet = UUID.randomUUID();
         CompoundTag type = new CompoundTag();
@@ -58,7 +82,7 @@ public final class PetIndexBlacklistTest {
         });
         require(visits[0] == 1, "index traversal included metadata or skipped pet state");
 
-        System.out.println("PetIndexBlacklistTest: 15/15 passed");
+        System.out.println("PetIndexBlacklistTest: 25/25 passed");
     }
 
     private static void require(boolean condition, String message) {

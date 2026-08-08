@@ -19,7 +19,7 @@ final class DeleteButton extends AbstractWidget {
     private final TrulyScreen screen;
 
     DeleteButton(int x, int y, TrulyScreen screen) {
-        super(x, y, DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT, Component.empty());
+        super(x, y, DELETE_BUTTON_SIZE, DELETE_BUTTON_SIZE, Component.empty());
         this.screen = screen;
     }
 

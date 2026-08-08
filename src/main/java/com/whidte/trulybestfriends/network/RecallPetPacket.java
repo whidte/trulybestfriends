@@ -38,6 +38,15 @@ public class RecallPetPacket {
      *  Mirrors TeleportPetToPlayerPacket's strict entity-existence checks:
      *  searches the pet's stored dimension before falling back to chunk force-load. */
     public static void handle(RecallPetPacket packet, Supplier<NetworkEvent.Context> ctx) {
+        handle(packet, ctx, true);
+    }
+
+    static void handleWithoutRideSwap(UUID petUuid, Supplier<NetworkEvent.Context> ctx) {
+        handle(new RecallPetPacket(petUuid), ctx, false);
+    }
+
+    private static void handle(RecallPetPacket packet, Supplier<NetworkEvent.Context> ctx,
+                               boolean allowRideSwap) {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
             if (player == null) return;
@@ -103,6 +112,11 @@ public class RecallPetPacket {
             if (nbt.getBoolean("Recalled")) {
                 if (trulybestfriends.isPendingRemoval(player.getUUID(), packet.petUuid)) {
                     PetWarningPacket.send(player, 2, packet.petUuid);
+                    return;
+                }
+                if (allowRideSwap && !PetDeathState.isDeadSnapshot(nbt)
+                        && TeleportPetToPlayerPacket.trySwapRecalledPet(
+                        player, packet.petUuid, nbt, nbtFile, playerLevel)) {
                     return;
                 }
                 if (!releaseRecalledPet(player, packet.petUuid, playerLevel)) {
