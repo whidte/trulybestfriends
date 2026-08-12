@@ -851,8 +851,8 @@ public class TrulyScreen extends Screen {
 			for (int column = 0; column < 3; column++) {
 				if (row == 1 && column == 1) continue;
 				g.blit(SQUAD_SLOT,
-						gridX + column * SQUAD_GRID_SLOT_SIZE,
-						gridY + row * SQUAD_GRID_SLOT_SIZE,
+						gridX + column * SQUAD_GRID_STEP,
+						gridY + row * SQUAD_GRID_STEP,
 						0, 0,
 						SQUAD_GRID_SLOT_SIZE, SQUAD_GRID_SLOT_SIZE,
 						SQUAD_GRID_SLOT_SIZE, SQUAD_GRID_SLOT_SIZE);

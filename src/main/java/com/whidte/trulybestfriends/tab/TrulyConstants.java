@@ -108,13 +108,15 @@ final class TrulyConstants {
 	static final int SQUAD_Y = SUMMON_TO_PLAYER_Y + (20 - SQUAD_SIZE) / 2;
 	/** Top-center 3x3 squad grid layout. The center cell is reserved for the release button. */
 	static final int SQUAD_GRID_SLOT_SIZE = 18;
-	static final int SQUAD_GRID_SIZE = SQUAD_GRID_SLOT_SIZE * 3;
+	static final int SQUAD_GRID_GAP = 4;
+	static final int SQUAD_GRID_STEP = SQUAD_GRID_SLOT_SIZE + SQUAD_GRID_GAP;
+	static final int SQUAD_GRID_SIZE = SQUAD_GRID_SLOT_SIZE * 3 + SQUAD_GRID_GAP * 2;
 	static final int SQUAD_GRID_X = (176 - SQUAD_GRID_SIZE) / 2;
 	static final int SQUAD_GRID_Y = 10;
 	static final int AREA_RELEASE_BUTTON_SIZE = 20;
-	static final int AREA_RELEASE_X = SQUAD_GRID_X + SQUAD_GRID_SLOT_SIZE
+	static final int AREA_RELEASE_X = SQUAD_GRID_X + SQUAD_GRID_STEP
 			- (AREA_RELEASE_BUTTON_SIZE - SQUAD_GRID_SLOT_SIZE) / 2;
-	static final int AREA_RELEASE_Y = SQUAD_GRID_Y + SQUAD_GRID_SLOT_SIZE
+	static final int AREA_RELEASE_Y = SQUAD_GRID_Y + SQUAD_GRID_STEP
 			- (AREA_RELEASE_BUTTON_SIZE - SQUAD_GRID_SLOT_SIZE) / 2;
 
 	// --- Scale / Rotation ---
