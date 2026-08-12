@@ -9,26 +9,26 @@ import org.jetbrains.annotations.NotNull;
 
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 
-/** Icon-only button placed to the right of the summon button. */
-class SquadButton extends AbstractWidget {
+/** Icon-only button shown in squad mode to return to the standard tab view. */
+class DetailsButton extends AbstractWidget {
 
-    private static final Component LABEL = Component.translatable("trulybestfriends.squad.tooltip");
+    private static final Component LABEL = Component.translatable("trulybestfriends.details.tooltip");
     private static final long HOVER_DELAY_MILLIS = 1000L;
 
     private final TrulyScreen screen;
     private long hoverStartMillis = -1L;
 
-    public SquadButton(int x, int y, TrulyScreen screen) {
+    public DetailsButton(int x, int y, TrulyScreen screen) {
         super(x, y, SQUAD_SIZE, SQUAD_SIZE, LABEL);
         this.screen = screen;
     }
 
     @Override
     public void renderWidget(@NotNull GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        // Draw the squad icon, scaled from 8x8 to SQUAD_ICON_SIZE, centered in the hitbox.
+        // Draw the details icon, scaled from 8x8 to SQUAD_ICON_SIZE, centered in the hitbox.
         int iconX = getX() + (width - SQUAD_ICON_SIZE) / 2;
         int iconY = getY() + (height - SQUAD_ICON_SIZE) / 2;
-        g.blit(SQUAD_ICON, iconX, iconY,
+        g.blit(DETAILS_ICON, iconX, iconY,
                 SQUAD_ICON_SIZE, SQUAD_ICON_SIZE,
                 0, 0,
                 8, 8,
@@ -60,7 +60,7 @@ class SquadButton extends AbstractWidget {
 
     @Override
     public void onClick(double mouseX, double mouseY) {
-        screen.enterSquadMode();
+        screen.exitSquadMode();
     }
 
     @Override
