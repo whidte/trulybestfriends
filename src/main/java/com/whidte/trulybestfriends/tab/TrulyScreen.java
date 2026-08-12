@@ -585,7 +585,7 @@ public class TrulyScreen extends Screen {
 		return System.currentTimeMillis() + serverTimeOffsetMs;
 	}
 
-	private void updateButtonVisibility() {
+	void updateButtonVisibility() {
 		boolean has = hasSelection() && !squadMode;
 		if (healButton != null) healButton.visible = has;
 		if (deleteButton != null) deleteButton.visible = has;

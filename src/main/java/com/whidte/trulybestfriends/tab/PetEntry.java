@@ -130,10 +130,7 @@ class PetEntry extends AbstractWidget {
 		}
 		if (screen.selectedPetIndex != index) screen.deletePromptUuid = null;
 		screen.selectedPetIndex = index;
-		screen.healButton.visible = true;
-		screen.deleteButton.visible = true;
-		screen.actionButton.visible = true;
-		screen.summonToPlayerButton.visible = true;
+		screen.updateButtonVisibility();
 		screen.adjustScaleForCurrentPet();
 		screen.rotX = DEFAULT_ROT_X;
 		screen.rotY = DEFAULT_ROT_Y;
