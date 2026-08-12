@@ -32,7 +32,8 @@ public class Config
                     "The final field may contain either a UUID tag or a UUID string. Path segments are case-sensitive.")
             .defineListAllowEmpty("ownerNbtFields", java.util.Arrays.asList(
                     "Owner",
-                    "OwnerUUID"
+                    "OwnerUUID",
+                    "ForgeCaps.mob_controller:mob_control.ControllerUUID"
             ), s -> s instanceof String path && OwnerNbtResolver.isValidPath(path));
 
     public static final ForgeConfigSpec.IntValue SYNC_INTERVAL_TICKS = BUILDER

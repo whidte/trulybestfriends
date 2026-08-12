@@ -98,6 +98,25 @@ final class TrulyConstants {
 	/** 召唤至玩家按钮的宽度。 */
 	static final int SUMMON_TO_PLAYER_W = 60;
 
+	/** Squad icon button size (square hitbox). */
+	static final int SQUAD_SIZE = 8;
+	/** Squad icon drawn size inside the hitbox (scaled from 8x8 source). */
+	static final int SQUAD_ICON_SIZE = 8;
+	/** Squad button X offset relative to the tab panel left edge (right of summon). */
+	static final int SQUAD_X = SUMMON_TO_PLAYER_X + SUMMON_TO_PLAYER_W + 2;
+	/** Squad button Y offset relative to the tab panel top edge. */
+	static final int SQUAD_Y = SUMMON_TO_PLAYER_Y + (20 - SQUAD_SIZE) / 2;
+	/** Top-center 3x3 squad grid layout. The center cell is reserved for the release button. */
+	static final int SQUAD_GRID_SLOT_SIZE = 18;
+	static final int SQUAD_GRID_SIZE = SQUAD_GRID_SLOT_SIZE * 3;
+	static final int SQUAD_GRID_X = (176 - SQUAD_GRID_SIZE) / 2;
+	static final int SQUAD_GRID_Y = 10;
+	static final int AREA_RELEASE_BUTTON_SIZE = 20;
+	static final int AREA_RELEASE_X = SQUAD_GRID_X + SQUAD_GRID_SLOT_SIZE
+			- (AREA_RELEASE_BUTTON_SIZE - SQUAD_GRID_SLOT_SIZE) / 2;
+	static final int AREA_RELEASE_Y = SQUAD_GRID_Y + SQUAD_GRID_SLOT_SIZE
+			- (AREA_RELEASE_BUTTON_SIZE - SQUAD_GRID_SLOT_SIZE) / 2;
+
 	// --- Scale / Rotation ---
 	/** 普通宠物模型在界面中渲染时使用的基础缩放值。 */
 	static final float BASE_SCALE = 17f;
@@ -147,6 +166,20 @@ final class TrulyConstants {
 	static final ResourceLocation VILLAGER_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/container/villager2.png");
 	/** 宠物列表条目纹理，纵向包含普通态和选中态。 */
 	static final ResourceLocation PET_ENTRY = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/pet_entry.png");
+	/** Squad button icon. */
+	static final ResourceLocation SQUAD_ICON =
+			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/squad.png");
+	/** Squad button hover highlight ring. */
+	static final ResourceLocation SQUAD_BORDER =
+			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/border.png");
+	/** 单项模式按钮图标。 */
+	static final ResourceLocation DETAILS_ICON =
+			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/details.png");
+	/** Squad formation slot and center area-release icon. */
+	static final ResourceLocation SQUAD_SLOT =
+			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/slot.png");
+	static final ResourceLocation AREA_RELEASE_ICON =
+			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/release_bottle.png");
 
 	// --- Utility ---
 

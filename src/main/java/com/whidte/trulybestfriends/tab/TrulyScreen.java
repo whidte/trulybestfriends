@@ -61,6 +61,10 @@ public class TrulyScreen extends Screen {
 	DeleteButton deleteButton;
 	ActionButton actionButton;
 	SummonToPlayerButton summonToPlayerButton;
+	SquadButton squadButton;
+	DetailsButton detailsButton;
+	AreaReleaseButton areaReleaseButton;
+	boolean squadMode = false;
 	private SpeciesDropdown speciesFilterButton;
 	private EditBox searchBox;
 	private SearchModeButton searchModeButton;
@@ -280,6 +284,12 @@ public class TrulyScreen extends Screen {
 				new ActionButton(this.leftPos + ACTION_X, this.topPos + ACTION_Y, this));
 		summonToPlayerButton = this.addRenderableWidget(new SummonToPlayerButton(
 				this.leftPos + SUMMON_TO_PLAYER_X, this.topPos + SUMMON_TO_PLAYER_Y, SUMMON_TO_PLAYER_W, this));
+		squadButton = this.addRenderableWidget(new SquadButton(
+				this.leftPos + SQUAD_X, this.topPos + SQUAD_Y, this));
+		detailsButton = this.addRenderableWidget(new DetailsButton(
+				this.leftPos + SQUAD_X, this.topPos + SQUAD_Y, this));
+		areaReleaseButton = this.addRenderableWidget(new AreaReleaseButton(
+				this.leftPos + AREA_RELEASE_X, this.topPos + AREA_RELEASE_Y, this));
 		updateButtonVisibility();
 	}
 
@@ -576,11 +586,24 @@ public class TrulyScreen extends Screen {
 	}
 
 	private void updateButtonVisibility() {
-		boolean has = hasSelection();
+		boolean has = hasSelection() && !squadMode;
 		if (healButton != null) healButton.visible = has;
 		if (deleteButton != null) deleteButton.visible = has;
 		if (actionButton != null) actionButton.visible = has;
 		if (summonToPlayerButton != null) summonToPlayerButton.visible = has;
+		if (squadButton != null) squadButton.visible = !squadMode;
+		if (detailsButton != null) detailsButton.visible = squadMode;
+		if (areaReleaseButton != null) areaReleaseButton.visible = squadMode;
+	}
+
+	void enterSquadMode() {
+		squadMode = true;
+		updateButtonVisibility();
+	}
+
+	void exitSquadMode() {
+		squadMode = false;
+		updateButtonVisibility();
 	}
 
 	private void cleanExpiredCooldowns() {
@@ -737,12 +760,16 @@ public class TrulyScreen extends Screen {
 		// Draw the panel first, then layer custom widgets and overlays on top.
 		this.renderBackground(g);
 		g.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
-		g.blit(PET_PREVIEW_BACKGROUND,
-				this.leftPos + PET_PREVIEW_BACKGROUND_X,
-				this.topPos + PET_PREVIEW_BACKGROUND_Y,
-				0, 0,
-				PET_PREVIEW_BACKGROUND_SIZE, PET_PREVIEW_BACKGROUND_SIZE,
-				PET_PREVIEW_BACKGROUND_SIZE, PET_PREVIEW_BACKGROUND_SIZE);
+		if (!squadMode) {
+			g.blit(PET_PREVIEW_BACKGROUND,
+					this.leftPos + PET_PREVIEW_BACKGROUND_X,
+					this.topPos + PET_PREVIEW_BACKGROUND_Y,
+					0, 0,
+					PET_PREVIEW_BACKGROUND_SIZE, PET_PREVIEW_BACKGROUND_SIZE,
+					PET_PREVIEW_BACKGROUND_SIZE, PET_PREVIEW_BACKGROUND_SIZE);
+		} else {
+			renderSquadGrid(g);
+		}
 		PetEntry selectedEntry = null;
 		SpeciesDropdown speciesDropdown = null;
 		for (GuiEventListener listener : this.children()) {
@@ -765,7 +792,7 @@ public class TrulyScreen extends Screen {
 
 		renderScrollBar(g);
 
-		if (hasSelection()) {
+		if (hasSelection() && !squadMode) {
 			renderPetPreview(g);
 			g.pose().pushPose();
 			g.pose().translate(0.0, 0.0, PET_INFO_OVERLAY_Z);
@@ -804,6 +831,32 @@ public class TrulyScreen extends Screen {
 		// L2Tabs tooltip overlay (must render after children)
 		if (tabManager != null) {
 			tabManager.onToolTipRender(g, mouseX, mouseY);
+		}
+
+		if (squadButton != null) {
+			squadButton.renderTooltip(g, mouseX, mouseY);
+		}
+		if (detailsButton != null) {
+			detailsButton.renderTooltip(g, mouseX, mouseY);
+		}
+		if (areaReleaseButton != null) {
+			areaReleaseButton.renderTooltip(g, mouseX, mouseY);
+		}
+	}
+
+	private void renderSquadGrid(GuiGraphics g) {
+		int gridX = this.leftPos + SQUAD_GRID_X;
+		int gridY = this.topPos + SQUAD_GRID_Y;
+		for (int row = 0; row < 3; row++) {
+			for (int column = 0; column < 3; column++) {
+				if (row == 1 && column == 1) continue;
+				g.blit(SQUAD_SLOT,
+						gridX + column * SQUAD_GRID_SLOT_SIZE,
+						gridY + row * SQUAD_GRID_SLOT_SIZE,
+						0, 0,
+						SQUAD_GRID_SLOT_SIZE, SQUAD_GRID_SLOT_SIZE,
+						SQUAD_GRID_SLOT_SIZE, SQUAD_GRID_SLOT_SIZE);
+			}
 		}
 	}
 
