@@ -51,7 +51,7 @@
 | `noReviveWhitelist` | （见配置） | 保留掉落物且不可复活的实体类型列表 |
 | `autoRegisterBlacklist` | （见配置） | 不自动登记为宠物的实体类型列表，支持 `namespace:*` 通配符（默认屏蔽 Iron's Spells 的召唤物） |
 | `clearOnDeathWhitelist` | （见配置） | 死亡时保留掉落物，并彻底清除追踪数据的实体类型列表 |
-| `enableLoginLoadDiagnostics` | `false` | 登录时校验宠物 NBT 文件并打印日志（调试用） |
+| `enableLoginLoadDiagnostics` | `false` | 登录时校验宠物 NBT 文件；实体 NBT 序列化失败时在聊天栏显示详情（调试用） |
 
 ## 数据存储位置
 

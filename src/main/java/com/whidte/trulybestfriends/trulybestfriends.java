@@ -26,7 +26,9 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.advancements.Advancement;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -91,6 +93,7 @@ public class trulybestfriends {
     private static final Set<ForcedChunk> chunksForcedByMod = ConcurrentHashMap.newKeySet();
     private static final Set<LocalSyncCandidate> localSyncCandidates = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, PendingPetSave> pendingPetSaves = new ConcurrentHashMap<>();
+    private static final Set<EntityNbtSaveFailure> reportedEntityNbtSaveFailures = ConcurrentHashMap.newKeySet();
     private static volatile boolean petIndexLoaded;
     private static final long PENDING_REMOVAL_TIMEOUT_TICKS = 100L;
 
@@ -396,6 +399,7 @@ public class trulybestfriends {
         trackedPetUUIDs.clear();
         blacklistedPetUUIDs.clear();
         forcedTrackingOwners.clear();
+        reportedEntityNbtSaveFailures.clear();
         petIndexLoaded = false;
     }
 
@@ -657,6 +661,8 @@ public class trulybestfriends {
     private record ForcedChunk(ServerLevel level, int chunkX, int chunkZ) {}
 
     private record LocalSyncCandidate(ResourceKey<Level> dimension, UUID entityUUID) {}
+
+    private record EntityNbtSaveFailure(UUID entityUUID, String exceptionType, String exceptionMessage) {}
 
     private static boolean hasPetFileInOtherOwnerDir(Path modDir, UUID currentOwnerUUID, UUID petUUID) {
         try {
@@ -963,8 +969,49 @@ public class trulybestfriends {
             if (ownerUUID != null) return ownerUUID;
         }
         // Compatibility: read ownership from configured top-level or nested NBT paths.
-        CompoundTag nbt = entity.saveWithoutId(new CompoundTag());
+        CompoundTag nbt;
+        try {
+            nbt = entity.saveWithoutId(new CompoundTag());
+        } catch (RuntimeException exception) {
+            reportEntityNbtSaveFailure(entity, exception);
+            return null;
+        }
         return OwnerNbtResolver.resolve(nbt, Config.ownerNbtPaths);
+    }
+
+    private static void reportEntityNbtSaveFailure(Entity entity, RuntimeException exception) {
+        Throwable rootCause = exception;
+        while (rootCause.getCause() != null && rootCause.getCause() != rootCause) {
+            rootCause = rootCause.getCause();
+        }
+
+        ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+        String entityType = typeId != null ? typeId.toString() : entity.getType().toString();
+        String exceptionType = rootCause.getClass().getName();
+        String exceptionName = rootCause.getClass().getSimpleName();
+        if (exceptionName.isEmpty()) exceptionName = exceptionType;
+        String exceptionMessage = rootCause.getMessage();
+        if (exceptionMessage == null || exceptionMessage.isBlank()) exceptionMessage = "<no message>";
+
+        EntityNbtSaveFailure failure = new EntityNbtSaveFailure(
+                entity.getUUID(), exceptionType, exceptionMessage);
+        if (!reportedEntityNbtSaveFailures.add(failure)) return;
+
+        LOGGER.error("Failed to serialize NBT for entity {} ({}, {}); skipping entity: {}: {}",
+                entity.getName().getString(), entityType, entity.getUUID(),
+                exceptionType, exceptionMessage, exception);
+
+        MinecraftServer server = entity.getServer();
+        if (!Config.enableLoginLoadDiagnostics || server == null) return;
+
+        Component message = Component.translatable(
+                        "trulybestfriends.diagnostics.entity_nbt_save_failed",
+                        entity.getName(), entityType, entity.getUUID().toString(),
+                        exceptionName, exceptionMessage)
+                .withStyle(ChatFormatting.RED);
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            player.sendSystemMessage(message);
+        }
     }
 
     public static boolean isOwnedBy(Entity entity, UUID ownerUUID) {
