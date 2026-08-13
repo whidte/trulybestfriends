@@ -137,7 +137,7 @@ public class Config
             .defineInRange("healMaxHealthFraction", 0.01, 0.0, 1.0);
 
     public static final ModConfigSpec.BooleanValue ENABLE_LOGIN_LOAD_DIAGNOSTICS = BUILDER
-            .comment("If true, validates all pet .nbt files on player login and logs counts. Debug only.")
+            .comment("If true, validates pet .nbt files on login and reports entity NBT serialization failures in chat. Debug only.")
             .define("enableLoginLoadDiagnostics", false);
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> AUTO_REGISTER_BLACKLIST = BUILDER

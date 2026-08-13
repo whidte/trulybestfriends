@@ -62,6 +62,7 @@
   "trulybestfriends.load.unblacklist_failed": "This entity is blacklisted, but the entry could not be removed.",
   "trulybestfriends.load.save_failed": "Failed to save pet data for this entity.",
   "trulybestfriends.load.not_enough_register_items": "Manual registration requires %s held item(s).",
+  "trulybestfriends.diagnostics.entity_nbt_save_failed": "Skipped entity %1$s (type: %2$s, UUID: %3$s): NBT serialization failed: %4$s: %5$s",
   "trulybestfriends.command.no_entity": "No usable entity is under the crosshair.",
   "trulybestfriends.command.unknown_entity_type": "Unable to resolve this entity's type.",
   "trulybestfriends.command.list.auto_register_blacklist": "autoRegisterBlacklist",

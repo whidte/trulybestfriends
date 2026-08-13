@@ -63,6 +63,7 @@
   "trulybestfriends.load.unblacklist_failed": "该实体已列入黑名单，但无法移除对应记录。",
   "trulybestfriends.load.save_failed": "保存该实体的宠物数据失败。",
   "trulybestfriends.load.not_enough_register_items": "手中至少需要 %s 个手动注册物品。",
+  "trulybestfriends.diagnostics.entity_nbt_save_failed": "已跳过实体 %1$s（类型：%2$s，UUID：%3$s）：NBT 序列化失败：%4$s：%5$s",
   "trulybestfriends.command.no_entity": "准星没有指向可用实体。",
   "trulybestfriends.command.unknown_entity_type": "无法读取该实体的类型。",
   "trulybestfriends.command.list.auto_register_blacklist": "autoRegisterBlacklist",
