@@ -40,6 +40,10 @@ class PetEntry extends AbstractWidget {
 		return screen.selectedPetIndex == index;
 	}
 
+	UUID petUuid() {
+		return screen.petUuids.get(index);
+	}
+
 	@Override
 	public void renderWidget(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
 		boolean isSelected = isSelected();

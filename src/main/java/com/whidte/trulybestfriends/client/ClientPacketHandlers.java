@@ -2,6 +2,7 @@ package com.whidte.trulybestfriends.client;
 
 import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
+import com.whidte.trulybestfriends.network.TeamDataPacket;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -53,6 +54,18 @@ public final class ClientPacketHandlers {
                 screen.applySyncPacket(applyPacket);
             } else {
                 TrulyScreen.cacheSyncPacket(applyPacket);
+            }
+        });
+        ctx.get().setPacketHandled(true);
+    }
+
+    public static void handle(TeamDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
+        ctx.get().enqueueWork(() -> {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.screen instanceof TrulyScreen screen) {
+                screen.applyTeamData(packet);
+            } else {
+                TrulyScreen.cacheTeamData(packet);
             }
         });
         ctx.get().setPacketHandled(true);

@@ -29,7 +29,7 @@
   "trulybestfriends.summon_to_player.label": "召唤",
   "trulybestfriends.ride_swap.label": "换乘",
   "trulybestfriends.squad.tooltip": "队伍",
-  "trulybestfriends.action.area_release": "队伍放出",
+  "trulybestfriends.action.squad_summon": "队伍召唤",
   "trulybestfriends.details.tooltip": "单项",
   "trulybestfriends.revive.label": "复活吧！",
   "trulybestfriends.revive.cooldown": "复活冷却 %s秒",

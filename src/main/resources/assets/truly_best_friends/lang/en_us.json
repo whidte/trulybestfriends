@@ -29,7 +29,7 @@
   "trulybestfriends.summon_to_player.label": "Summon",
   "trulybestfriends.ride_swap.label": "Swap Mount",
   "trulybestfriends.squad.tooltip": "Squad",
-  "trulybestfriends.action.area_release": "Release Squad",
+  "trulybestfriends.action.squad_summon": "Summon Squad",
   "trulybestfriends.details.tooltip": "Details",
   "trulybestfriends.revive.label": "Revive",
   "trulybestfriends.revive.cooldown": "Revive %ss left",

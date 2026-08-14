@@ -19,6 +19,9 @@ import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
+import static com.whidte.trulybestfriends.tab.TrulyConstants.DEFAULT_ROT_X;
+import static com.whidte.trulybestfriends.tab.TrulyConstants.DEFAULT_ROT_Y;
+
 /** Shared low-level rendering helpers used by multiple tab UI classes. */
 final class RenderHelper {
 
@@ -51,6 +54,46 @@ final class RenderHelper {
 		dispatcher.setRenderShadow(true);
 		g.pose().popPose();
 		Lighting.setupFor3DItems();
+	}
+
+	/**
+	 * Render a small pet preview (formation slot / drag ghost) using the same
+	 * pose logic as the pet-list entries, anchored by the entity's feet at (x, y).
+	 */
+	static void renderMiniPet(GuiGraphics g, int x, int y, float baseSize, LivingEntity pet) {
+		float scale = TrulyScreen.computePreviewScale(pet, baseSize);
+		boolean multipart = pet.getScale() > 1.0001f
+				|| (pet.getParts() != null && pet.getParts().length > 0);
+		Quaternionf quat;
+		Quaternionf quatPitch;
+		if (multipart) {
+			float pitch = multipartPitchRadians(DEFAULT_ROT_Y);
+			quat = buildMultipartPose(
+					detectMultipartYBase(pet) - DEFAULT_ROT_X * 20.0f * ((float) Math.PI / 180f),
+					pitch);
+			quatPitch = new Quaternionf().rotateX(-pitch);
+		} else {
+			quat = new Quaternionf().rotateZ((float) Math.PI)
+					.rotateX(DEFAULT_ROT_Y * 20.0f * ((float) Math.PI / 180f));
+			quatPitch = new Quaternionf().rotateX(DEFAULT_ROT_Y * 20.0f * ((float) Math.PI / 180f));
+		}
+
+		if (!multipart) {
+			pet.yBodyRot = 180.0f + DEFAULT_ROT_X * 20.0f;
+			pet.setYRot(180.0f + DEFAULT_ROT_X * 40.0f);
+			TrulyConstants.setXRotUnclamped(pet, -DEFAULT_ROT_Y * 20.0f);
+			pet.yHeadRot = pet.yBodyRot;
+			pet.yHeadRotO = pet.yBodyRot;
+		} else {
+			pet.yBodyRot = 0f;
+			pet.yBodyRotO = 0f;
+			pet.setYRot(0f);
+			pet.yRotO = 0f;
+			pet.yHeadRot = 0f;
+			pet.yHeadRotO = 0f;
+		}
+
+		renderEntityInInventory(g, x, y, scale, quat, quatPitch, pet);
 	}
 
 	/**

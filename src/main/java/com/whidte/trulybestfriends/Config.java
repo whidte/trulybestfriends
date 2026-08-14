@@ -73,8 +73,8 @@ public class Config
     public static final ForgeConfigSpec.IntValue MAX_PENDING_SUMMONS = BUILDER
             .comment("Max simultaneous pending summons per player for pets in unloaded chunks.",
                     "Also defines the number of numbered member slots in each of the eight formation teams.",
-                    "Team slot numbers range from 1 to this value. Effective pending cap = this value + 2 buffer (1-32, default 6).")
-            .defineInRange("maxPendingSummons", 6, 1, 32);
+                    "Team slot numbers range from 1 to this value (1-8, default 6). Effective pending cap = this value + 2 buffer.")
+            .defineInRange("maxPendingSummons", 6, 1, 8);
 
     public static final ForgeConfigSpec.ConfigValue<String> REVIVE_ITEM = BUILDER
             .comment("Item ID required to revive a dead pet (e.g. \"minecraft:totem_of_undying\").",

@@ -17,9 +17,13 @@ import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
 import com.whidte.trulybestfriends.network.ReleaseRecalledPetPacket;
 import com.whidte.trulybestfriends.network.RequestPetDataPacket;
+import com.whidte.trulybestfriends.network.RequestTeamDataPacket;
 import com.whidte.trulybestfriends.network.RevivePetPacket;
 import com.whidte.trulybestfriends.network.SetPriorityPacket;
+import com.whidte.trulybestfriends.network.SetTeamMemberPacket;
+import com.whidte.trulybestfriends.network.SummonTeamPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
+import com.whidte.trulybestfriends.network.TeamDataPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.TeleportToPetPacket;
 import net.minecraft.nbt.CompoundTag;
@@ -266,6 +270,13 @@ public class trulybestfriends {
         CHANNEL.registerMessage(10, DeletePetDataPacket.class, DeletePetDataPacket::encode, DeletePetDataPacket::decode, DeletePetDataPacket::handle);
         CHANNEL.registerMessage(11, ReleaseRecalledPetPacket.class, ReleaseRecalledPetPacket::encode, ReleaseRecalledPetPacket::decode, ReleaseRecalledPetPacket::handle);
         CHANNEL.registerMessage(12, DirectTeleportPetToPlayerPacket.class, DirectTeleportPetToPlayerPacket::encode, DirectTeleportPetToPlayerPacket::decode, DirectTeleportPetToPlayerPacket::handle);
+        CHANNEL.registerMessage(13, RequestTeamDataPacket.class, RequestTeamDataPacket::encode, RequestTeamDataPacket::decode, RequestTeamDataPacket::handle);
+        CHANNEL.registerMessage(14, SetTeamMemberPacket.class, SetTeamMemberPacket::encode, SetTeamMemberPacket::decode, SetTeamMemberPacket::handle);
+        CHANNEL.registerMessage(15, TeamDataPacket.class, TeamDataPacket::encode, TeamDataPacket::decode,
+                (packet, ctx) -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
+                });
+        CHANNEL.registerMessage(16, SummonTeamPacket.class, SummonTeamPacket::encode, SummonTeamPacket::decode, SummonTeamPacket::handle);
     }
 
     @SubscribeEvent
