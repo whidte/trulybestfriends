@@ -1,0 +1,49 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "NeoForge: Run Client",
+            "type": "shell",
+            "command": "${workspaceFolder}\\gradlew.bat",
+            "args": ["runClient"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": ["$javac"]
+        },
+        {
+            "label": "NeoForge: Run Server",
+            "type": "shell",
+            "command": "${workspaceFolder}\\gradlew.bat",
+            "args": ["runServer"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": ["$javac"]
+        },
+        {
+            "label": "NeoForge: Run Data",
+            "type": "shell",
+            "command": "${workspaceFolder}\\gradlew.bat",
+            "args": ["runData"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": ["$javac"]
+        },
+        {
+            "label": "NeoForge: Build",
+            "type": "shell",
+            "command": "${workspaceFolder}\\gradlew.bat",
+            "args": ["build"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$javac"]
+        }
+    ]
+}

@@ -105,22 +105,41 @@ final class TrulyConstants {
 	static final int SQUAD_X = SUMMON_TO_PLAYER_X + SUMMON_TO_PLAYER_W + 2;
 	/** Squad button Y offset relative to the tab panel top edge. */
 	static final int SQUAD_Y = SUMMON_TO_PLAYER_Y + (20 - SQUAD_SIZE) / 2;
-	/** Top-center 3x3 squad grid layout. The center cell is reserved for the release button. */
+	/** Top-center 3x3 squad grid layout, shifted 6px right and 2px down. */
 	static final int SQUAD_GRID_SLOT_SIZE = 18;
-	static final int SQUAD_GRID_SIZE = SQUAD_GRID_SLOT_SIZE * 3;
-	static final int SQUAD_GRID_X = (176 - SQUAD_GRID_SIZE) / 2;
-	static final int SQUAD_GRID_Y = 10;
-	static final int AREA_RELEASE_BUTTON_SIZE = 20;
-	static final int AREA_RELEASE_X = SQUAD_GRID_X + SQUAD_GRID_SLOT_SIZE
-			- (AREA_RELEASE_BUTTON_SIZE - SQUAD_GRID_SLOT_SIZE) / 2;
-	static final int AREA_RELEASE_Y = SQUAD_GRID_Y + SQUAD_GRID_SLOT_SIZE
-			- (AREA_RELEASE_BUTTON_SIZE - SQUAD_GRID_SLOT_SIZE) / 2;
+	static final int SQUAD_GRID_GAP = 4;
+	static final int SQUAD_GRID_STEP = SQUAD_GRID_SLOT_SIZE + SQUAD_GRID_GAP;
+	static final int SQUAD_GRID_SIZE = SQUAD_GRID_SLOT_SIZE * 3 + SQUAD_GRID_GAP * 2;
+	static final int SQUAD_GRID_X = (176 - SQUAD_GRID_SIZE) / 2 + 6;
+	static final int SQUAD_GRID_Y = 5 + 2;
+	/** Squad grid cells mapped to formation member slots (center cell unused). */
+	static final int[] SQUAD_CELL_SLOTS = {2, 1, 5, 3, -1, 6, 4, 8, 7};
+	/** 群体召唤按钮放在单项按钮左侧 3px 处，并与单项按钮垂直居中对齐。 */
+	static final int SQUAD_SUMMON_BUTTON_SIZE = 20;
+	static final int SQUAD_SUMMON_X = SQUAD_X - 3 - SQUAD_SUMMON_BUTTON_SIZE;
+	static final int SQUAD_SUMMON_Y = SQUAD_Y + (SQUAD_SIZE - SQUAD_SUMMON_BUTTON_SIZE) / 2;
+	/** Team selector button occupying the center cell of the expanded 3x3 panel,
+	 *  with the expanded panel inset 4px right and 4px down from the tab page corner. */
+	static final int TEAM_SELECTOR_BUTTON_SIZE = 18;
+	static final int TEAM_SELECTOR_PANEL_WIDTH = 58;
+	static final int TEAM_SELECTOR_PANEL_HEIGHT = 63;
+	static final int TEAM_SELECTOR_GRID_X = 2;
+	static final int TEAM_SELECTOR_GRID_Y = 2;
+	static final int TEAM_SELECTOR_CELL_WIDTH = 18;
+	static final int TEAM_SELECTOR_CELL_HEIGHT = 20;
+	static final int TEAM_SELECTOR_X = TEAM_SELECTOR_GRID_X + TEAM_SELECTOR_CELL_WIDTH + 4;
+	static final int TEAM_SELECTOR_Y = TEAM_SELECTOR_GRID_Y + TEAM_SELECTOR_CELL_HEIGHT + 4;
+	static final int TEAM_SELECTOR_FRAME_NORMAL_V = 60;
+	static final int TEAM_SELECTOR_FRAME_HOVERED_V = 78;
+	static final int TEAM_SELECTOR_FRAME_DISABLED_V = 96;
 
 	// --- Scale / Rotation ---
 	/** 普通宠物模型在界面中渲染时使用的基础缩放值。 */
 	static final float BASE_SCALE = 17f;
 	/** 列表条目中的宠物预览相对于基础缩放值的比例。 */
 	static final float LIST_ENTRY_SCALE_RATIO = 26f / 50f;
+	/** Squad slot pet rendering scale relative to the pet-list entry scale. */
+	static final float SQUAD_PET_SCALE_RATIO = LIST_ENTRY_SCALE_RATIO / 2f;
 	/** 宠物模型默认的水平旋转输入值，用于确定初始朝向。 */
 	static final float DEFAULT_ROT_X = -37f;
 	/** 宠物模型默认的垂直旋转输入值，用于确定初始俯仰角。 */
@@ -160,10 +179,14 @@ final class TrulyConstants {
 	/** 单项模式按钮图标。 */
 	static final ResourceLocation DETAILS_ICON =
 			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/details.png");
-	/** Squad formation slot and center release-button icon. */
+	/** Squad formation slot texture. */
 	static final ResourceLocation SQUAD_SLOT =
 			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/slot.png");
-	static final ResourceLocation AREA_RELEASE_ICON =
+	/** Vanilla bundle tooltip assembled into a fixed 3x3 team selector background. */
+	static final ResourceLocation TEAM_SELECTOR_BACKGROUND =
+			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/bundle_tooltip_3x3.png");
+	/** Squad summon button icon. */
+	static final ResourceLocation SQUAD_SUMMON_ICON =
 			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/release_bottle.png");
 	/** 村民交易界面使用的原版滚动滑块 sprite。 */
 	static final ResourceLocation SCROLLBAR_THUMB = ResourceLocation.withDefaultNamespace("container/villager/scroller");

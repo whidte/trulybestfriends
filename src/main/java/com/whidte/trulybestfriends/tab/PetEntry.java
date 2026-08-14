@@ -42,6 +42,10 @@ class PetEntry extends AbstractWidget {
 		return screen.selectedPetIndex == index;
 	}
 
+	UUID petUuid() {
+		return screen.petUuids.get(index);
+	}
+
 	@Override
 	public void renderWidget(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
 		boolean isSelected = isSelected();
@@ -131,10 +135,7 @@ class PetEntry extends AbstractWidget {
 		}
 		if (screen.selectedPetIndex != index) screen.deletePromptUuid = null;
 		screen.selectedPetIndex = index;
-		screen.healButton.visible = true;
-		screen.deleteButton.visible = true;
-		screen.actionButton.visible = true;
-		screen.summonToPlayerButton.visible = true;
+		screen.updateButtonVisibility();
 		screen.adjustScaleForCurrentPet();
 		screen.rotX = DEFAULT_ROT_X;
 		screen.rotY = DEFAULT_ROT_Y;

@@ -4,6 +4,7 @@ import com.whidte.trulybestfriends.compat.SableCompat;
 import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.SableSubLevelSyncPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
+import com.whidte.trulybestfriends.network.TeamDataPacket;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -61,6 +62,17 @@ public final class ClientPacketHandlers {
                 screen.applySyncPacket(applyPacket);
             } else {
                 TrulyScreen.cacheSyncPacket(applyPacket);
+            }
+        });
+    }
+
+    public static void handle(TeamDataPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.screen instanceof TrulyScreen screen) {
+                screen.applyTeamData(packet);
+            } else {
+                TrulyScreen.cacheTeamData(packet);
             }
         });
     }

@@ -10,7 +10,12 @@ import java.util.UUID;
 
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.compat.SableCompat;
+import com.whidte.trulybestfriends.network.PetTeamData;
+import com.whidte.trulybestfriends.network.RequestTeamDataPacket;
+import com.whidte.trulybestfriends.network.SetTeamMemberPacket;
+import com.whidte.trulybestfriends.network.TeamDataPacket;
 import com.whidte.trulybestfriends.trulybestfriends;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
@@ -18,6 +23,7 @@ import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -66,8 +72,20 @@ public class TrulyScreen extends Screen {
 	private SpeciesDropdown speciesFilterButton;
 	SquadButton squadButton;
 	DetailsButton detailsButton;
-	AreaReleaseButton areaReleaseButton;
+	SquadSummonButton squadSummonButton;
+	TeamSelectorButton teamSelectorButton;
 	boolean squadMode = false;
+	private int selectedTeamIndex;
+	private final Map<String, Map<Integer, UUID>> teamMembers = new java.util.HashMap<>();
+	private int teamCapacity = Config.maxPendingSummons;
+	private boolean squadDragPending;
+	private boolean squadDragConsumed;
+	private boolean squadDragging;
+	private boolean squadDragFromGrid;
+	private UUID squadDragUuid;
+	private int squadDragSourceSlot = -1;
+	private double squadDragStartX;
+	private double squadDragStartY;
 	private EditBox searchBox;
 	private SearchModeButton searchModeButton;
 	private boolean searchMode;
@@ -84,6 +102,9 @@ public class TrulyScreen extends Screen {
 
 	/** Full-list batches received before the screen was open. Applied in order on init(). */
 	private static final List<com.whidte.trulybestfriends.network.SyncPetDataPacket> pendingSyncPackets = new ArrayList<>();
+
+	/** Latest team data received while the screen was closed. Applied on next init(). */
+	private static TeamDataPacket pendingTeamData;
 
 	/** Cache state from before the current batched full-list snapshot. */
 	private Map<UUID, CompoundTag> fullListPreviousNbt;
@@ -237,6 +258,11 @@ public class TrulyScreen extends Screen {
 		UUID selectedUuid = getSelectedUuid();
 		lastRequestedSelection = selectedUuid;
 
+		if (pendingTeamData != null) {
+			applyTeamData(pendingTeamData);
+			pendingTeamData = null;
+		}
+
 		petUuids.clear();
 		petNbtCache.clear();
 		clearPreviewEntities();
@@ -270,6 +296,7 @@ public class TrulyScreen extends Screen {
 		if (mc.player != null && mc.getConnection() != null) {
 			PacketDistributor.sendToServer(
 					com.whidte.trulybestfriends.network.RequestPetDataPacket.requestFullList());
+			PacketDistributor.sendToServer(new RequestTeamDataPacket());
 		}
 
 		if (hasSelection()) {
@@ -290,8 +317,10 @@ public class TrulyScreen extends Screen {
 				this.leftPos + SQUAD_X, this.topPos + SQUAD_Y, this));
 		detailsButton = this.addRenderableWidget(new DetailsButton(
 				this.leftPos + SQUAD_X, this.topPos + SQUAD_Y, this));
-		areaReleaseButton = this.addRenderableWidget(new AreaReleaseButton(
-				this.leftPos + AREA_RELEASE_X, this.topPos + AREA_RELEASE_Y, this));
+		squadSummonButton = this.addRenderableWidget(new SquadSummonButton(
+				this.leftPos + SQUAD_SUMMON_X, this.topPos + SQUAD_SUMMON_Y, this));
+		teamSelectorButton = this.addRenderableWidget(new TeamSelectorButton(
+				this.leftPos + TEAM_SELECTOR_X, this.topPos + TEAM_SELECTOR_Y, this));
 		updateButtonVisibility();
 	}
 
@@ -587,7 +616,7 @@ public class TrulyScreen extends Screen {
 		return System.currentTimeMillis() + serverTimeOffsetMs;
 	}
 
-	private void updateButtonVisibility() {
+	void updateButtonVisibility() {
 		boolean has = hasSelection() && !squadMode;
 		if (healButton != null) healButton.visible = has;
 		if (deleteButton != null) deleteButton.visible = has;
@@ -595,17 +624,159 @@ public class TrulyScreen extends Screen {
 		if (summonToPlayerButton != null) summonToPlayerButton.visible = has;
 		if (squadButton != null) squadButton.visible = !squadMode;
 		if (detailsButton != null) detailsButton.visible = squadMode;
-		if (areaReleaseButton != null) areaReleaseButton.visible = squadMode;
+		if (squadSummonButton != null) squadSummonButton.visible = squadMode;
+		if (teamSelectorButton != null) teamSelectorButton.visible = squadMode;
 	}
 
 	void enterSquadMode() {
 		squadMode = true;
+		isDraggingEntity = false;
 		updateButtonVisibility();
 	}
 
 	void exitSquadMode() {
 		squadMode = false;
+		if (teamSelectorButton != null) teamSelectorButton.collapse();
 		updateButtonVisibility();
+	}
+
+	int selectedTeamIndex() {
+		return selectedTeamIndex;
+	}
+
+	void selectTeam(int teamIndex) {
+		selectedTeamIndex = Mth.clamp(teamIndex, 0, 7);
+		if (getMinecraft().player != null && getMinecraft().getConnection() != null) {
+			PacketDistributor.sendToServer(SetTeamMemberPacket.select(selectedTeamIndex));
+		}
+	}
+
+	// === Formation team data ===
+
+	/** Replace the cached formation team data with an authoritative server snapshot. */
+	public void applyTeamData(TeamDataPacket packet) {
+		CompoundTag data = packet.teamData();
+		if (data.contains("Capacity")) {
+			teamCapacity = Math.max(1, data.getInt("Capacity"));
+		}
+		if (data.contains("SelectedTeam", Tag.TAG_STRING)) {
+			int index = PetTeamData.TEAM_COLORS.indexOf(data.getString("SelectedTeam"));
+			if (index >= 0) selectedTeamIndex = index;
+		}
+		Map<String, Map<Integer, UUID>> rebuilt = new java.util.HashMap<>();
+		CompoundTag teams = data.contains("Teams", Tag.TAG_COMPOUND)
+				? data.getCompound("Teams") : new CompoundTag();
+		for (String color : PetTeamData.TEAM_COLORS) {
+			ListTag members = teams.getCompound(color).getList("Members", Tag.TAG_COMPOUND);
+			Map<Integer, UUID> slots = new java.util.HashMap<>();
+			for (Tag tag : members) {
+				CompoundTag member = (CompoundTag) tag;
+				if (member.hasUUID("UUID")) {
+					slots.put(member.getInt("Slot"), member.getUUID("UUID"));
+				}
+			}
+			rebuilt.put(color, slots);
+		}
+		teamMembers.clear();
+		teamMembers.putAll(rebuilt);
+	}
+
+	/** Cache team data received while the screen was closed. */
+	public static void cacheTeamData(TeamDataPacket packet) {
+		pendingTeamData = packet;
+	}
+
+	private String selectedTeamColor() {
+		return PetTeamData.TEAM_COLORS.get(selectedTeamIndex);
+	}
+
+	Map<Integer, UUID> selectedTeamSlots() {
+		return teamMembers.get(selectedTeamColor());
+	}
+
+	private UUID squadMemberAtSlot(int slot) {
+		Map<Integer, UUID> slots = selectedTeamSlots();
+		return slots != null ? slots.get(slot) : null;
+	}
+
+	/** Returns the formation slot under the mouse, or -1. */
+	private int squadSlotAt(double mouseX, double mouseY) {
+		int gridX = this.leftPos + SQUAD_GRID_X;
+		int gridY = this.topPos + SQUAD_GRID_Y;
+		for (int cell = 0; cell < SQUAD_CELL_SLOTS.length; cell++) {
+			if (SQUAD_CELL_SLOTS[cell] < 0) continue;
+			int column = cell % 3;
+			int row = cell / 3;
+			int x = gridX + column * SQUAD_GRID_STEP;
+			int y = gridY + row * SQUAD_GRID_STEP;
+			if (mouseX >= x && mouseX < x + SQUAD_GRID_SLOT_SIZE
+					&& mouseY >= y && mouseY < y + SQUAD_GRID_SLOT_SIZE) {
+				return SQUAD_CELL_SLOTS[cell];
+			}
+		}
+		return -1;
+	}
+
+	private PetEntry squadPetEntryAt(double mouseX, double mouseY) {
+		for (GuiEventListener child : this.children()) {
+			if (child instanceof PetEntry entry && entry.isMouseOver(mouseX, mouseY)) return entry;
+		}
+		return null;
+	}
+
+	private void assignSquadMemberLocally(String color, int slot, UUID uuid) {
+		Map<Integer, UUID> slots = teamMembers.computeIfAbsent(color, k -> new java.util.HashMap<>());
+		slots.entrySet().removeIf(entry -> uuid.equals(entry.getValue()) && entry.getKey() != slot);
+		slots.put(slot, uuid);
+	}
+
+	private void moveSquadMemberLocally(String color, int fromSlot, int toSlot) {
+		Map<Integer, UUID> slots = teamMembers.get(color);
+		if (slots == null) return;
+		UUID from = slots.get(fromSlot);
+		if (from == null) return;
+		UUID to = slots.get(toSlot);
+		if (to == null) slots.remove(fromSlot);
+		else slots.put(fromSlot, to);
+		slots.put(toSlot, from);
+	}
+
+	private void removeSquadMemberLocally(String color, UUID uuid) {
+		Map<Integer, UUID> slots = teamMembers.get(color);
+		if (slots == null) return;
+		slots.entrySet().removeIf(entry -> uuid.equals(entry.getValue()));
+	}
+
+	private void resolveSquadDrop(double mouseX, double mouseY) {
+		int slot = squadSlotAt(mouseX, mouseY);
+		String color = selectedTeamColor();
+		if (slot < 0) {
+			if (squadDragFromGrid && squadDragSourceSlot >= 0) {
+				removeSquadMemberLocally(color, squadDragUuid);
+				PacketDistributor.sendToServer(
+						SetTeamMemberPacket.remove(selectedTeamIndex, squadDragUuid));
+			}
+		} else if (squadDragFromGrid) {
+			if (squadDragSourceSlot >= 0 && squadDragSourceSlot != slot) {
+				moveSquadMemberLocally(color, squadDragSourceSlot, slot);
+				PacketDistributor.sendToServer(
+						SetTeamMemberPacket.move(selectedTeamIndex, squadDragSourceSlot, slot));
+			}
+		} else if (!squadDragUuid.equals(squadMemberAtSlot(slot))) {
+			Map<Integer, UUID> slots = selectedTeamSlots();
+			int count = slots != null ? slots.size() : 0;
+			boolean member = slots != null && slots.containsValue(squadDragUuid);
+			boolean occupied = squadMemberAtSlot(slot) != null;
+			if (count < teamCapacity || member || occupied) {
+				assignSquadMemberLocally(color, slot, squadDragUuid);
+			}
+			PacketDistributor.sendToServer(
+					SetTeamMemberPacket.assign(selectedTeamIndex, slot, squadDragUuid));
+		}
+		squadDragging = false;
+		squadDragFromGrid = false;
+		squadDragUuid = null;
+		squadDragSourceSlot = -1;
 	}
 
 	private void cleanExpiredCooldowns() {
@@ -763,6 +934,8 @@ public class TrulyScreen extends Screen {
 		this.renderBackground(g, mouseX, mouseY, partialTick);
 		g.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
 		if (!squadMode) {
+			RenderSystem.enableBlend();
+			RenderSystem.defaultBlendFunc();
 			g.blit(PET_PREVIEW_BACKGROUND,
 					this.leftPos + PET_PREVIEW_BACKGROUND_X,
 					this.topPos + PET_PREVIEW_BACKGROUND_Y,
@@ -847,23 +1020,47 @@ public class TrulyScreen extends Screen {
 		if (detailsButton != null) {
 			detailsButton.renderTooltip(g, mouseX, mouseY);
 		}
-		if (areaReleaseButton != null) {
-			areaReleaseButton.renderTooltip(g, mouseX, mouseY);
+		if (squadSummonButton != null) {
+			squadSummonButton.renderTooltip(g, mouseX, mouseY);
+		}
+		if (teamSelectorButton != null) {
+			teamSelectorButton.renderTooltip(g, mouseX, mouseY);
+		}
+		if (squadDragging && squadDragUuid != null) {
+			LivingEntity dragged = getPreviewEntity(squadDragUuid);
+			if (dragged != null) {
+				renderMiniPet(g, mouseX, mouseY + 8,
+						BASE_SCALE * SQUAD_PET_SCALE_RATIO, dragged);
+			}
 		}
 	}
 
 	private void renderSquadGrid(GuiGraphics g) {
 		int gridX = this.leftPos + SQUAD_GRID_X;
 		int gridY = this.topPos + SQUAD_GRID_Y;
-		for (int row = 0; row < 3; row++) {
-			for (int column = 0; column < 3; column++) {
-				if (row == 1 && column == 1) continue;
-				g.blit(SQUAD_SLOT,
-						gridX + column * SQUAD_GRID_SLOT_SIZE,
-						gridY + row * SQUAD_GRID_SLOT_SIZE,
-						0, 0,
-						SQUAD_GRID_SLOT_SIZE, SQUAD_GRID_SLOT_SIZE,
-						SQUAD_GRID_SLOT_SIZE, SQUAD_GRID_SLOT_SIZE);
+		Map<Integer, UUID> members = selectedTeamSlots();
+		for (int cell = 0; cell < SQUAD_CELL_SLOTS.length; cell++) {
+			if (SQUAD_CELL_SLOTS[cell] < 0) continue;
+			int column = cell % 3;
+			int row = cell / 3;
+			int x = gridX + column * SQUAD_GRID_STEP;
+			int y = gridY + row * SQUAD_GRID_STEP;
+			g.blit(SQUAD_SLOT,
+					x, y,
+					0, 0,
+					SQUAD_GRID_SLOT_SIZE, SQUAD_GRID_SLOT_SIZE,
+					SQUAD_GRID_SLOT_SIZE, SQUAD_GRID_SLOT_SIZE);
+			if (members != null) {
+				UUID uuid = members.get(SQUAD_CELL_SLOTS[cell]);
+				if (uuid != null) {
+					LivingEntity pet = getPreviewEntity(uuid);
+					if (pet != null) {
+						renderMiniPet(g,
+								x + SQUAD_GRID_SLOT_SIZE / 2,
+								y + SQUAD_GRID_SLOT_SIZE - 4,
+								BASE_SCALE * SQUAD_PET_SCALE_RATIO, pet);
+					}
+				}
 			}
 		}
 	}
@@ -1213,6 +1410,39 @@ public class TrulyScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(double mx, double my, int button) {
+		if (teamSelectorButton != null && teamSelectorButton.isExpanded()) {
+			if (teamSelectorButton.mouseClicked(mx, my, button)) return true;
+			teamSelectorButton.collapse();
+		}
+		if (button == 0 && squadMode) {
+			int slot = squadSlotAt(mx, my);
+			if (slot >= 0) {
+				UUID member = squadMemberAtSlot(slot);
+				if (member != null) {
+					squadDragPending = true;
+					squadDragConsumed = true;
+					squadDragging = false;
+					squadDragFromGrid = true;
+					squadDragUuid = member;
+					squadDragSourceSlot = slot;
+					squadDragStartX = mx;
+					squadDragStartY = my;
+					return true;
+				}
+			}
+			PetEntry entry = squadPetEntryAt(mx, my);
+			if (entry != null && entry.petUuid() != null) {
+				UUID uuid = entry.petUuid();
+				squadDragPending = true;
+				squadDragConsumed = false;
+				squadDragging = false;
+				squadDragFromGrid = false;
+				squadDragUuid = uuid;
+				squadDragSourceSlot = -1;
+				squadDragStartX = mx;
+				squadDragStartY = my;
+			}
+		}
 		if (speciesFilterButton != null && speciesFilterButton.mouseClicked(mx, my, button)) return true;
 		if (button == 0 && hasSelection() && isOverEntityPreview(mx, my)) {
 			isDraggingEntity = true;
@@ -1229,6 +1459,17 @@ public class TrulyScreen extends Screen {
 
 	@Override
 	public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+		if (squadDragging) return true;
+		if (squadDragPending && button == 0) {
+			double deltaX = mx - squadDragStartX;
+			double deltaY = my - squadDragStartY;
+			if (deltaX * deltaX + deltaY * deltaY > 16.0) {
+				squadDragging = true;
+				squadDragPending = false;
+				squadDragConsumed = false;
+				return true;
+			}
+		}
 		if (speciesFilterButton != null && speciesFilterButton.mouseDragged(mx, my, button, dx, dy)) return true;
 		if (isDraggingScrollbar) {
 			dragScrollbar(my);
@@ -1245,6 +1486,22 @@ public class TrulyScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(double mx, double my, int button) {
+		if (button == 0) {
+			if (squadDragging) {
+				resolveSquadDrop(mx, my);
+				return true;
+			}
+			if (squadDragPending) {
+				squadDragPending = false;
+				if (squadDragConsumed) {
+					squadDragConsumed = false;
+					squadDragFromGrid = false;
+					squadDragUuid = null;
+					squadDragSourceSlot = -1;
+					return true;
+				}
+			}
+		}
 		if (speciesFilterButton != null && speciesFilterButton.mouseReleased(mx, my, button)) return true;
 		if (button == 0) {
 			if (isDraggingEntity) { isDraggingEntity = false; return true; }
@@ -1254,6 +1511,7 @@ public class TrulyScreen extends Screen {
 	}
 
 	private boolean isOverEntityPreview(double mx, double my) {
+		if (squadMode) return false;
 		int ex = this.leftPos + ENTITY_PREVIEW_OFFSET_X;
 		int ey = this.topPos + ENTITY_PREVIEW_OFFSET_Y;
 		int s = 50;
