@@ -20,6 +20,7 @@ import com.whidte.trulybestfriends.network.RequestPetDataPacket;
 import com.whidte.trulybestfriends.network.RequestTeamDataPacket;
 import com.whidte.trulybestfriends.network.SableSubLevelSyncPacket;
 import com.whidte.trulybestfriends.network.RevivePetPacket;
+import com.whidte.trulybestfriends.network.SetLastSummonPacket;
 import com.whidte.trulybestfriends.network.SetPriorityPacket;
 import com.whidte.trulybestfriends.network.SetTeamMemberPacket;
 import com.whidte.trulybestfriends.network.SummonTeamPacket;
@@ -303,6 +304,7 @@ public class trulybestfriends {
         registrar.playToServer(RequestTeamDataPacket.TYPE, RequestTeamDataPacket.STREAM_CODEC, RequestTeamDataPacket::handle);
         registrar.playToServer(SetTeamMemberPacket.TYPE, SetTeamMemberPacket.STREAM_CODEC, SetTeamMemberPacket::handle);
         registrar.playToServer(SummonTeamPacket.TYPE, SummonTeamPacket.STREAM_CODEC, SummonTeamPacket::handle);
+        registrar.playToServer(SetLastSummonPacket.TYPE, SetLastSummonPacket.STREAM_CODEC, SetLastSummonPacket::handle);
         registrar.playToServer(SummonPetPacket.TYPE, SummonPetPacket.STREAM_CODEC, SummonPetPacket::handle);
         registrar.playToClient(TeamDataPacket.TYPE, TeamDataPacket.STREAM_CODEC,
                 (packet, ctx) -> {

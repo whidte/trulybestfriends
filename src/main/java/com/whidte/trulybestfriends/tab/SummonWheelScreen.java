@@ -3,6 +3,8 @@ package com.whidte.trulybestfriends.tab;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.whidte.trulybestfriends.client.SummonKeyHandler;
+import com.whidte.trulybestfriends.network.PetTeamData;
+import com.whidte.trulybestfriends.network.SummonTeamPacket;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -11,9 +13,11 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.neoforged.neoforge.network.PacketDistributor;
 import org.joml.Quaternionf;
 import org.lwjgl.glfw.GLFW;
 
@@ -41,19 +45,22 @@ public final class SummonWheelScreen extends Screen {
             "truly_best_friends", "textures/gui/imperial_order.png");
     private static final ResourceLocation WORLD_IN_A_BOTTLE = ResourceLocation.fromNamespaceAndPath(
             "truly_best_friends", "textures/gui/world_in_a_bottle.png");
+    private static final ResourceLocation RELEASE_BOTTLE = ResourceLocation.fromNamespaceAndPath(
+            "truly_best_friends", "textures/gui/release_bottle.png");
     private static final int WHEEL_SIZE = 90;
     private static final int IMPERIAL_ORDER_SIZE = 50;
     private static final int CENTER_BOTTLE_SIZE = 16;
     private static final int SLOT_SIZE = 40;
     private static final int DEAD_ZONE_RADIUS = 18;
+    private static final int CENTER_NAME_MAX_WIDTH = 44;
     private static final int[] DIRECTION_SLOTS = {1, 5, 6, 7, 8, 4, 3, 2};
     private static final int[][] SLOT_OFFSETS = {
             {0, -62}, {50, -50}, {62, 0}, {50, 50},
             {0, 62}, {-50, 50}, {-62, 0}, {-50, -50}
     };
     private static final int[][] POINTER_CLIPS = {
-            {33, 0, 57, 18}, {55, 0, 90, 35}, {72, 33, 90, 57}, {55, 55, 90, 90},
-            {33, 72, 57, 90}, {0, 55, 35, 90}, {0, 33, 18, 57}, {0, 0, 35, 35}
+            {33, 0, 57, 18}, {57, 15, 76, 32}, {72, 33, 90, 57}, {57, 57, 76, 75},
+            {33, 72, 57, 90}, {14, 57, 32, 75}, {0, 33, 18, 57}, {14, 15, 32, 32}
     };
     private static final Quaternionf NORMAL_QUAT = new Quaternionf().rotateZ((float) Math.PI)
             .rotateX(DEFAULT_ROT_Y * 20.0F * ((float) Math.PI / 180F));
@@ -86,6 +93,9 @@ public final class SummonWheelScreen extends Screen {
     @Override
     protected void init() {
         super.init();
+        if (minecraft != null && minecraft.player != null) {
+            minecraft.player.playSound(SoundEvents.BOOK_PAGE_TURN, 1.0F, 1.0F);
+        }
         for (int i = 0; i < movementKeys.length; i++) {
             movementKeys[i].setDown(movementKeysHeldOnOpen[i]);
         }
@@ -100,6 +110,7 @@ public final class SummonWheelScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        this.renderBackground(graphics, mouseX, mouseY, partialTick);
         int centerX = width / 2;
         int centerY = height / 2;
         Map<Integer, UUID> members = SummonWheelData.selectedTeamSlots();
@@ -112,6 +123,9 @@ public final class SummonWheelScreen extends Screen {
             int slotY = centerY + SLOT_OFFSETS[direction][1] - SLOT_SIZE / 2;
             LivingEntity entity = previewEntity(uuid);
             if (entity != null) {
+                if (direction == selectedDirection) {
+                    renderSelectedBorder(graphics, slotX, slotY);
+                }
                 float brightness = direction == selectedDirection ? 1.0F : 0.35F;
                 RenderSystem.setShaderColor(brightness, brightness, brightness, 1.0F);
                 try {
@@ -127,11 +141,16 @@ public final class SummonWheelScreen extends Screen {
         graphics.pose().pushPose();
         graphics.pose().translate(0.0F, 0.0F, 100.0F);
         try {
-            graphics.blit(IMPERIAL_ORDER,
-                    centerX - IMPERIAL_ORDER_SIZE / 2, centerY - IMPERIAL_ORDER_SIZE / 2,
-                    0, 0, IMPERIAL_ORDER_SIZE, IMPERIAL_ORDER_SIZE,
-                    IMPERIAL_ORDER_SIZE, IMPERIAL_ORDER_SIZE);
-            graphics.blit(WHEEL, wheelX, wheelY, 0, 0, WHEEL_SIZE, WHEEL_SIZE, WHEEL_SIZE, WHEEL_SIZE);
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+            try {
+                graphics.blit(IMPERIAL_ORDER,
+                        centerX - IMPERIAL_ORDER_SIZE / 2, centerY - IMPERIAL_ORDER_SIZE / 2,
+                        0, 0, IMPERIAL_ORDER_SIZE, IMPERIAL_ORDER_SIZE,
+                        IMPERIAL_ORDER_SIZE, IMPERIAL_ORDER_SIZE);
+            } finally {
+                RenderSystem.disableBlend();
+            }
             RenderSystem.setShaderColor(0.35F, 0.35F, 0.35F, 1.0F);
             graphics.blit(POINTER, wheelX, wheelY, 0, 0, WHEEL_SIZE, WHEEL_SIZE, WHEEL_SIZE, WHEEL_SIZE);
             RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
@@ -145,10 +164,38 @@ public final class SummonWheelScreen extends Screen {
                     graphics.disableScissor();
                 }
             }
-            graphics.blit(WORLD_IN_A_BOTTLE,
-                    centerX - CENTER_BOTTLE_SIZE / 2, centerY - CENTER_BOTTLE_SIZE / 2,
-                    0, 0, CENTER_BOTTLE_SIZE, CENTER_BOTTLE_SIZE,
-                    CENTER_BOTTLE_SIZE, CENTER_BOTTLE_SIZE);
+            graphics.blit(WHEEL, wheelX, wheelY, 0, 0, WHEEL_SIZE, WHEEL_SIZE, WHEEL_SIZE, WHEEL_SIZE);
+            if (selectedDirection >= 0) {
+                UUID selected = members.get(DIRECTION_SLOTS[selectedDirection]);
+                if (selected != null) {
+                    LivingEntity entity = previewEntity(selected);
+                    if (entity != null) {
+                        renderPet(graphics, centerX - SLOT_SIZE / 2,
+                                centerY - SLOT_SIZE / 2 - 10, entity);
+                    }
+                    renderCenterName(graphics, petName(selected), centerX, centerY);
+                    renderHalfSizeCentered(graphics,
+                            Component.translatable("trulybestfriends.wheel.release_summon"),
+                            centerX, centerY + 11, 0xAAAAAA);
+                    renderHalfSizeCentered(graphics,
+                            Component.translatable("trulybestfriends.wheel.cancel"),
+                            centerX, centerY + 86, 0xFFFFFF);
+                }
+            } else {
+                boolean bottleHovered = isOverBottle(mouseX, mouseY);
+                graphics.blit(bottleHovered ? RELEASE_BOTTLE : WORLD_IN_A_BOTTLE,
+                        centerX - CENTER_BOTTLE_SIZE / 2, centerY - CENTER_BOTTLE_SIZE / 2 - 10,
+                        0, 0, CENTER_BOTTLE_SIZE, CENTER_BOTTLE_SIZE,
+                        CENTER_BOTTLE_SIZE, CENTER_BOTTLE_SIZE);
+                renderHalfSizeCentered(graphics,
+                        Component.translatable(bottleHovered
+                                ? "trulybestfriends.wheel.summon_team"
+                                : "trulybestfriends.wheel.select_pet"),
+                        centerX, centerY + 11, 0xAAAAAA);
+                renderHalfSizeCentered(graphics,
+                        Component.translatable("trulybestfriends.wheel.cancel"),
+                        centerX, centerY + 86, 0xFFFFFF);
+            }
         } finally {
             RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
             graphics.pose().popPose();
@@ -161,6 +208,51 @@ public final class SummonWheelScreen extends Screen {
         int direction = Math.floorMod((int) Math.floor(
                 (clockwiseFromNorth + Math.PI / 8.0) / (Math.PI / 4.0)), 8);
         return members.containsKey(DIRECTION_SLOTS[direction]) ? direction : -1;
+    }
+
+    /** Display name matching the pet list: CustomName when present, else entity type name. */
+    private Component petName(UUID uuid) {
+        CompoundTag nbt = SummonWheelData.petNbt(uuid);
+        if (nbt == null) return Component.empty();
+        if (nbt.contains("CustomName") && minecraft != null && minecraft.level != null) {
+            try {
+                return Component.Serializer.fromJson(nbt.getString("CustomName"), minecraft.level.registryAccess());
+            } catch (Exception ignored) {}
+        }
+        String typeKey = nbt.getString("EntityType");
+        if (!typeKey.isEmpty()) {
+            ResourceLocation id = ResourceLocation.tryParse(typeKey);
+            EntityType<?> type = id != null ? BuiltInRegistries.ENTITY_TYPE.get(id) : null;
+            if (type != null) return type.getDescription();
+        }
+        return Component.literal("???");
+    }
+
+    /** Pet-list style name rendering inside the wheel center: scrolls when too long. */
+    private void renderCenterName(GuiGraphics graphics, Component name, int centerX, int centerY) {
+        int textWidth = font.width(name);
+        int nameX = centerX - CENTER_NAME_MAX_WIDTH / 2;
+        int nameY = centerY + 2;
+        graphics.enableScissor(nameX, nameY - 1, nameX + CENTER_NAME_MAX_WIDTH, nameY + 10);
+        try {
+            if (textWidth <= CENTER_NAME_MAX_WIDTH) {
+                graphics.drawCenteredString(font, name, centerX, nameY, 0xFFFFFF);
+            } else {
+                int scrollOffset = RenderHelper.scrollingOffset(textWidth - CENTER_NAME_MAX_WIDTH + 12);
+                graphics.drawString(font, name, nameX - scrollOffset, nameY, 0xFFFFFF);
+            }
+        } finally {
+            graphics.disableScissor();
+        }
+    }
+
+    /** Half-size centered hint text (pose-scaled 0.5x). */
+    private void renderHalfSizeCentered(GuiGraphics graphics, Component text, int centerX, int y, int color) {
+        graphics.pose().pushPose();
+        graphics.pose().translate(centerX, y, 0.0F);
+        graphics.pose().scale(0.5F, 0.5F, 1.0F);
+        graphics.drawCenteredString(font, text, 0, 0, color);
+        graphics.pose().popPose();
     }
 
     private LivingEntity previewEntity(UUID uuid) {
@@ -180,6 +272,14 @@ public final class SummonWheelScreen extends Screen {
         }
         previewEntities.put(uuid, living);
         return living;
+    }
+
+    /** 1px white border matching the pet-list selected frame, drawn under the pet. */
+    private static void renderSelectedBorder(GuiGraphics graphics, int x, int y) {
+        graphics.fill(x, y, x + SLOT_SIZE, y + 1, 0xFFFFFFFF);
+        graphics.fill(x, y + SLOT_SIZE - 1, x + SLOT_SIZE, y + SLOT_SIZE, 0xFFFFFFFF);
+        graphics.fill(x, y, x + 1, y + SLOT_SIZE, 0xFFFFFFFF);
+        graphics.fill(x + SLOT_SIZE - 1, y, x + SLOT_SIZE, y + SLOT_SIZE, 0xFFFFFFFF);
     }
 
     private static void renderPet(GuiGraphics graphics, int x, int y, LivingEntity pet) {
@@ -219,8 +319,40 @@ public final class SummonWheelScreen extends Screen {
         completed = true;
         Map<Integer, UUID> members = SummonWheelData.selectedTeamSlots();
         UUID selected = selectedDirection >= 0 ? members.get(DIRECTION_SLOTS[selectedDirection]) : null;
+        int slot = selected != null ? DIRECTION_SLOTS[selectedDirection] : -1;
         if (selected != null && !SummonWheelData.isSummonable(selected)) selected = null;
-        SummonKeyHandler.completeWheel(this, selected);
+        SummonKeyHandler.completeWheel(this, selected, slot);
+    }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (button == 1) {
+            completed = true;
+            SummonKeyHandler.completeWheel(this, null, -1);
+            return true;
+        }
+        if (button == 0) {
+            if (selectedDirection >= 0) {
+                finishSelection();
+                return true;
+            }
+            if (isOverBottle(mouseX, mouseY)) {
+                completed = true;
+                int colorIndex = PetTeamData.TEAM_COLORS.indexOf(SummonWheelData.selectedTeamColor());
+                PacketDistributor.sendToServer(new SummonTeamPacket(colorIndex));
+                SummonKeyHandler.completeWheel(this, null, -1);
+                return true;
+            }
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    private boolean isOverBottle(double mouseX, double mouseY) {
+        int centerX = width / 2;
+        int centerY = height / 2;
+        return mouseX >= centerX - CENTER_BOTTLE_SIZE / 2 && mouseX < centerX + CENTER_BOTTLE_SIZE / 2
+                && mouseY >= centerY - CENTER_BOTTLE_SIZE / 2 - 10
+                && mouseY < centerY + CENTER_BOTTLE_SIZE / 2 - 10;
     }
 
     @Override
@@ -262,7 +394,7 @@ public final class SummonWheelScreen extends Screen {
     public void onClose() {
         if (!completed) {
             completed = true;
-            SummonKeyHandler.completeWheel(this, null);
+            SummonKeyHandler.completeWheel(this, null, -1);
         }
     }
 

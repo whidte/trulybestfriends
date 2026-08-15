@@ -118,6 +118,16 @@ public final class PetTeamData {
         return commit(ownerDir, raw);
     }
 
+    /** Persists the last wheel-summoned member as team color + slot number. */
+    public static synchronized CompoundTag setLastSummon(Path ownerDir, String color, int slot) throws IOException {
+        CompoundTag raw = readRaw(ownerDir);
+        CompoundTag lastSummon = new CompoundTag();
+        lastSummon.putString("Color", color);
+        lastSummon.putInt("Slot", slot);
+        raw.put("LastSummon", lastSummon);
+        return commit(ownerDir, raw);
+    }
+
     private static CompoundTag readRaw(Path ownerDir) throws IOException {
         File file = ownerDir.resolve(FILE_NAME).toFile();
         return file.exists() ? NbtFileIO.readCompressed(file) : new CompoundTag();
@@ -173,6 +183,21 @@ public final class PetTeamData {
             selectedTeam = TEAM_COLORS.get(0);
         }
         normalized.putString("SelectedTeam", selectedTeam);
+
+        CompoundTag sourceLastSummon = source.contains("LastSummon", Tag.TAG_COMPOUND)
+                ? source.getCompound("LastSummon") : new CompoundTag();
+        CompoundTag lastSummon = new CompoundTag();
+        String lastColor = sourceLastSummon.getString("Color");
+        if (!TEAM_COLORS.contains(lastColor)) {
+            lastColor = "";
+        }
+        int lastSlot = sourceLastSummon.getInt("Slot");
+        if (lastSlot < 1 || lastSlot > GRID_SLOT_COUNT) {
+            lastSlot = 0;
+        }
+        lastSummon.putString("Color", lastColor);
+        lastSummon.putInt("Slot", lastSlot);
+        normalized.put("LastSummon", lastSummon);
 
         CompoundTag sourceTeams = source.contains("Teams", Tag.TAG_COMPOUND)
                 ? source.getCompound("Teams") : new CompoundTag();

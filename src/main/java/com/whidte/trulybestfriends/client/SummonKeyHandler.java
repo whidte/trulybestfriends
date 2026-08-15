@@ -3,9 +3,12 @@ package com.whidte.trulybestfriends.client;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.math.Axis;
 import com.whidte.trulybestfriends.Config;
+import com.whidte.trulybestfriends.network.PetTeamData;
 import com.whidte.trulybestfriends.network.RequestPetDataPacket;
 import com.whidte.trulybestfriends.network.RequestTeamDataPacket;
+import com.whidte.trulybestfriends.network.SetLastSummonPacket;
 import com.whidte.trulybestfriends.network.SummonPetPacket;
+import com.whidte.trulybestfriends.tab.SummonWheelData;
 import com.whidte.trulybestfriends.tab.SummonWheelScreen;
 import net.minecraft.Util;
 import net.minecraft.client.KeyMapping;
@@ -61,6 +64,9 @@ public final class SummonKeyHandler {
                 || minecraft.screen != null) return;
         refreshPlayer(minecraft.player.getUUID());
         requestSnapshots();
+        if (lastSummonedPet == null) {
+            lastSummonedPet = SummonWheelData.resolveLastSummon();
+        }
         if (lastSummonedPet == null) {
             openWheel();
         } else {
@@ -195,11 +201,17 @@ public final class SummonKeyHandler {
         return SUMMON_KEY.matches(keyCode, scanCode);
     }
 
-    public static void completeWheel(SummonWheelScreen wheel, UUID selectedPet) {
+    public static void completeWheel(SummonWheelScreen wheel, UUID selectedPet, int selectedSlot) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.screen == wheel) minecraft.setScreen(null);
         state = State.IDLE;
-        if (selectedPet != null) sendSummon(selectedPet);
+        if (selectedPet != null) {
+            sendSummon(selectedPet);
+            if (selectedSlot >= 1) {
+                int colorIndex = PetTeamData.TEAM_COLORS.indexOf(SummonWheelData.selectedTeamColor());
+                PacketDistributor.sendToServer(new SetLastSummonPacket(colorIndex, selectedSlot));
+            }
+        }
     }
 
     public static void wheelRemoved(SummonWheelScreen wheel) {

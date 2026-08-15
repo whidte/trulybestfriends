@@ -86,6 +86,8 @@ public class TrulyScreen extends Screen {
 	private int squadDragSourceSlot = -1;
 	private double squadDragStartX;
 	private double squadDragStartY;
+	private int previousHoveredEmptySlot = -1;
+	private long emptySlotHoverStartMillis = -1L;
 	private EditBox searchBox;
 	private SearchModeButton searchModeButton;
 	private boolean searchMode;
@@ -943,7 +945,7 @@ public class TrulyScreen extends Screen {
 					PET_PREVIEW_BACKGROUND_SIZE, PET_PREVIEW_BACKGROUND_SIZE,
 					PET_PREVIEW_BACKGROUND_SIZE, PET_PREVIEW_BACKGROUND_SIZE);
 		} else {
-			renderSquadGrid(g);
+			renderSquadGrid(g, mouseX, mouseY);
 		}
 		PetEntry selectedEntry = null;
 		SpeciesDropdown speciesDropdown = null;
@@ -1033,12 +1035,41 @@ public class TrulyScreen extends Screen {
 						BASE_SCALE * SQUAD_PET_SCALE_RATIO, dragged);
 			}
 		}
+		renderEmptySlotTooltip(g, mouseX, mouseY);
 	}
 
-	private void renderSquadGrid(GuiGraphics g) {
+	/** Hover tooltip for empty formation slots: add hints, or the red full-team warning. */
+	private void renderEmptySlotTooltip(GuiGraphics g, int mouseX, int mouseY) {
+		Map<Integer, UUID> members = selectedTeamSlots();
+		int slot = squadMode ? squadSlotAt(mouseX, mouseY) : -1;
+		boolean empty = slot >= 0 && (members == null || !members.containsKey(slot));
+		int hovered = empty ? slot : -1;
+		long now = System.currentTimeMillis();
+		if (hovered != previousHoveredEmptySlot) {
+			previousHoveredEmptySlot = hovered;
+			emptySlotHoverStartMillis = now;
+		}
+		if (hovered < 0 || now - emptySlotHoverStartMillis < 1000L) return;
+
+		int count = members != null ? members.size() : 0;
+		if (count >= teamCapacity) {
+			g.renderTooltip(font, Component.translatable("trulybestfriends.squad.slot_hint_full")
+					.withStyle(net.minecraft.ChatFormatting.RED), mouseX, mouseY);
+		} else if (hasSelection()) {
+			List<net.minecraft.util.FormattedCharSequence> lines = new ArrayList<>();
+			lines.add(Component.translatable("trulybestfriends.squad.slot_hint_add").getVisualOrderText());
+			lines.add(Component.translatable("trulybestfriends.squad.slot_hint_drag").getVisualOrderText());
+			g.renderTooltip(font, lines, mouseX, mouseY);
+		}
+	}
+
+	private void renderSquadGrid(GuiGraphics g, int mouseX, int mouseY) {
 		int gridX = this.leftPos + SQUAD_GRID_X;
 		int gridY = this.topPos + SQUAD_GRID_Y;
 		Map<Integer, UUID> members = selectedTeamSlots();
+		boolean showPlus = hasSelection() && members != null
+				&& members.size() < teamCapacity;
+		int hoveredSlot = squadSlotAt(mouseX, mouseY);
 		for (int cell = 0; cell < SQUAD_CELL_SLOTS.length; cell++) {
 			if (SQUAD_CELL_SLOTS[cell] < 0) continue;
 			int column = cell % 3;
@@ -1052,7 +1083,14 @@ public class TrulyScreen extends Screen {
 					SQUAD_GRID_SLOT_SIZE, SQUAD_GRID_SLOT_SIZE);
 			if (members != null) {
 				UUID uuid = members.get(SQUAD_CELL_SLOTS[cell]);
-				if (uuid != null) {
+				if (uuid == null) {
+					if (showPlus && SQUAD_CELL_SLOTS[cell] == hoveredSlot) {
+						g.blit(PLUS_SIGN,
+								x + (SQUAD_GRID_SLOT_SIZE - 16) / 2,
+								y + (SQUAD_GRID_SLOT_SIZE - 16) / 2,
+								0, 0, 16, 16, 16, 16);
+					}
+				} else {
 					LivingEntity pet = getPreviewEntity(uuid);
 					if (pet != null) {
 						renderMiniPet(g,
@@ -1428,6 +1466,16 @@ public class TrulyScreen extends Screen {
 					squadDragStartX = mx;
 					squadDragStartY = my;
 					return true;
+				}
+				Map<Integer, UUID> slots = selectedTeamSlots();
+				if (hasSelection() && slots != null && slots.size() < teamCapacity) {
+					UUID uuid = getSelectedUuid();
+					if (uuid != null) {
+						assignSquadMemberLocally(selectedTeamColor(), slot, uuid);
+						PacketDistributor.sendToServer(
+								SetTeamMemberPacket.assign(selectedTeamIndex, slot, uuid));
+						return true;
+					}
 				}
 			}
 			PetEntry entry = squadPetEntryAt(mx, my);
