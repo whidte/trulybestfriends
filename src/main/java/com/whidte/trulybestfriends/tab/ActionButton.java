@@ -24,8 +24,10 @@ class ActionButton extends AbstractWidget {
 	private static final ResourceLocation ICON_SUMMON = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/world_in_a_bottle.png");
 	private static final ResourceLocation ICON_AREA_RECALL = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/absorption_bottle.png");
 	private static final int ICON_SIZE = 16;
+	private static final long HOVER_DELAY_MILLIS = 1000L;
 
 	private final TrulyScreen screen;
+	private long hoverStartMillis = -1L;
 
 	public ActionButton(int x, int y, TrulyScreen screen) {
 		super(x, y, 20, 20, Component.empty());
@@ -110,8 +112,16 @@ class ActionButton extends AbstractWidget {
 		guiGraphics.blit(icon, iconX, iconY, 0, 0, ICON_SIZE, ICON_SIZE, ICON_SIZE, ICON_SIZE);
 
 		if (mouseX >= getX() && mouseX <= getX() + width && mouseY >= getY() && mouseY <= getY() + height) {
-			Component tooltip = shiftHeld ? getAreaRecallTooltip() : getDynamicTooltip();
-			guiGraphics.renderTooltip(screen.font(), tooltip, mouseX, mouseY);
+			long now = System.currentTimeMillis();
+			if (hoverStartMillis < 0L) {
+				hoverStartMillis = now;
+			}
+			if (shiftHeld || now - hoverStartMillis >= HOVER_DELAY_MILLIS) {
+				Component tooltip = shiftHeld ? getAreaRecallTooltip() : getDynamicTooltip();
+				guiGraphics.renderTooltip(screen.font(), tooltip, mouseX, mouseY);
+			}
+		} else {
+			hoverStartMillis = -1L;
 		}
 	}
 

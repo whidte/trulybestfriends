@@ -65,9 +65,18 @@ public final class SummonWheelData {
     }
 
     static Map<Integer, UUID> selectedTeamSlots() {
-        Map<Integer, UUID> result = new LinkedHashMap<>();
+        return teamSlots(selectedTeamColor());
+    }
+
+    /** Team color currently selected in the formation tab. */
+    public static String selectedTeamColor() {
         String color = teamData.getString("SelectedTeam");
         if (!PetTeamData.TEAM_COLORS.contains(color)) color = PetTeamData.TEAM_COLORS.get(0);
+        return color;
+    }
+
+    static Map<Integer, UUID> teamSlots(String color) {
+        Map<Integer, UUID> result = new LinkedHashMap<>();
         CompoundTag teams = teamData.contains("Teams", Tag.TAG_COMPOUND)
                 ? teamData.getCompound("Teams") : new CompoundTag();
         ListTag members = teams.getCompound(color).getList("Members", Tag.TAG_COMPOUND);
@@ -76,5 +85,16 @@ public final class SummonWheelData {
             if (member.hasUUID("UUID")) result.put(member.getInt("Slot"), member.getUUID("UUID"));
         }
         return result;
+    }
+
+    /** Resolves the persisted last summon (team color + slot) to a pet UUID, or null. */
+    public static UUID resolveLastSummon() {
+        CompoundTag lastSummon = teamData.contains("LastSummon", Tag.TAG_COMPOUND)
+                ? teamData.getCompound("LastSummon") : null;
+        if (lastSummon == null) return null;
+        String color = lastSummon.getString("Color");
+        int slot = lastSummon.getInt("Slot");
+        if (!PetTeamData.TEAM_COLORS.contains(color) || slot < 1) return null;
+        return teamSlots(color).get(slot);
     }
 }

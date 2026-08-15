@@ -18,7 +18,10 @@ import java.util.List;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 
 class HealButton extends AbstractWidget {
+    private static final long HOVER_DELAY_MILLIS = 1000L;
+
     private final TrulyScreen screen;
+    private long hoverStartMillis = -1L;
 
     HealButton(int x, int y, TrulyScreen screen) {
         super(x, y, 20, 20, Component.translatable("effect.minecraft.regeneration"));
@@ -37,7 +40,17 @@ class HealButton extends AbstractWidget {
                 HEAL_BUTTON_SIZE, HEAL_BUTTON_SIZE, HEAL_BUTTON_SIZE, HEAL_BUTTON_SIZE);
         if (mouseX >= getX() && mouseX <= getX() + width
                 && mouseY >= getY() && mouseY <= getY() + height) {
-            graphics.renderComponentTooltip(screen.font(), tooltip(disabledReason, advanced), mouseX, mouseY);
+            long now = System.currentTimeMillis();
+            if (hoverStartMillis < 0L) {
+                hoverStartMillis = now;
+            }
+            CompoundTag nbt = screen.getSelectedNbt();
+            int remaining = nbt != null ? PetHealingManager.getRemainingTicks(nbt, advanced) : 0;
+            if (remaining > 0 || now - hoverStartMillis >= HOVER_DELAY_MILLIS) {
+                graphics.renderComponentTooltip(screen.font(), tooltip(disabledReason, advanced), mouseX, mouseY);
+            }
+        } else {
+            hoverStartMillis = -1L;
         }
     }
 

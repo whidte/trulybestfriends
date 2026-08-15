@@ -46,6 +46,20 @@ public final class PetTeamDataTest {
         source.putString("SelectedTeam", "not_a_color");
         CompoundTag reselectedInvalid = PetTeamData.normalize(source, 6, Set.of(first, second)::contains);
         require("white".equals(reselectedInvalid.getString("SelectedTeam")), "invalid selected team not reset");
+        require(normalized.getCompound("LastSummon").getString("Color").isEmpty()
+                        && normalized.getCompound("LastSummon").getInt("Slot") == 0,
+                "default last summon not empty");
+
+        source.put("LastSummon", lastSummon("purple", 5));
+        CompoundTag withLast = PetTeamData.normalize(source, 6, Set.of(first, second)::contains);
+        require("purple".equals(withLast.getCompound("LastSummon").getString("Color"))
+                        && withLast.getCompound("LastSummon").getInt("Slot") == 5,
+                "last summon not persisted");
+        source.put("LastSummon", lastSummon("not_a_color", 99));
+        CompoundTag invalidLast = PetTeamData.normalize(source, 6, Set.of(first, second)::contains);
+        require(invalidLast.getCompound("LastSummon").getString("Color").isEmpty()
+                        && invalidLast.getCompound("LastSummon").getInt("Slot") == 0,
+                "invalid last summon not reset");
         CompoundTag normalizedTeams = normalized.getCompound("Teams");
         require(normalizedTeams.getAllKeys().containsAll(PetTeamData.TEAM_COLORS), "not all eight teams exist");
         require(normalizedTeams.getList("unused", Tag.TAG_COMPOUND).isEmpty(), "unexpected root member list");
@@ -93,6 +107,13 @@ public final class PetTeamDataTest {
         member.putInt("Slot", slot);
         member.putUUID("UUID", uuid);
         return member;
+    }
+
+    private static CompoundTag lastSummon(String color, int slot) {
+        CompoundTag tag = new CompoundTag();
+        tag.putString("Color", color);
+        tag.putInt("Slot", slot);
+        return tag;
     }
 
     private static void require(boolean condition, String message) {

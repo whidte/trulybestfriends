@@ -19,6 +19,7 @@ import com.whidte.trulybestfriends.network.ReleaseRecalledPetPacket;
 import com.whidte.trulybestfriends.network.RequestPetDataPacket;
 import com.whidte.trulybestfriends.network.RequestTeamDataPacket;
 import com.whidte.trulybestfriends.network.RevivePetPacket;
+import com.whidte.trulybestfriends.network.SetLastSummonPacket;
 import com.whidte.trulybestfriends.network.SetPriorityPacket;
 import com.whidte.trulybestfriends.network.SetTeamMemberPacket;
 import com.whidte.trulybestfriends.network.SummonTeamPacket;
@@ -279,6 +280,7 @@ public class trulybestfriends {
                 });
         CHANNEL.registerMessage(16, SummonTeamPacket.class, SummonTeamPacket::encode, SummonTeamPacket::decode, SummonTeamPacket::handle);
         CHANNEL.registerMessage(17, SummonPetPacket.class, SummonPetPacket::encode, SummonPetPacket::decode, SummonPetPacket::handle);
+        CHANNEL.registerMessage(18, SetLastSummonPacket.class, SetLastSummonPacket::encode, SetLastSummonPacket::decode, SetLastSummonPacket::handle);
     }
 
     @SubscribeEvent
