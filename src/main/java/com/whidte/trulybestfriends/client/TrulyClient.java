@@ -10,6 +10,9 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.InputEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.MovementInputUpdateEvent;
+import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 
@@ -28,6 +31,9 @@ public final class TrulyClient {
         modEventBus.addListener(TrulyClient::onClientSetup);
         modEventBus.addListener(TrulyClient::onRegisterKeyMappings);
         NeoForge.EVENT_BUS.addListener(TrulyClient::onKeyInput);
+        NeoForge.EVENT_BUS.addListener(TrulyClient::onClientTick);
+        NeoForge.EVENT_BUS.addListener(TrulyClient::onMovementInputUpdate);
+        NeoForge.EVENT_BUS.addListener(TrulyClient::onRenderGui);
     }
 
     private static void registerL2TabsIntegration() {
@@ -60,12 +66,26 @@ public final class TrulyClient {
 
     private static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(OPEN_TAB_KEY);
+        event.register(SummonKeyHandler.SUMMON_KEY);
     }
 
     private static void onKeyInput(InputEvent.Key event) {
+        SummonKeyHandler.onKeyInput(event.getKey(), event.getScanCode(), event.getAction());
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null && OPEN_TAB_KEY.consumeClick()) {
             minecraft.setScreen(new TrulyScreen(Component.translatable("tab.trulybestfriends.pets")));
         }
+    }
+
+    private static void onClientTick(ClientTickEvent.Post event) {
+        SummonKeyHandler.tick();
+    }
+
+    private static void onMovementInputUpdate(MovementInputUpdateEvent event) {
+        SummonKeyHandler.applyMovementInput(event.getInput());
+    }
+
+    private static void onRenderGui(RenderGuiEvent.Post event) {
+        SummonKeyHandler.renderBottle(event.getGuiGraphics());
     }
 }

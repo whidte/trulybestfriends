@@ -23,6 +23,7 @@ import com.whidte.trulybestfriends.network.RevivePetPacket;
 import com.whidte.trulybestfriends.network.SetPriorityPacket;
 import com.whidte.trulybestfriends.network.SetTeamMemberPacket;
 import com.whidte.trulybestfriends.network.SummonTeamPacket;
+import com.whidte.trulybestfriends.network.SummonPetPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeamDataPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
@@ -271,7 +272,7 @@ public class trulybestfriends {
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar registrar = event.registrar("4");
+        PayloadRegistrar registrar = event.registrar("5");
         registrar.playToServer(HealPetPacket.TYPE, HealPetPacket.STREAM_CODEC, HealPetPacket::handle);
         registrar.playToServer(RecallPetPacket.TYPE, RecallPetPacket.STREAM_CODEC, RecallPetPacket::handle);
         registrar.playToServer(TeleportToPetPacket.TYPE, TeleportToPetPacket.STREAM_CODEC, TeleportToPetPacket::handle);
@@ -302,6 +303,7 @@ public class trulybestfriends {
         registrar.playToServer(RequestTeamDataPacket.TYPE, RequestTeamDataPacket.STREAM_CODEC, RequestTeamDataPacket::handle);
         registrar.playToServer(SetTeamMemberPacket.TYPE, SetTeamMemberPacket.STREAM_CODEC, SetTeamMemberPacket::handle);
         registrar.playToServer(SummonTeamPacket.TYPE, SummonTeamPacket.STREAM_CODEC, SummonTeamPacket::handle);
+        registrar.playToServer(SummonPetPacket.TYPE, SummonPetPacket.STREAM_CODEC, SummonPetPacket::handle);
         registrar.playToClient(TeamDataPacket.TYPE, TeamDataPacket.STREAM_CODEC,
                 (packet, ctx) -> {
                     if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
