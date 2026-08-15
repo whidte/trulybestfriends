@@ -1,6 +1,7 @@
 package com.whidte.trulybestfriends.tab;
 
 import com.whidte.trulybestfriends.Config;
+import com.whidte.trulybestfriends.client.SummonKeyHandler;
 import com.whidte.trulybestfriends.network.DirectTeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.RecallPetPacket;
 import com.whidte.trulybestfriends.network.ReleaseRecalledPetPacket;
@@ -245,6 +246,7 @@ class SummonToPlayerButton extends AbstractWidget {
             trulybestfriends.CHANNEL.sendToServer(directTeleport
                     ? new ReleaseRecalledPetPacket(screen.getSelectedUuid())
                     : new RecallPetPacket(screen.getSelectedUuid()));
+            if (!screen.isSelectedPetLost()) SummonKeyHandler.rememberSummon(screen.getSelectedUuid());
             return;
         }
 
@@ -255,6 +257,7 @@ class SummonToPlayerButton extends AbstractWidget {
         trulybestfriends.CHANNEL.sendToServer(directTeleport
                 ? new DirectTeleportPetToPlayerPacket(screen.getSelectedUuid())
                 : new TeleportPetToPlayerPacket(screen.getSelectedUuid()));
+        if (!screen.isSelectedPetLost()) SummonKeyHandler.rememberSummon(screen.getSelectedUuid());
     }
 
     @Override

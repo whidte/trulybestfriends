@@ -4,6 +4,7 @@ import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeamDataPacket;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
+import com.whidte.trulybestfriends.tab.SummonWheelData;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.network.NetworkEvent;
@@ -50,6 +51,7 @@ public final class ClientPacketHandlers {
                 applyPacket = complete;
             }
             Minecraft mc = Minecraft.getInstance();
+            SummonWheelData.applySyncPacket(applyPacket);
             if (mc.screen instanceof TrulyScreen screen) {
                 screen.applySyncPacket(applyPacket);
             } else {
@@ -62,6 +64,7 @@ public final class ClientPacketHandlers {
     public static void handle(TeamDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             Minecraft mc = Minecraft.getInstance();
+            SummonWheelData.applyTeamData(packet);
             if (mc.screen instanceof TrulyScreen screen) {
                 screen.applyTeamData(packet);
             } else {

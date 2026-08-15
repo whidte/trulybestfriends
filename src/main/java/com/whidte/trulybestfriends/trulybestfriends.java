@@ -22,6 +22,7 @@ import com.whidte.trulybestfriends.network.RevivePetPacket;
 import com.whidte.trulybestfriends.network.SetPriorityPacket;
 import com.whidte.trulybestfriends.network.SetTeamMemberPacket;
 import com.whidte.trulybestfriends.network.SummonTeamPacket;
+import com.whidte.trulybestfriends.network.SummonPetPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeamDataPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
@@ -106,7 +107,7 @@ public class trulybestfriends {
      *  服务器重启后清空 → 重启前的死亡宠物无冷却，可立即复活（符合"不保存到磁盘"的设计）。 */
     private static final Map<UUID, Long> petDeathTimes = new ConcurrentHashMap<>();
 
-    private static final String PROTOCOL_VERSION = "4";
+    private static final String PROTOCOL_VERSION = "5";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(MODID, "main"),
             () -> PROTOCOL_VERSION,
@@ -277,6 +278,7 @@ public class trulybestfriends {
                     if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
                 });
         CHANNEL.registerMessage(16, SummonTeamPacket.class, SummonTeamPacket::encode, SummonTeamPacket::decode, SummonTeamPacket::handle);
+        CHANNEL.registerMessage(17, SummonPetPacket.class, SummonPetPacket::encode, SummonPetPacket::decode, SummonPetPacket::handle);
     }
 
     @SubscribeEvent

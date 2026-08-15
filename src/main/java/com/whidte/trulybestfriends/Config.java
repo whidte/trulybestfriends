@@ -76,6 +76,14 @@ public class Config
                     "Team slot numbers range from 1 to this value (1-8, default 6). Effective pending cap = this value + 2 buffer.")
             .defineInRange("maxPendingSummons", 6, 1, 8);
 
+    public static final ForgeConfigSpec.IntValue SUMMON_BOTTLE_RIGHT_OFFSET = BUILDER
+            .comment("Distance in GUI pixels between the summon-key bottle animation and the right screen edge.")
+            .defineInRange("summonBottleRightOffset", 8, 0, 4096);
+
+    public static final ForgeConfigSpec.IntValue SUMMON_BOTTLE_VERTICAL_OFFSET = BUILDER
+            .comment("Vertical GUI-pixel offset of the summon-key bottle animation from screen center.")
+            .defineInRange("summonBottleVerticalOffset", 0, -4096, 4096);
+
     public static final ForgeConfigSpec.ConfigValue<String> REVIVE_ITEM = BUILDER
             .comment("Item ID required to revive a dead pet (e.g. \"minecraft:totem_of_undying\").",
                     "Set this to an empty string (reviveItem = \"\") to require no item.",
@@ -257,6 +265,8 @@ public class Config
     public static boolean deleteStoredPetsDirectly;
     public static int areaRecallDefaultRange;
     public static int maxPendingSummons;
+    public static int summonBottleRightOffset;
+    public static int summonBottleVerticalOffset;
     public static String reviveItem;
     public static String manualRegisterItem;
     public static boolean consumeManualRegisterItem;
@@ -329,6 +339,8 @@ public class Config
         deleteStoredPetsDirectly = DELETE_STORED_PETS_DIRECTLY.get();
         areaRecallDefaultRange = AREA_RECALL_DEFAULT_RANGE.get();
         maxPendingSummons = MAX_PENDING_SUMMONS.get();
+        summonBottleRightOffset = SUMMON_BOTTLE_RIGHT_OFFSET.get();
+        summonBottleVerticalOffset = SUMMON_BOTTLE_VERTICAL_OFFSET.get();
         reviveItem = REVIVE_ITEM.get();
         manualRegisterItem = MANUAL_REGISTER_ITEM.get();
         consumeManualRegisterItem = CONSUME_MANUAL_REGISTER_ITEM.get();

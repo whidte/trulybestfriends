@@ -8,8 +8,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.InputEvent;
+import net.minecraftforge.client.event.MovementInputUpdateEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
+import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.common.Mod;
@@ -29,6 +32,9 @@ public final class ClientEvents {
     @SubscribeEvent
     public static void onClientSetup(FMLClientSetupEvent event) {
         MinecraftForge.EVENT_BUS.addListener(ClientEvents::onKeyInput);
+        MinecraftForge.EVENT_BUS.addListener(ClientEvents::onClientTick);
+        MinecraftForge.EVENT_BUS.addListener(ClientEvents::onMovementInputUpdate);
+        MinecraftForge.EVENT_BUS.addListener(ClientEvents::onRenderGui);
         event.enqueueWork(() -> {
             if (ModList.get().isLoaded("l2tabs")) {
                 try {
@@ -48,12 +54,26 @@ public final class ClientEvents {
     @SubscribeEvent
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(OPEN_TAB_KEY);
+        event.register(SummonKeyHandler.SUMMON_KEY);
     }
 
     private static void onKeyInput(InputEvent.Key event) {
+        SummonKeyHandler.onKeyInput(event.getKey(), event.getScanCode(), event.getAction());
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null && OPEN_TAB_KEY.consumeClick()) {
             minecraft.setScreen(new TrulyScreen(Component.translatable("tab.trulybestfriends.pets")));
         }
+    }
+
+    private static void onClientTick(TickEvent.ClientTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) SummonKeyHandler.tick();
+    }
+
+    private static void onMovementInputUpdate(MovementInputUpdateEvent event) {
+        SummonKeyHandler.applyMovementInput(event.getInput());
+    }
+
+    private static void onRenderGui(RenderGuiEvent.Post event) {
+        SummonKeyHandler.renderBottle(event.getGuiGraphics());
     }
 }

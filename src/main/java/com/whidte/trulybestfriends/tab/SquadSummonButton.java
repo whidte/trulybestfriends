@@ -16,6 +16,11 @@ class SquadSummonButton extends AbstractWidget {
     private static final Component LABEL = Component.translatable("trulybestfriends.action.squad_summon");
     private static final long HOVER_DELAY_MILLIS = 1000L;
     private static final int ICON_SIZE = 16;
+    private static final int ICON_VISUAL_OFFSET_X = 0;
+    private static final int ICON_VISUAL_OFFSET_Y = -1;
+    private static final int FRAME_NORMAL_V = 0;
+    private static final int FRAME_HOVERED_V = 20;
+    private static final int FRAME_DISABLED_V = 40;
     private static final int COOLDOWN_TICKS = 5;
 
     private final TrulyScreen screen;
@@ -36,12 +41,12 @@ class SquadSummonButton extends AbstractWidget {
     @Override
     protected void renderWidget(@NotNull GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         this.active = !screen.selectedTeamSlots().isEmpty() && !isOnCooldown();
-        int frameV = !active ? TEAM_SELECTOR_FRAME_DISABLED_V
-                : isHovered() ? TEAM_SELECTOR_FRAME_HOVERED_V : TEAM_SELECTOR_FRAME_NORMAL_V;
+        int frameV = !active ? FRAME_DISABLED_V
+                : isHovered() ? FRAME_HOVERED_V : FRAME_NORMAL_V;
         graphics.blit(WIDGET_BUTTON, getX(), getY(), 0, frameV, width, height, 256, 256);
 
-        int iconX = getX() + (width - ICON_SIZE) / 2;
-        int iconY = getY() + (height - ICON_SIZE) / 2;
+        int iconX = getX() + (width - ICON_SIZE) / 2 + ICON_VISUAL_OFFSET_X;
+        int iconY = getY() + (height - ICON_SIZE) / 2 + ICON_VISUAL_OFFSET_Y;
         graphics.blit(SQUAD_SUMMON_ICON, iconX, iconY,
                 0, 0, ICON_SIZE, ICON_SIZE, ICON_SIZE, ICON_SIZE);
     }
