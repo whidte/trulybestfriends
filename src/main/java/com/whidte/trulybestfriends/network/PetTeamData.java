@@ -57,10 +57,10 @@ public final class PetTeamData {
     }
 
     /** Places a pet into a numbered slot of one color team, kicking the previous
-     *  occupant and removing the pet from every other team it belonged to. */
+     *  occupant. The pet may keep its membership in other teams. */
     public static synchronized CompoundTag setMember(Path ownerDir, String color, int slot, UUID uuid) throws IOException {
         CompoundTag raw = readRaw(ownerDir);
-        removeFromAllTeams(raw, uuid);
+        removeFromTeam(raw, color, uuid);
         CompoundTag team = teamTag(raw, color);
         ListTag members = new ListTag();
         for (Tag tag : team.getList("Members", Tag.TAG_COMPOUND)) {
@@ -140,16 +140,14 @@ public final class PetTeamData {
         return normalized;
     }
 
-    private static void removeFromAllTeams(CompoundTag raw, UUID uuid) {
-        for (String color : TEAM_COLORS) {
-            CompoundTag team = teamTag(raw, color);
-            ListTag members = new ListTag();
-            for (Tag tag : team.getList("Members", Tag.TAG_COMPOUND)) {
-                CompoundTag member = (CompoundTag) tag;
-                if (!uuid.equals(member.getUUID("UUID"))) members.add(member);
-            }
-            team.put("Members", members);
+    private static void removeFromTeam(CompoundTag raw, String color, UUID uuid) {
+        CompoundTag team = teamTag(raw, color);
+        ListTag members = new ListTag();
+        for (Tag tag : team.getList("Members", Tag.TAG_COMPOUND)) {
+            CompoundTag member = (CompoundTag) tag;
+            if (!uuid.equals(member.getUUID("UUID"))) members.add(member);
         }
+        team.put("Members", members);
     }
 
     private static CompoundTag teamTag(CompoundTag raw, String color) {
@@ -202,7 +200,6 @@ public final class PetTeamData {
         CompoundTag sourceTeams = source.contains("Teams", Tag.TAG_COMPOUND)
                 ? source.getCompound("Teams") : new CompoundTag();
         CompoundTag teams = new CompoundTag();
-        Set<UUID> assignedPets = new HashSet<>();
 
         for (String color : TEAM_COLORS) {
             CompoundTag sourceTeam = sourceTeams.contains(color, Tag.TAG_COMPOUND)
@@ -210,6 +207,7 @@ public final class PetTeamData {
             ListTag sourceMembers = sourceTeam.getList("Members", Tag.TAG_COMPOUND);
             List<Member> members = new ArrayList<>();
             Set<Integer> occupiedSlots = new HashSet<>();
+            Set<UUID> teamPets = new HashSet<>();
 
             for (int i = 0; i < sourceMembers.size(); i++) {
                 CompoundTag member = sourceMembers.getCompound(i);
@@ -217,9 +215,9 @@ public final class PetTeamData {
                 UUID uuid = member.getUUID("UUID");
                 int slot = member.getInt("Slot");
                 if (slot < 1 || slot > GRID_SLOT_COUNT || occupiedSlots.contains(slot)
-                        || assignedPets.contains(uuid) || !isTrackedByOwner.test(uuid)) continue;
+                        || teamPets.contains(uuid) || !isTrackedByOwner.test(uuid)) continue;
                 occupiedSlots.add(slot);
-                assignedPets.add(uuid);
+                teamPets.add(uuid);
                 members.add(new Member(slot, uuid));
             }
 

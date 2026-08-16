@@ -71,7 +71,8 @@ public final class PetTeamDataTest {
         require(first.equals(keptWhite.getCompound(0).getUUID("UUID")), "member UUID was not retained");
         require(keptWhite.getCompound(1).getInt("Slot") == 7, "high grid slot was not retained");
         require(second.equals(keptWhite.getCompound(1).getUUID("UUID")), "second member UUID was not retained");
-        require(keptGreen.isEmpty(), "cross-team duplicate UUID was not removed");
+        require(keptGreen.size() == 1 && first.equals(keptGreen.getCompound(0).getUUID("UUID")),
+                "multi-team membership was not retained");
         require("purple".equals(normalizedTeams.getCompound("purple").getString("Color")),
                 "team color metadata missing");
 

@@ -1067,8 +1067,8 @@ public class TrulyScreen extends Screen {
 		int gridX = this.leftPos + SQUAD_GRID_X;
 		int gridY = this.topPos + SQUAD_GRID_Y;
 		Map<Integer, UUID> members = selectedTeamSlots();
-		boolean showPlus = hasSelection() && members != null
-				&& members.size() < teamCapacity;
+		boolean teamFull = members != null && members.size() >= teamCapacity;
+		boolean showPlus = hasSelection() && members != null;
 		int hoveredSlot = squadSlotAt(mouseX, mouseY);
 		for (int cell = 0; cell < SQUAD_CELL_SLOTS.length; cell++) {
 			if (SQUAD_CELL_SLOTS[cell] < 0) continue;
@@ -1084,7 +1084,14 @@ public class TrulyScreen extends Screen {
 			if (members != null) {
 				UUID uuid = members.get(SQUAD_CELL_SLOTS[cell]);
 				if (uuid == null) {
-					if (showPlus && SQUAD_CELL_SLOTS[cell] == hoveredSlot) {
+					if (teamFull) {
+						g.blit(PLACEHOLDER,
+								x + 1, y + 1,
+								16, 16,
+								0, 0,
+								18, 18,
+								18, 18);
+					} else if (showPlus && SQUAD_CELL_SLOTS[cell] == hoveredSlot) {
 						g.blit(PLUS_SIGN,
 								x + (SQUAD_GRID_SLOT_SIZE - 16) / 2,
 								y + (SQUAD_GRID_SLOT_SIZE - 16) / 2,

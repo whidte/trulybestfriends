@@ -6,6 +6,7 @@ import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
@@ -30,7 +31,7 @@ public final class TrulyClient {
         registerL2TabsIntegration();
         modEventBus.addListener(TrulyClient::onClientSetup);
         modEventBus.addListener(TrulyClient::onRegisterKeyMappings);
-        NeoForge.EVENT_BUS.addListener(TrulyClient::onKeyInput);
+        NeoForge.EVENT_BUS.addListener(EventPriority.HIGH, TrulyClient::onKeyInput);
         NeoForge.EVENT_BUS.addListener(TrulyClient::onClientTick);
         NeoForge.EVENT_BUS.addListener(TrulyClient::onMovementInputUpdate);
         NeoForge.EVENT_BUS.addListener(TrulyClient::onRenderGui);
@@ -70,11 +71,29 @@ public final class TrulyClient {
     }
 
     private static void onKeyInput(InputEvent.Key event) {
-        SummonKeyHandler.onKeyInput(event.getKey(), event.getScanCode(), event.getAction());
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player != null && OPEN_TAB_KEY.consumeClick()) {
-            minecraft.setScreen(new TrulyScreen(Component.translatable("tab.trulybestfriends.pets")));
+        if (SummonKeyHandler.onKeyInput(event.getKey(), event.getScanCode(), event.getAction())) {
+            if (isTabKeySharedWithSummon()) {
+                OPEN_TAB_KEY.consumeClick();
+            }
+            return;
         }
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player != null && OPEN_TAB_KEY.consumeClick()
+                && !isTabKeySharedWithSummon()) {
+            openPetTab();
+        }
+    }
+
+    /** Opens the pet tab screen when the player has no screen open. */
+    public static void openPetTab() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null) return;
+        minecraft.setScreen(new TrulyScreen(Component.translatable("tab.trulybestfriends.pets")));
+    }
+
+    /** True when the summon wheel key and the pet tab key are bound to the same physical key. */
+    public static boolean isTabKeySharedWithSummon() {
+        return OPEN_TAB_KEY.same(SummonKeyHandler.SUMMON_KEY);
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {

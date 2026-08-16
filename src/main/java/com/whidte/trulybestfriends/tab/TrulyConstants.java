@@ -182,6 +182,9 @@ final class TrulyConstants {
 	/** Squad formation slot texture. */
 	static final ResourceLocation SQUAD_SLOT =
 			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/slot.png");
+	/** Light slot fill used for the selected team and unavailable empty squad slots. */
+	static final ResourceLocation PLACEHOLDER =
+			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/placeholder.png");
 	/** Empty-slot add icon shown when a list pet is selected and the team is not full. */
 	static final ResourceLocation PLUS_SIGN =
 			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/plus_sign.png");

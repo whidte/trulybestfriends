@@ -177,9 +177,6 @@ public final class SummonWheelScreen extends Screen {
                     renderHalfSizeCentered(graphics,
                             Component.translatable("trulybestfriends.wheel.release_summon"),
                             centerX, centerY + 11, 0xAAAAAA);
-                    renderHalfSizeCentered(graphics,
-                            Component.translatable("trulybestfriends.wheel.cancel"),
-                            centerX, centerY + 86, 0xFFFFFF);
                 }
             } else {
                 boolean bottleHovered = isOverBottle(mouseX, mouseY);
@@ -192,10 +189,10 @@ public final class SummonWheelScreen extends Screen {
                                 ? "trulybestfriends.wheel.summon_team"
                                 : "trulybestfriends.wheel.select_pet"),
                         centerX, centerY + 11, 0xAAAAAA);
-                renderHalfSizeCentered(graphics,
-                        Component.translatable("trulybestfriends.wheel.cancel"),
-                        centerX, centerY + 86, 0xFFFFFF);
             }
+            renderHalfSizeCentered(graphics,
+                    Component.translatable("trulybestfriends.wheel.cancel"),
+                    centerX, centerY + 86, 0xFFFFFF);
         } finally {
             RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
             graphics.pose().popPose();

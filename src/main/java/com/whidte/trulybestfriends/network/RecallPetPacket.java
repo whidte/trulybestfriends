@@ -212,7 +212,7 @@ public class RecallPetPacket implements CustomPacketPayload {
 
     }
 
-    static boolean savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {
+    public static boolean savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {
         return savePetToDisk(playerUuid, pet, level, true);
     }
 

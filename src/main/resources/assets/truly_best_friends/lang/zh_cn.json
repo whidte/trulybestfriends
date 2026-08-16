@@ -47,6 +47,8 @@
   "trulybestfriends.team.black": "黑队",
   "trulybestfriends.team.orange": "橙队",
   "trulybestfriends.team.yellow": "黄队",
+  "trulybestfriends.boss.space_disorder": "因boss导致空间错乱，宠物%s已经被收回。",
+  "trulybestfriends.boss.name_separator": "，",
   "trulybestfriends.details.tooltip": "单项",
   "trulybestfriends.revive.label": "复活吧！",
   "trulybestfriends.revive.cooldown": "复活冷却 %s秒",

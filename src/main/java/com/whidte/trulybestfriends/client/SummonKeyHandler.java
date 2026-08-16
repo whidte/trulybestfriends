@@ -47,15 +47,33 @@ public final class SummonKeyHandler {
 
     private SummonKeyHandler() {}
 
-    public static void onKeyInput(int keyCode, int scanCode, int action) {
-        if (!matchesKey(keyCode, scanCode)) return;
+    /** Returns true when this handler took ownership of the event (the caller should cancel it). */
+    public static boolean onKeyInput(int keyCode, int scanCode, int action) {
+        if (!matchesKey(keyCode, scanCode)) return false;
         if (action == GLFW.GLFW_PRESS) {
             keyHeld = true;
-            beginPress();
-        } else if (action == GLFW.GLFW_RELEASE) {
-            keyHeld = false;
-            releaseKey();
+            if (canBeginPress()) {
+                beginPress();
+                return true;
+            }
+            return false;
         }
+        if (action == GLFW.GLFW_RELEASE) {
+            keyHeld = false;
+            if (state == State.HOLDING || state == State.WHEEL) {
+                releaseKey();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean canBeginPress() {
+        Minecraft minecraft = Minecraft.getInstance();
+        return state == State.IDLE
+                && minecraft.player != null
+                && minecraft.getConnection() != null
+                && minecraft.screen == null;
     }
 
     private static void beginPress() {
@@ -67,7 +85,10 @@ public final class SummonKeyHandler {
         if (lastSummonedPet == null) {
             lastSummonedPet = SummonWheelData.resolveLastSummon();
         }
-        if (lastSummonedPet == null) {
+        if (TrulyClient.isTabKeySharedWithSummon()) {
+            pressStartMillis = Util.getMillis();
+            state = State.HOLDING;
+        } else if (lastSummonedPet == null) {
             openWheel();
         } else {
             pressStartMillis = Util.getMillis();
@@ -79,8 +100,12 @@ public final class SummonKeyHandler {
         if (state == State.HOLDING) {
             long heldMillis = Util.getMillis() - pressStartMillis;
             state = State.IDLE;
-            if (heldMillis < ROTATION_START_MILLIS && lastSummonedPet != null) {
-                sendSummon(lastSummonedPet);
+            if (heldMillis < ROTATION_START_MILLIS) {
+                if (TrulyClient.isTabKeySharedWithSummon()) {
+                    TrulyClient.openPetTab();
+                } else if (lastSummonedPet != null) {
+                    sendSummon(lastSummonedPet);
+                }
             }
         } else if (state == State.WHEEL) {
             Minecraft minecraft = Minecraft.getInstance();
@@ -99,6 +124,9 @@ public final class SummonKeyHandler {
             return;
         }
         refreshPlayer(minecraft.player.getUUID());
+        if (state == State.HOLDING && minecraft.screen != null) {
+            state = State.IDLE;
+        }
         if (state == State.HOLDING
                 && keyHeld
                 && Util.getMillis() - pressStartMillis >= WHEEL_START_MILLIS) {
@@ -142,24 +170,33 @@ public final class SummonKeyHandler {
     }
 
     public static void renderBottle(GuiGraphics graphics) {
-        if (state != State.HOLDING) return;
+        if (state != State.HOLDING && state != State.WHEEL) return;
         long heldMillis = Util.getMillis() - pressStartMillis;
-        if (keyHeld && heldMillis >= WHEEL_START_MILLIS) {
-            openWheel();
-            return;
+        boolean wheel = state == State.WHEEL;
+        if (state == State.HOLDING) {
+            if (keyHeld && heldMillis >= WHEEL_START_MILLIS) {
+                openWheel();
+                if (state != State.WHEEL) return;
+                wheel = true;
+            } else if (heldMillis >= WHEEL_START_MILLIS) {
+                return;
+            }
         }
-        if (heldMillis >= WHEEL_START_MILLIS) return;
         int x = Math.max(0, graphics.guiWidth() - Config.summonBottleRightOffset - BOTTLE_SIZE);
         int y = Math.max(0, Math.min(graphics.guiHeight() - BOTTLE_SIZE,
                 (graphics.guiHeight() - BOTTLE_SIZE) / 2 + Config.summonBottleVerticalOffset));
-        float rotation = heldMillis < ROTATION_START_MILLIS
-                ? 0.0F
-                : heldMillis >= RELEASE_TEXTURE_MILLIS
-                ? 180.0F
-                : 180.0F * (heldMillis - ROTATION_START_MILLIS)
-                / (RELEASE_TEXTURE_MILLIS - ROTATION_START_MILLIS);
-        ResourceLocation texture = heldMillis >= RELEASE_TEXTURE_MILLIS
-                ? RELEASE_BOTTLE : WORLD_IN_A_BOTTLE;
+        float rotation;
+        ResourceLocation texture;
+        if (wheel || heldMillis >= RELEASE_TEXTURE_MILLIS) {
+            rotation = 0.0F;
+            texture = RELEASE_BOTTLE;
+        } else {
+            rotation = heldMillis < ROTATION_START_MILLIS
+                    ? 0.0F
+                    : 180.0F * (heldMillis - ROTATION_START_MILLIS)
+                    / (RELEASE_TEXTURE_MILLIS - ROTATION_START_MILLIS);
+            texture = WORLD_IN_A_BOTTLE;
+        }
 
         graphics.pose().pushPose();
         graphics.pose().translate(x + BOTTLE_SIZE / 2.0F, y + BOTTLE_SIZE / 2.0F, 0.0F);
@@ -171,7 +208,8 @@ public final class SummonKeyHandler {
 
     private static void openWheel() {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null || minecraft.getConnection() == null) {
+        if (minecraft.player == null || minecraft.getConnection() == null
+                || minecraft.screen != null) {
             state = State.IDLE;
             return;
         }
