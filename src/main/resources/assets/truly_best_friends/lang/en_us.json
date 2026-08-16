@@ -47,6 +47,8 @@
   "trulybestfriends.team.black": "Black Team",
   "trulybestfriends.team.orange": "Orange Team",
   "trulybestfriends.team.yellow": "Yellow Team",
+  "trulybestfriends.boss.space_disorder": "Space distortion caused by a boss recalled your pet(s): %s.",
+  "trulybestfriends.boss.name_separator": ", ",
   "trulybestfriends.details.tooltip": "Details",
   "trulybestfriends.revive.label": "Revive",
   "trulybestfriends.revive.cooldown": "Revive %ss left",

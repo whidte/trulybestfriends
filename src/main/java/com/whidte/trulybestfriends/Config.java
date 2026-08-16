@@ -26,6 +26,14 @@ public class Config
             .comment("In performance mode, interval in ticks for updating loaded pets by their already tracked UUIDs.")
             .defineInRange("performanceModeSyncIntervalTicks", 5, 1, 1200);
 
+    public static final ForgeConfigSpec.IntValue BOSS_FIGHT_PET_LIMIT = BUILDER
+            .comment("Anti-gang-up: when a boss bar is visible to a player, every 20 ticks randomly recall",
+                    "that player's owned pets within LOCAL_SYNC_CHUNK_RADIUS chunks until this many remain.",
+                    "Pets in the player's current team, pets being ridden, and untracked pets are excluded.",
+                    "-1 disables the check entirely. Values above (maxPets - current team size) are clamped",
+                    "to that bound (0-512, default -1).")
+            .defineInRange("bossFightPetLimit", -1, -1, 512);
+
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> OWNER_NBT_FIELDS = BUILDER
             .comment("NBT paths used to find an owner UUID on living entities that do not implement OwnableEntity.",
                     "Use dots to traverse nested compounds, for example ForgeData.Owner. Paths are checked in order.",
@@ -256,6 +264,7 @@ public class Config
     static volatile java.util.List<String[]> ownerNbtPaths = OwnerNbtResolver.parsePaths(ownerNbtFields);
     public static boolean performanceMode;
     public static int performanceModeSyncIntervalTicks;
+    public static int bossFightPetLimit;
     public static int syncIntervalTicks;
     public static int localSyncIntervalTicks;
     public static int savePetDataCooldownTicks;
@@ -330,6 +339,7 @@ public class Config
 
         performanceMode = PERFORMANCE_MODE.get();
         performanceModeSyncIntervalTicks = PERFORMANCE_MODE_SYNC_INTERVAL_TICKS.get();
+        bossFightPetLimit = BOSS_FIGHT_PET_LIMIT.get();
         syncIntervalTicks = SYNC_INTERVAL_TICKS.get();
         localSyncIntervalTicks = LOCAL_SYNC_INTERVAL_TICKS.get();
         savePetDataCooldownTicks = SAVE_PET_DATA_COOLDOWN_TICKS.get();

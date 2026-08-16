@@ -209,7 +209,7 @@ public class RecallPetPacket {
         ctx.get().setPacketHandled(true);
     }
 
-    static boolean savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {
+    public static boolean savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {
         return savePetToDisk(playerUuid, pet, level, true);
     }
 

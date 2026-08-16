@@ -40,6 +40,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -120,6 +121,8 @@ public class trulybestfriends {
     private int localSyncTickCounter = 0;
     private int performanceModeSyncTickCounter = 0;
     private int saveTickCounter = 0;
+    private int bossRecallTickCounter = 0;
+    private static final int BOSS_RECALL_INTERVAL_TICKS = 20;
 
     private static trulybestfriends INSTANCE;
 
@@ -449,6 +452,13 @@ public class trulybestfriends {
                 if (Config.syncIntervalTicks > 0 && syncTickCounter >= Config.syncIntervalTicks) {
                     syncTickCounter = 0;
                     syncAllPets(event.getServer());
+                }
+            }
+            if (Config.bossFightPetLimit >= 0) {
+                bossRecallTickCounter++;
+                if (bossRecallTickCounter >= BOSS_RECALL_INTERVAL_TICKS) {
+                    bossRecallTickCounter = 0;
+                    checkBossRecalls(event.getServer());
                 }
             }
             if (saveTickCounter >= Config.savePetDataCooldownTicks) {
@@ -1520,6 +1530,99 @@ public class trulybestfriends {
             if (!trackedPetUUIDs.contains(entity.getUUID()) && !registerUntrackedOwnedPet(entity, ownerUUID, level)) return;
             savePetData(ownerUUID, entity, level);
         }
+    }
+
+    // === Boss anti-gang-up recall ===
+
+    private void checkBossRecalls(MinecraftServer server) {
+        int configured = Config.bossFightPetLimit;
+        if (configured < 0) return;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!hasVisibleBossBar(server, player)) continue;
+            Set<UUID> teamMembers = currentTeamMemberUuids(player);
+            int limit = Math.min(configured, Math.max(0, Config.maxPets - teamMembers.size()));
+            recallPetsForBoss(player, limit, teamMembers);
+        }
+    }
+
+    private boolean hasVisibleBossBar(MinecraftServer server, ServerPlayer player) {
+        return server.getCustomBossEvents().getEvents().stream()
+                .anyMatch(event -> event.isVisible() && event.getPlayers().contains(player));
+    }
+
+    private Set<UUID> currentTeamMemberUuids(ServerPlayer player) {
+        Set<UUID> uuids = new HashSet<>();
+        try {
+            CompoundTag data = PetTeamData.teamData(PetIOUtil.getOwnerDir(player));
+            String color = data.getString("SelectedTeam");
+            if (!PetTeamData.TEAM_COLORS.contains(color)) color = PetTeamData.TEAM_COLORS.get(0);
+            ListTag members = data.getCompound("Teams")
+                    .getCompound(color).getList("Members", Tag.TAG_COMPOUND);
+            for (Tag raw : members) {
+                CompoundTag member = (CompoundTag) raw;
+                if (member.hasUUID("UUID")) uuids.add(member.getUUID("UUID"));
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to read team members for boss recall: {}", e.getMessage());
+        }
+        return uuids;
+    }
+
+    private void recallPetsForBoss(ServerPlayer player, int limit, Set<UUID> teamMembers) {
+        ServerLevel level = player.serverLevel();
+        List<LivingEntity> candidates = new ArrayList<>();
+        ChunkPos center = player.chunkPosition();
+        for (int x = center.x - LOCAL_SYNC_CHUNK_RADIUS; x <= center.x + LOCAL_SYNC_CHUNK_RADIUS; x++) {
+            for (int z = center.z - LOCAL_SYNC_CHUNK_RADIUS; z <= center.z + LOCAL_SYNC_CHUNK_RADIUS; z++) {
+                if (!level.hasChunk(x, z)) continue;
+                AABB area = new AABB(
+                        x << 4, level.getMinBuildHeight(), z << 4,
+                        (x << 4) + 16, level.getMaxBuildHeight(), (z << 4) + 16);
+                for (Entity entity : level.getEntities(null, area)) {
+                    if (entity instanceof LivingEntity living && living.isAlive()
+                            && trackedPetUUIDs.contains(living.getUUID())
+                            && isOwnedBy(living, player.getUUID())
+                            && !teamMembers.contains(living.getUUID())
+                            && living.getFirstPassenger() == null) {
+                        candidates.add(living);
+                    }
+                }
+            }
+        }
+        if (candidates.size() <= limit) return;
+        Collections.shuffle(candidates);
+        int toRecall = candidates.size() - limit;
+        List<Component> recalledNames = new ArrayList<>();
+        for (int i = 0; i < toRecall; i++) {
+            LivingEntity pet = candidates.get(i);
+            Component name = pet.getDisplayName().copy();
+            if (recallLoadedPetForBoss(player, pet, level)) {
+                recalledNames.add(name);
+            }
+        }
+        if (!recalledNames.isEmpty()) {
+            player.displayClientMessage(Component.translatable(
+                    "trulybestfriends.boss.space_disorder", joinNames(recalledNames)), false);
+        }
+    }
+
+    private boolean recallLoadedPetForBoss(ServerPlayer owner, LivingEntity pet, ServerLevel level) {
+        pet.ejectPassengers();
+        pet.stopRiding();
+        if (!RecallPetPacket.savePetToDisk(owner.getUUID(), pet, level)) return false;
+        pet.playSound(SoundEvents.ENDERMAN_TELEPORT, 0.5f, 1.0f);
+        pet.discard();
+        return true;
+    }
+
+    private Component joinNames(List<Component> names) {
+        net.minecraft.network.chat.MutableComponent result = Component.empty();
+        Component separator = Component.translatable("trulybestfriends.boss.name_separator");
+        for (int i = 0; i < names.size(); i++) {
+            if (i > 0) result.append(separator);
+            result.append(names.get(i));
+        }
+        return result;
     }
 
     private boolean hasTrulyBestFriendsAdvancement(MinecraftServer server, ServerPlayer player) {

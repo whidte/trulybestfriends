@@ -73,13 +73,23 @@ class TeamSelectorButton extends AbstractWidget {
                 if (team < 0) continue;
                 int column = cell % 3;
                 int row = cell / 3;
+                int slotX = panelX + TEAM_SELECTOR_GRID_X + column * TEAM_SELECTOR_CELL_WIDTH;
+                int slotY = panelY + TEAM_SELECTOR_GRID_Y + row * TEAM_SELECTOR_CELL_HEIGHT;
+                if (team == screen.selectedTeamIndex()) {
+                    graphics.blit(PLACEHOLDER,
+                            slotX, slotY,
+                            18, 18,
+                            0, 0,
+                            18, 18,
+                            18, 18);
+                }
                 graphics.renderItem(TEAM_BANNERS[team],
-                        panelX + TEAM_SELECTOR_GRID_X + 1 + column * TEAM_SELECTOR_CELL_WIDTH,
-                        panelY + TEAM_SELECTOR_GRID_Y + 1 + row * TEAM_SELECTOR_CELL_HEIGHT);
+                        slotX + 1, slotY + 1);
             }
 
             int hoveredCell = cellAt(mouseX, mouseY);
-            if (hoveredCell >= 0 && CELL_TEAMS[hoveredCell] >= 0) {
+            if (hoveredCell >= 0 && CELL_TEAMS[hoveredCell] >= 0
+                    && CELL_TEAMS[hoveredCell] != screen.selectedTeamIndex()) {
                 renderSlotHighlight(graphics,
                         panelX + TEAM_SELECTOR_GRID_X + 1 + (hoveredCell % 3) * TEAM_SELECTOR_CELL_WIDTH,
                         panelY + TEAM_SELECTOR_GRID_Y + 1 + (hoveredCell / 3) * TEAM_SELECTOR_CELL_HEIGHT);
