@@ -269,7 +269,7 @@ public class RequestPetDataPacket {
 
     private static void preserveStoredUiFields(CompoundTag storedNbt, CompoundTag nbt) {
         if (storedNbt.contains("Priority")) {
-            nbt.putInt("Priority", Math.max(1, Math.min(6, storedNbt.getInt("Priority"))));
+            nbt.putInt("Priority", PetIOUtil.clampPriority(storedNbt.getInt("Priority")));
         }
         if (storedNbt.getBoolean("Recalled")) {
             nbt.putBoolean("Recalled", true);

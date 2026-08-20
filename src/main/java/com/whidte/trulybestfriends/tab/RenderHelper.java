@@ -24,8 +24,32 @@ import static com.whidte.trulybestfriends.tab.TrulyConstants.DEFAULT_ROT_Y;
 
 /** Shared low-level rendering helpers used by multiple tab UI classes. */
 final class RenderHelper {
+	private static final String[] FACING_PART_NAMES = {"head", "neck", "head1", "neck1", "skull", "jaw"};
 
 	private RenderHelper() {}
+
+	static boolean isMultipartPreview(LivingEntity entity) {
+		return entity.getScale() > 1.0001f
+				|| (entity.getParts() != null && entity.getParts().length > 0);
+	}
+
+	static void applyPreviewRotation(LivingEntity entity, boolean multipart,
+	                                 float horizontalRotation, float verticalRotation,
+	                                 boolean unclampedPitch) {
+		if (multipart) {
+			entity.yBodyRot = entity.yBodyRotO = 0f;
+			entity.setYRot(0f);
+			entity.yRotO = entity.yHeadRot = entity.yHeadRotO = 0f;
+			return;
+		}
+
+		entity.yBodyRot = 180f + horizontalRotation * 20f;
+		entity.setYRot(180f + horizontalRotation * 40f);
+		float pitch = -verticalRotation * 20f;
+		if (unclampedPitch) TrulyConstants.setXRotUnclamped(entity, pitch);
+		else entity.setXRot(pitch);
+		entity.yHeadRot = entity.yHeadRotO = entity.yBodyRot;
+	}
 
 	/**
 	 * Render an entity in the GUI with float-precision scale, replicating
@@ -62,8 +86,7 @@ final class RenderHelper {
 	 */
 	static void renderMiniPet(GuiGraphics g, int x, int y, float baseSize, LivingEntity pet) {
 		float scale = TrulyScreen.computePreviewScale(pet, baseSize);
-		boolean multipart = pet.getScale() > 1.0001f
-				|| (pet.getParts() != null && pet.getParts().length > 0);
+		boolean multipart = isMultipartPreview(pet);
 		Quaternionf quat;
 		Quaternionf quatPitch;
 		if (multipart) {
@@ -78,20 +101,7 @@ final class RenderHelper {
 			quatPitch = new Quaternionf().rotateX(DEFAULT_ROT_Y * 20.0f * ((float) Math.PI / 180f));
 		}
 
-		if (!multipart) {
-			pet.yBodyRot = 180.0f + DEFAULT_ROT_X * 20.0f;
-			pet.setYRot(180.0f + DEFAULT_ROT_X * 40.0f);
-			TrulyConstants.setXRotUnclamped(pet, -DEFAULT_ROT_Y * 20.0f);
-			pet.yHeadRot = pet.yBodyRot;
-			pet.yHeadRotO = pet.yBodyRot;
-		} else {
-			pet.yBodyRot = 0f;
-			pet.yBodyRotO = 0f;
-			pet.setYRot(0f);
-			pet.yRotO = 0f;
-			pet.yHeadRot = 0f;
-			pet.yHeadRotO = 0f;
-		}
+		applyPreviewRotation(pet, multipart, DEFAULT_ROT_X, DEFAULT_ROT_Y, true);
 
 		renderEntityInInventory(g, x, y, scale, quat, quatPitch, pet);
 	}
@@ -161,12 +171,12 @@ final class RenderHelper {
 	private static Float findFacingPartZ(EntityModel<?> model) {
 		ModelPart root = getModelRoot(model);
 		if (root != null) {
-			for (String name : new String[]{"head", "neck", "head1", "neck1", "skull", "jaw"}) {
+			for (String name : FACING_PART_NAMES) {
 				Float z = findPartLocalZ(root, name);
 				if (z != null) return z;
 			}
 		}
-		for (String name : new String[]{"head", "neck", "head1", "neck1", "skull", "jaw"}) {
+		for (String name : FACING_PART_NAMES) {
 			Float z = getModelPartFieldZ(model, name);
 			if (z != null) return z;
 		}
@@ -189,35 +199,25 @@ final class RenderHelper {
 	 * EnderDragonRenderer), access the private "model" field via reflection.
 	 */
 	private static EntityModel<?> getModelFromRenderer(EntityRenderer<?> renderer) {
-		Class<?> cls = renderer.getClass();
-		while (cls != null && cls != Object.class) {
-			try {
-				java.lang.reflect.Field f = cls.getDeclaredField("model");
-				f.setAccessible(true);
-				Object value = f.get(renderer);
-				if (value instanceof EntityModel<?> entityModel) return entityModel;
-			} catch (NoSuchFieldException ignored) {
-				// try superclass
-			} catch (Exception ignored) {
-				break;
-			}
-			cls = cls.getSuperclass();
-		}
-		return null;
+		return findFieldValue(renderer, "model", EntityModel.class);
 	}
 
 	private static Float getModelPartFieldZ(EntityModel<?> model, String name) {
-		Class<?> cls = model.getClass();
+		ModelPart part = findFieldValue(model, name, ModelPart.class);
+		return part != null ? part.z : null;
+	}
+
+	private static <T> T findFieldValue(Object target, String name, Class<T> valueType) {
+		Class<?> cls = target.getClass();
 		while (cls != null && cls != Object.class) {
 			try {
 				java.lang.reflect.Field f = cls.getDeclaredField(name);
 				f.setAccessible(true);
-				Object value = f.get(model);
-				if (value instanceof ModelPart part) return part.z;
+				Object value = f.get(target);
+				return valueType.isInstance(value) ? valueType.cast(value) : null;
 			} catch (NoSuchFieldException ignored) {
-				// try superclass
 			} catch (Exception ignored) {
-				break;
+				return null;
 			}
 			cls = cls.getSuperclass();
 		}

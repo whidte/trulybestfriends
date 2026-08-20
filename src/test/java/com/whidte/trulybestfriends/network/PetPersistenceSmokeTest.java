@@ -31,7 +31,19 @@ public final class PetPersistenceSmokeTest {
         testStoredDeathIsNotLost();
         testDirectDieCompatibilityGuard();
         testThreeStateInventoryRestore();
-        System.out.println("PetPersistenceSmokeTest: 12/12 passed");
+        testPriorityNormalization();
+        System.out.println("PetPersistenceSmokeTest: 13/13 passed");
+    }
+
+    private static void testPriorityNormalization() {
+        require(PetIOUtil.clampPriority(-1) == PetIOUtil.MIN_PRIORITY, "low priority was not clamped");
+        require(PetIOUtil.clampPriority(99) == PetIOUtil.MAX_PRIORITY,
+                "high priority was not clamped");
+        require(PetIOUtil.priorityFrom(new CompoundTag()) == PetIOUtil.DEFAULT_PRIORITY,
+                "missing priority did not use the default");
+        CompoundTag stored = new CompoundTag();
+        stored.putInt("Priority", 3);
+        require(PetIOUtil.priorityFrom(stored) == 3, "stored priority changed");
     }
 
     private static void testStoredChunkResolution() {

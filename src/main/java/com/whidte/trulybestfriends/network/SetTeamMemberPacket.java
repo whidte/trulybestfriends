@@ -1,14 +1,10 @@
 package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -79,47 +75,13 @@ public class SetTeamMemberPacket {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
             if (player == null) return;
-            int colorIndex = Math.max(0, Math.min(PetTeamData.TEAM_COLORS.size() - 1, packet.colorIndex));
-            String color = PetTeamData.TEAM_COLORS.get(colorIndex);
+            String color = PetTeamData.colorAt(packet.colorIndex);
             Path ownerDir = PetIOUtil.getOwnerDir(player);
             try {
-                CompoundTag data = PetTeamData.teamData(ownerDir);
-                int capacity = data.getInt("Capacity");
-                ListTag members = data.getCompound("Teams")
-                        .getCompound(color).getList("Members", Tag.TAG_COMPOUND);
                 switch (packet.action) {
-                    case ACTION_ASSIGN -> {
-                        UUID uuid = packet.petUuid;
-                        if (packet.slot >= 1 && packet.slot <= PetTeamData.GRID_SLOT_COUNT
-                                && uuid != null
-                                && Files.isRegularFile(ownerDir.resolve(uuid + ".nbt"))) {
-                            boolean member = false;
-                            boolean occupied = false;
-                            for (Tag tag : members) {
-                                CompoundTag memberTag = (CompoundTag) tag;
-                                if (memberTag.hasUUID("UUID") && uuid.equals(memberTag.getUUID("UUID"))) {
-                                    member = true;
-                                }
-                                if (memberTag.getInt("Slot") == packet.slot) {
-                                    occupied = true;
-                                }
-                            }
-                            if (members.size() < capacity || member || occupied) {
-                                PetTeamData.setMember(ownerDir, color, packet.slot, uuid);
-                            }
-                        }
-                    }
-                    case ACTION_MOVE -> {
-                        if (packet.fromSlot >= 1 && packet.fromSlot <= PetTeamData.GRID_SLOT_COUNT
-                                && packet.slot >= 1 && packet.slot <= PetTeamData.GRID_SLOT_COUNT) {
-                            PetTeamData.moveMember(ownerDir, color, packet.fromSlot, packet.slot);
-                        }
-                    }
-                    case ACTION_REMOVE -> {
-                        if (packet.petUuid != null) {
-                            PetTeamData.removeMember(ownerDir, color, packet.petUuid);
-                        }
-                    }
+                    case ACTION_ASSIGN -> PetTeamData.setMember(ownerDir, color, packet.slot, packet.petUuid);
+                    case ACTION_MOVE -> PetTeamData.moveMember(ownerDir, color, packet.fromSlot, packet.slot);
+                    case ACTION_REMOVE -> PetTeamData.removeMember(ownerDir, color, packet.petUuid);
                     case ACTION_SELECT -> PetTeamData.setSelectedTeam(ownerDir, color);
                     default -> {}
                 }

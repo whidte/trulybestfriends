@@ -32,7 +32,7 @@ config="trulybestfriends.mixins.json"
 [[dependencies.${mod_id}]]
     modId="l2library"
     mandatory=false
-    versionRange="[0.3,)"
+    versionRange="[2.4.2,)"
     ordering="NONE"
     side="BOTH"
 

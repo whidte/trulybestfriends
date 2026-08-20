@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.network.PetTeamData;
+import com.whidte.trulybestfriends.network.PetIOUtil;
 import com.whidte.trulybestfriends.network.RequestTeamDataPacket;
 import com.whidte.trulybestfriends.network.SetTeamMemberPacket;
 import com.whidte.trulybestfriends.network.TeamDataPacket;
@@ -83,8 +84,7 @@ public class TrulyScreen extends Screen {
 	private int squadDragSourceSlot = -1;
 	private double squadDragStartX;
 	private double squadDragStartY;
-	private int previousHoveredEmptySlot = -1;
-	private long emptySlotHoverStartMillis = -1L;
+	private final HoverDelay emptySlotHoverDelay = new HoverDelay();
 	private SpeciesDropdown speciesFilterButton;
 	private EditBox searchBox;
 	private SearchModeButton searchModeButton;
@@ -173,6 +173,20 @@ public class TrulyScreen extends Screen {
 	boolean isSelectedPetDead() {
 		CompoundTag nbt = getSelectedNbt();
 		return nbt != null && nbt.contains("Health") && nbt.getFloat("Health") <= 0;
+	}
+
+	boolean isSelectedPetRecalled() {
+		CompoundTag nbt = getSelectedNbt();
+		return nbt != null && nbt.getBoolean("Recalled");
+	}
+
+	boolean isButtonCooldownActive(long lastClickTick) {
+		return minecraft.level == null
+				|| minecraft.level.getGameTime() - lastClickTick < BUTTON_COOLDOWN_TICKS;
+	}
+
+	long currentGameTick() {
+		return minecraft.level != null ? minecraft.level.getGameTime() : 0L;
 	}
 
 	boolean isSelectedPetLost() {
@@ -521,8 +535,7 @@ public class TrulyScreen extends Screen {
 						UUID uuid = entry.getUUID("UUID");
 						CompoundTag nbt = entry.getCompound("NBT");
 						pendingFullListNbt.put(uuid, nbt);
-						int priority = nbt.contains("Priority") ? nbt.getInt("Priority") : 6;
-						pendingFullListPriorities.put(uuid, Math.max(1, Math.min(6, priority)));
+						pendingFullListPriorities.put(uuid, PetIOUtil.priorityFrom(nbt));
 					}
 				}
 				if (!packet.isLastBatch()) break;
@@ -562,9 +575,7 @@ public class TrulyScreen extends Screen {
 					invalidatePreviewEntity(uuid);
 				}
 				petNbtCache.put(uuid, merged);
-				int priority = merged.contains("Priority") ? merged.getInt("Priority") : 6;
-				priority = Math.max(1, Math.min(6, priority));
-				petPriorities.put(uuid, priority);
+				petPriorities.put(uuid, PetIOUtil.priorityFrom(merged));
 				rebuildFilteredPetUuids(previousSelection, false);
 				finishPetListUpdate(
 						!oldSpecies.equals(merged.getString("EntityType")),
@@ -899,8 +910,8 @@ public class TrulyScreen extends Screen {
 	}
 
 	private void sortPetUuids() {
-		petUuids.sort(Comparator.comparingInt(uuid ->
-				Math.max(1, Math.min(6, petPriorities.getOrDefault(uuid, 6)))));
+		petUuids.sort(Comparator.comparingInt(uuid -> PetIOUtil.clampPriority(
+				petPriorities.getOrDefault(uuid, PetIOUtil.DEFAULT_PRIORITY))));
 	}
 
 	void onShiftReleased() {
@@ -912,17 +923,7 @@ public class TrulyScreen extends Screen {
 	Component getPetDisplayName(UUID uuid) {
 		CompoundTag nbt = petNbtCache.get(uuid);
 		if (nbt == null) return Component.literal("???");
-		if (nbt.contains("CustomName")) {
-			try {
-				return Component.Serializer.fromJson(nbt.getString("CustomName"));
-			} catch (Exception ignored) {}
-		}
-		String typeKey = nbt.getString("EntityType");
-		if (!typeKey.isEmpty()) {
-			var type = getEntityType(typeKey);
-			if (type != null) return type.getDescription();
-		}
-		return Component.literal("???");
+		return PetDataLoader.displayName(minecraft, nbt);
 	}
 
 	// ============================
@@ -970,38 +971,22 @@ public class TrulyScreen extends Screen {
 
 		if (hasSelection() && !squadMode) {
 			renderPetPreview(g);
-			g.pose().pushPose();
-			g.pose().translate(0.0, 0.0, PET_INFO_OVERLAY_Z);
-			try {
+			renderAtDepth(g, PET_INFO_OVERLAY_Z, () -> {
 				renderHealthBar(g);
 				renderPetInfo(g);
 				renderPetLocation(g, mouseX, mouseY);
-				g.flush();
-			} finally {
-				g.pose().popPose();
-			}
+			});
 		}
 		if (deleteButton != null && deleteButton.visible) {
-			g.pose().pushPose();
-			g.pose().translate(0.0, 0.0, PET_INFO_OVERLAY_Z + 1);
-			try {
-				deleteButton.render(g, mouseX, mouseY, partialTick);
-				g.flush();
-			} finally {
-				g.pose().popPose();
-			}
+			renderAtDepth(g, PET_INFO_OVERLAY_Z + 1,
+					() -> deleteButton.render(g, mouseX, mouseY, partialTick));
 		}
 
 		// Keep the expanded dropdown above pet entries and the pet-list scrollbar.
 		if (speciesDropdown != null) {
-			g.pose().pushPose();
-			g.pose().translate(0.0, 0.0, SPECIES_DROPDOWN_OVERLAY_Z);
-			try {
-				speciesDropdown.render(g, mouseX, mouseY, partialTick);
-				g.flush();
-			} finally {
-				g.pose().popPose();
-			}
+			SpeciesDropdown dropdown = speciesDropdown;
+			renderAtDepth(g, SPECIES_DROPDOWN_OVERLAY_Z,
+					() -> dropdown.render(g, mouseX, mouseY, partialTick));
 		}
 
 		// L2Tabs tooltip overlay (must render after children)
@@ -1031,18 +1016,24 @@ public class TrulyScreen extends Screen {
 		renderEmptySlotTooltip(g, mouseX, mouseY);
 	}
 
+	private static void renderAtDepth(GuiGraphics graphics, double depth, Runnable renderer) {
+		graphics.pose().pushPose();
+		graphics.pose().translate(0.0, 0.0, depth);
+		try {
+			renderer.run();
+			graphics.flush();
+		} finally {
+			graphics.pose().popPose();
+		}
+	}
+
 	/** Hover tooltip for empty formation slots: add hints, or the red full-team warning. */
 	private void renderEmptySlotTooltip(GuiGraphics g, int mouseX, int mouseY) {
 		Map<Integer, UUID> members = selectedTeamSlots();
 		int slot = squadMode ? squadSlotAt(mouseX, mouseY) : -1;
 		boolean empty = slot >= 0 && (members == null || !members.containsKey(slot));
-		int hovered = empty ? slot : -1;
-		long now = System.currentTimeMillis();
-		if (hovered != previousHoveredEmptySlot) {
-			previousHoveredEmptySlot = hovered;
-			emptySlotHoverStartMillis = now;
-		}
-		if (hovered < 0 || now - emptySlotHoverStartMillis < 1000L) return;
+		Integer hovered = empty ? slot : null;
+		if (!emptySlotHoverDelay.isReady(hovered)) return;
 
 		int count = members != null ? members.size() : 0;
 		if (count >= teamCapacity) {
@@ -1149,8 +1140,7 @@ public class TrulyScreen extends Screen {
 		// model stays in its canonical pose while the whole rendered entity
 		// still rotates with the mouse.  Ordinary pets keep the original
 		// yBodyRot-driven behaviour.
-		boolean multipart = entity.getScale() > 1.0001f
-				|| (entity.getParts() != null && entity.getParts().length > 0);
+		boolean multipart = isMultipartPreview(entity);
 		Quaternionf quat;
 		Quaternionf quatPitch;
 		if (multipart) {
@@ -1168,24 +1158,7 @@ public class TrulyScreen extends Screen {
 			quat.mul(quatPitch);
 		}
 
-		if (!multipart) {
-			entity.yBodyRot = 180f + rotX * 20f;
-			entity.setYRot(180f + rotX * 40f);
-			setXRotUnclamped(entity, -rotY * 20f);
-			entity.yHeadRot = entity.yBodyRot;
-			entity.yHeadRotO = entity.yBodyRot;
-		} else {
-			// Reset all rotation fields to 0° so the model always starts
-			// from its canonical facing, regardless of the yBodyRot / yRot
-			// values saved in NBT (which reflect the entity's last heading
-			// in the world and would otherwise vary per open).
-			entity.yBodyRot = 0f;
-			entity.yBodyRotO = 0f;
-			entity.setYRot(0f);
-			entity.yRotO = 0f;
-			entity.yHeadRot = 0f;
-			entity.yHeadRotO = 0f;
-		}
+		applyPreviewRotation(entity, multipart, rotX, rotY, true);
 
 		renderEntityInInventory(g, ex, ey, currentScale, quat, quatPitch, entity);
 	}

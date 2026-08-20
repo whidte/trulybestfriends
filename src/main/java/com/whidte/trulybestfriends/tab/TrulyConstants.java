@@ -153,6 +153,8 @@ final class TrulyConstants {
 	static final int REFERENCE_WINDOW_WIDTH = 1920;
 	/** 请求刷新已选宠物数据的间隔，单位为游戏刻。 */
 	static final int REFRESH_INTERVAL = 20;
+	/** Prevents client action buttons from sending duplicate packets on adjacent ticks. */
+	static final int BUTTON_COOLDOWN_TICKS = 5;
 	/** 生命恢复按钮的正方形边长。 */
 	static final int HEAL_BUTTON_SIZE = 18;
 	// --- Textures ---

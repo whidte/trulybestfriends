@@ -28,6 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import static com.whidte.trulybestfriends.tab.RenderHelper.buildMultipartPose;
 import static com.whidte.trulybestfriends.tab.RenderHelper.detectMultipartYBase;
+import static com.whidte.trulybestfriends.tab.RenderHelper.applyPreviewRotation;
+import static com.whidte.trulybestfriends.tab.RenderHelper.isMultipartPreview;
 import static com.whidte.trulybestfriends.tab.RenderHelper.multipartPitchRadians;
 import static com.whidte.trulybestfriends.tab.RenderHelper.renderEntityInInventory;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.BASE_SCALE;
@@ -210,19 +212,7 @@ public final class SummonWheelScreen extends Screen {
     /** Display name matching the pet list: CustomName when present, else entity type name. */
     private Component petName(UUID uuid) {
         CompoundTag nbt = SummonWheelData.petNbt(uuid);
-        if (nbt == null) return Component.empty();
-        if (nbt.contains("CustomName") && minecraft != null && minecraft.level != null) {
-            try {
-                return Component.Serializer.fromJson(nbt.getString("CustomName"));
-            } catch (Exception ignored) {}
-        }
-        String typeKey = nbt.getString("EntityType");
-        if (!typeKey.isEmpty()) {
-            ResourceLocation id = ResourceLocation.tryParse(typeKey);
-            EntityType<?> type = id != null ? ForgeRegistries.ENTITY_TYPES.getValue(id) : null;
-            if (type != null) return type.getDescription();
-        }
-        return Component.literal("???");
+        return nbt == null ? Component.empty() : PetDataLoader.displayName(minecraft, nbt);
     }
 
     /** Pet-list style name rendering inside the wheel center: scrolls when too long. */
@@ -281,7 +271,7 @@ public final class SummonWheelScreen extends Screen {
 
     private static void renderPet(GuiGraphics graphics, int x, int y, LivingEntity pet) {
         float scale = TrulyScreen.computePreviewScale(pet, BASE_SCALE * LIST_ENTRY_SCALE_RATIO);
-        boolean multipart = pet.getScale() > 1.0001F || (pet.getParts() != null && pet.getParts().length > 0);
+        boolean multipart = isMultipartPreview(pet);
         Quaternionf pose;
         Quaternionf cameraOrientation;
         if (multipart) {
@@ -291,17 +281,11 @@ public final class SummonWheelScreen extends Screen {
                     detectMultipartYBase(pet) - DEFAULT_ROT_X * 20.0F * ((float) Math.PI / 180F),
                     multipartPitchRadians(DEFAULT_ROT_Y)));
             cameraOrientation = MULTIPART_QUAT_PITCH;
-            pet.yBodyRot = pet.yBodyRotO = 0.0F;
-            pet.setYRot(0.0F);
-            pet.yRotO = pet.yHeadRot = pet.yHeadRotO = 0.0F;
         } else {
             pose = NORMAL_QUAT;
             cameraOrientation = NORMAL_QUAT_PITCH;
-            pet.yBodyRot = 180.0F + DEFAULT_ROT_X * 20.0F;
-            pet.setYRot(180.0F + DEFAULT_ROT_X * 40.0F);
-            pet.setXRot(-DEFAULT_ROT_Y * 20.0F);
-            pet.yHeadRot = pet.yHeadRotO = pet.yBodyRot;
         }
+        applyPreviewRotation(pet, multipart, DEFAULT_ROT_X, DEFAULT_ROT_Y, false);
 
         graphics.enableScissor(x, y, x + SLOT_SIZE, y + SLOT_SIZE);
         try {

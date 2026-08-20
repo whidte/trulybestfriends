@@ -9,6 +9,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
+import net.minecraft.Util;
 import net.minecraft.util.Mth;
 import org.jetbrains.annotations.NotNull;
 
@@ -22,6 +23,10 @@ final class SpeciesDropdown extends AbstractWidget {
     private static final int OPTION_HEIGHT = 10;
     /** Width of the expanded list scrollbar. */
     private static final int SCROLLBAR_WIDTH = 4;
+    /** Milliseconds a marquee-scrolled label holds still at each end before moving on. */
+    private static final long MARQUEE_PAUSE_MILLIS = 800L;
+    /** Milliseconds the marquee needs to travel one pixel of overflowing text. */
+    private static final double MARQUEE_MILLIS_PER_PIXEL = 30.0;
 
     private final TrulyScreen screen;
     private final List<String> options;
@@ -102,8 +107,37 @@ final class SpeciesDropdown extends AbstractWidget {
 
     private void renderLabel(GuiGraphics graphics, Component label, int x, int y, int maxWidth) {
         graphics.enableScissor(x, y, x + Math.max(0, maxWidth), y + screen.font().lineHeight);
-        graphics.drawString(screen.font(), label, x, y, 0xFFFFFF, false);
+        graphics.drawString(screen.font(), label, x - marqueeOffset(label, maxWidth), y, 0xFFFFFF, false);
         graphics.disableScissor();
+    }
+
+    /**
+     * Pixel offset that marquee-scrolls labels wider than the available space. The animation
+     * ping-pongs (scroll out, hold, scroll back, hold) and its phase is derived from the label
+     * text, so every label scrolls independently and deterministically.
+     */
+    private int marqueeOffset(Component label, int maxWidth) {
+        int textWidth = screen.font().width(label);
+        int overflow = textWidth - maxWidth;
+        if (overflow <= 0) return 0;
+        long scrollMillis = Math.round(overflow * MARQUEE_MILLIS_PER_PIXEL);
+        long halfCycle = MARQUEE_PAUSE_MILLIS + scrollMillis;
+        long time = Math.floorMod(Util.getMillis() + marqueePhase(label), 2 * halfCycle);
+        double offset;
+        if (time < MARQUEE_PAUSE_MILLIS) {
+            offset = 0.0;
+        } else if (time < halfCycle) {
+            offset = (time - MARQUEE_PAUSE_MILLIS) * overflow / (double) scrollMillis;
+        } else if (time < halfCycle + MARQUEE_PAUSE_MILLIS) {
+            offset = overflow;
+        } else {
+            offset = (2 * halfCycle - time) * overflow / (double) scrollMillis;
+        }
+        return (int) Math.round(offset);
+    }
+
+    private static long marqueePhase(Component label) {
+        return Integer.toUnsignedLong(label.getString().hashCode()) % 500_000L;
     }
 
     private void renderScrollbar(GuiGraphics graphics) {

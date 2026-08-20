@@ -28,6 +28,25 @@ public final class PetTeamData {
 
     private PetTeamData() {}
 
+    /** Resolves an untrusted network index to one of the configured team colors. */
+    public static String colorAt(int index) {
+        return TEAM_COLORS.get(Math.max(0, Math.min(TEAM_COLORS.size() - 1, index)));
+    }
+
+    public static boolean isValidSlot(int slot) {
+        return slot >= 1 && slot <= GRID_SLOT_COUNT;
+    }
+
+    /** Returns the member UUIDs without exposing the persistent NBT layout to packet handlers. */
+    public static List<UUID> memberUuids(CompoundTag data, String color) {
+        List<UUID> members = new ArrayList<>();
+        for (Tag tag : teamMembers(data, color)) {
+            CompoundTag member = (CompoundTag) tag;
+            if (member.hasUUID("UUID")) members.add(member.getUUID("UUID"));
+        }
+        return members;
+    }
+
     /** Creates the file when absent and removes stale or structurally invalid members. */
     public static synchronized void ensureAndPrune(Path ownerDir) throws IOException {
         Files.createDirectories(ownerDir);
@@ -59,7 +78,20 @@ public final class PetTeamData {
     /** Places a pet into a numbered slot of one color team, kicking the previous
      *  occupant. The pet may keep its membership in other teams. */
     public static synchronized CompoundTag setMember(Path ownerDir, String color, int slot, UUID uuid) throws IOException {
-        CompoundTag raw = readRaw(ownerDir);
+        CompoundTag raw = teamData(ownerDir);
+        ListTag currentMembers = teamMembers(raw, color);
+        if (!isValidSlot(slot) || uuid == null
+                || !Files.isRegularFile(ownerDir.resolve(uuid + ".nbt"))) return raw;
+
+        boolean alreadyMember = false;
+        boolean slotOccupied = false;
+        for (Tag tag : currentMembers) {
+            CompoundTag member = (CompoundTag) tag;
+            alreadyMember |= member.hasUUID("UUID") && uuid.equals(member.getUUID("UUID"));
+            slotOccupied |= member.getInt("Slot") == slot;
+        }
+        if (currentMembers.size() >= raw.getInt("Capacity") && !alreadyMember && !slotOccupied) return raw;
+
         removeFromTeam(raw, color, uuid);
         CompoundTag team = teamTag(raw, color);
         ListTag members = new ListTag();
@@ -77,7 +109,9 @@ public final class PetTeamData {
 
     /** Moves a member to another numbered slot, swapping with the occupant when present. */
     public static synchronized CompoundTag moveMember(Path ownerDir, String color, int fromSlot, int toSlot) throws IOException {
-        if (fromSlot == toSlot) return teamData(ownerDir);
+        if (!isValidSlot(fromSlot) || !isValidSlot(toSlot) || fromSlot == toSlot) {
+            return teamData(ownerDir);
+        }
         CompoundTag raw = readRaw(ownerDir);
         CompoundTag team = teamTag(raw, color);
         CompoundTag from = null;
@@ -100,14 +134,9 @@ public final class PetTeamData {
 
     /** Removes a pet from one color team. */
     public static synchronized CompoundTag removeMember(Path ownerDir, String color, UUID uuid) throws IOException {
+        if (uuid == null) return teamData(ownerDir);
         CompoundTag raw = readRaw(ownerDir);
-        CompoundTag team = teamTag(raw, color);
-        ListTag members = new ListTag();
-        for (Tag tag : team.getList("Members", Tag.TAG_COMPOUND)) {
-            CompoundTag member = (CompoundTag) tag;
-            if (!uuid.equals(member.getUUID("UUID"))) members.add(member);
-        }
-        team.put("Members", members);
+        removeFromTeam(raw, color, uuid);
         return commit(ownerDir, raw);
     }
 
@@ -120,6 +149,7 @@ public final class PetTeamData {
 
     /** Persists the last wheel-summoned member as team color + slot number. */
     public static synchronized CompoundTag setLastSummon(Path ownerDir, String color, int slot) throws IOException {
+        if (!isValidSlot(slot)) return teamData(ownerDir);
         CompoundTag raw = readRaw(ownerDir);
         CompoundTag lastSummon = new CompoundTag();
         lastSummon.putString("Color", color);
@@ -169,6 +199,10 @@ public final class PetTeamData {
         return team;
     }
 
+    private static ListTag teamMembers(CompoundTag data, String color) {
+        return data.getCompound("Teams").getCompound(color).getList("Members", Tag.TAG_COMPOUND);
+    }
+
     static CompoundTag normalize(CompoundTag source, int configuredCapacity, Predicate<UUID> isTrackedByOwner) {
         int capacity = Math.max(1, configuredCapacity);
         CompoundTag normalized = source.copy();
@@ -190,7 +224,7 @@ public final class PetTeamData {
             lastColor = "";
         }
         int lastSlot = sourceLastSummon.getInt("Slot");
-        if (lastSlot < 1 || lastSlot > GRID_SLOT_COUNT) {
+        if (!isValidSlot(lastSlot)) {
             lastSlot = 0;
         }
         lastSummon.putString("Color", lastColor);
@@ -214,7 +248,7 @@ public final class PetTeamData {
                 if (!member.hasUUID("UUID")) continue;
                 UUID uuid = member.getUUID("UUID");
                 int slot = member.getInt("Slot");
-                if (slot < 1 || slot > GRID_SLOT_COUNT || occupiedSlots.contains(slot)
+                if (!isValidSlot(slot) || occupiedSlots.contains(slot)
                         || teamPets.contains(uuid) || !isTrackedByOwner.test(uuid)) continue;
                 occupiedSlots.add(slot);
                 teamPets.add(uuid);
