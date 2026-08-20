@@ -26,24 +26,13 @@ class ActionButton extends AbstractWidget {
 	private static final ResourceLocation ICON_SUMMON = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/world_in_a_bottle.png");
 	private static final ResourceLocation ICON_AREA_RECALL = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/absorption_bottle.png");
 	private static final int ICON_SIZE = 16;
-	private static final long HOVER_DELAY_MILLIS = 1000L;
 
 	private final TrulyScreen screen;
-	private long hoverStartMillis = -1L;
+	private final HoverDelay hoverDelay = new HoverDelay();
 
 	public ActionButton(int x, int y, TrulyScreen screen) {
 		super(x, y, 20, 20, Component.empty());
 		this.screen = screen;
-	}
-
-	private boolean isPetDead() {
-		CompoundTag nbt = screen.getSelectedNbt();
-		return nbt != null && nbt.contains("Health") && nbt.getFloat("Health") <= 0;
-	}
-
-	private boolean isPetRecalled() {
-		CompoundTag nbt = screen.getSelectedNbt();
-		return nbt != null && nbt.getBoolean("Recalled");
 	}
 
 	private long getLastClickTime() {
@@ -59,7 +48,7 @@ class ActionButton extends AbstractWidget {
 	}
 
 	private Component getDynamicTooltip() {
-		if (isPetDead()) {
+		if (screen.isSelectedPetDead()) {
 			return Component.translatable("trulybestfriends.action.dead").setStyle(Style.EMPTY.withColor(ChatFormatting.RED));
 		}
 		long remaining = getLastClickTime() + Config.recallCooldownMs - System.currentTimeMillis();
@@ -68,7 +57,7 @@ class ActionButton extends AbstractWidget {
 			return Component.translatable("trulybestfriends.action.cooldown", String.format("%.1f", secs))
 					.setStyle(Style.EMPTY.withColor(ChatFormatting.GRAY));
 		}
-		boolean recalled = isPetRecalled();
+		boolean recalled = screen.isSelectedPetRecalled();
 		if (recalled) {
 			return Component.translatable(screen.canSwapToSelectedPet()
 					? "trulybestfriends.ride_swap.label"
@@ -88,8 +77,8 @@ class ActionButton extends AbstractWidget {
 		if (!screen.hasSelection()) return;
 
 		boolean shiftHeld = Screen.hasShiftDown();
-		boolean dead = isPetDead();
-		boolean recalled = isPetRecalled();
+		boolean dead = screen.isSelectedPetDead();
+		boolean recalled = screen.isSelectedPetRecalled();
 		this.active = shiftHeld || !dead;
 
 		int frameV;
@@ -113,17 +102,14 @@ class ActionButton extends AbstractWidget {
 		int iconY = getY() + (height - ICON_SIZE) / 2;
 		guiGraphics.blit(icon, iconX, iconY, 0, 0, ICON_SIZE, ICON_SIZE, ICON_SIZE, ICON_SIZE);
 
-		if (mouseX >= getX() && mouseX <= getX() + width && mouseY >= getY() && mouseY <= getY() + height) {
-			long now = System.currentTimeMillis();
-			if (hoverStartMillis < 0L) {
-				hoverStartMillis = now;
-			}
-			if (shiftHeld || now - hoverStartMillis >= HOVER_DELAY_MILLIS) {
+		boolean hovered = mouseX >= getX() && mouseX <= getX() + width
+				&& mouseY >= getY() && mouseY <= getY() + height;
+		boolean tooltipReady = hoverDelay.isReady(hovered ? this : null);
+		if (hovered) {
+			if (shiftHeld || tooltipReady) {
 				Component tooltip = shiftHeld ? getAreaRecallTooltip() : getDynamicTooltip();
 				guiGraphics.renderTooltip(screen.font(), tooltip, mouseX, mouseY);
 			}
-		} else {
-			hoverStartMillis = -1L;
 		}
 	}
 
@@ -137,7 +123,7 @@ class ActionButton extends AbstractWidget {
 			return;
 		}
 
-		if (isPetDead()) return;
+		if (screen.isSelectedPetDead()) return;
 		long now = System.currentTimeMillis();
 		if (now - getLastClickTime() < Config.recallCooldownMs) return;
 		UUID uuid = screen.getSelectedUuid();

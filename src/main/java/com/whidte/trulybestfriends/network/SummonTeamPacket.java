@@ -2,8 +2,6 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -47,17 +45,11 @@ public class SummonTeamPacket implements CustomPacketPayload {
         context.enqueueWork(() -> {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
-            int colorIndex = Math.max(0, Math.min(PetTeamData.TEAM_COLORS.size() - 1, packet.colorIndex));
-            String color = PetTeamData.TEAM_COLORS.get(colorIndex);
+            String color = PetTeamData.colorAt(packet.colorIndex);
             Path ownerDir = PetIOUtil.getOwnerDir(player);
             try {
                 CompoundTag data = PetTeamData.teamData(ownerDir);
-                ListTag members = data.getCompound("Teams")
-                        .getCompound(color).getList("Members", Tag.TAG_COMPOUND);
-                for (Tag tag : members) {
-                    CompoundTag member = (CompoundTag) tag;
-                    if (!member.hasUUID("UUID")) continue;
-                    UUID uuid = member.getUUID("UUID");
+                for (UUID uuid : PetTeamData.memberUuids(data, color)) {
                     File nbtFile = ownerDir.resolve(uuid + ".nbt").toFile();
                     if (!nbtFile.exists()) continue;
                     CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);

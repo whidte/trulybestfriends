@@ -48,7 +48,7 @@ public class SetPriorityPacket implements CustomPacketPayload {
             if (player == null) return;
 
             // Clamp to valid range [1, 6]
-            int priority = Math.max(1, Math.min(6, packet.priority));
+            int priority = PetIOUtil.clampPriority(packet.priority);
 
             Path petDir = PetIOUtil.getOwnerDir(player);
 

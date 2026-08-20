@@ -1,6 +1,5 @@
 package com.whidte.trulybestfriends.tab;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,8 +9,10 @@ import java.util.UUID;
 import com.whidte.trulybestfriends.network.PetIOUtil;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import com.whidte.trulybestfriends.network.NbtFileIO;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -23,6 +24,18 @@ import net.minecraft.world.level.storage.LevelResource;
 final class PetDataLoader {
 
 	private PetDataLoader() {}
+
+	static Component displayName(Minecraft minecraft, CompoundTag nbt) {
+		if (nbt.contains("CustomName") && minecraft.level != null) {
+			try {
+				return Component.Serializer.fromJson(
+						nbt.getString("CustomName"), minecraft.level.registryAccess());
+			} catch (Exception ignored) {}
+		}
+		ResourceLocation id = ResourceLocation.tryParse(nbt.getString("EntityType"));
+		var type = id != null ? BuiltInRegistries.ENTITY_TYPE.get(id) : null;
+		return type != null ? type.getDescription() : Component.literal("???");
+	}
 
 	/** Resolve the owner-specific pet save directory.
 	 *  Returns null in multiplayer (client cannot access server saves); use
@@ -54,8 +67,7 @@ final class PetDataLoader {
 					UUID uuid = UUID.fromString(uuidStr);
 					cache.put(uuid, nbt);
 
-					int priority = nbt.contains("Priority") ? nbt.getInt("Priority") : 6;
-					priorities.put(uuid, Math.max(1, Math.min(6, priority)));
+					priorities.put(uuid, PetIOUtil.priorityFrom(nbt));
 				} catch (Exception e) {
 					trulybestfriends.LOGGER.error("Failed to read pet file: {}", file);
 				}

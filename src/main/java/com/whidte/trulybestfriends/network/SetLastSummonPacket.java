@@ -43,13 +43,10 @@ public class SetLastSummonPacket implements CustomPacketPayload {
         context.enqueueWork(() -> {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
-            int colorIndex = Math.max(0, Math.min(PetTeamData.TEAM_COLORS.size() - 1, packet.colorIndex));
-            String color = PetTeamData.TEAM_COLORS.get(colorIndex);
+            String color = PetTeamData.colorAt(packet.colorIndex);
             Path ownerDir = PetIOUtil.getOwnerDir(player);
             try {
-                if (packet.slot >= 1 && packet.slot <= PetTeamData.GRID_SLOT_COUNT) {
-                    PetTeamData.setLastSummon(ownerDir, color, packet.slot);
-                }
+                PetTeamData.setLastSummon(ownerDir, color, packet.slot);
                 TeamDataPacket.sendToPlayer(player, PetTeamData.teamData(ownerDir));
             } catch (Exception e) {
                 trulybestfriends.LOGGER.error("Failed to persist last summon for {}: {}",

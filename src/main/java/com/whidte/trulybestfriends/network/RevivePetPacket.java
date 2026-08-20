@@ -106,13 +106,10 @@ public class RevivePetPacket implements CustomPacketPayload {
                 applyTotemEffects(nbt);
 
                 // Persist the revived NBT, then summon the pet directly into the world
-                NbtFileIO.writeCompressed(nbt, nbtFile);
-                trulybestfriends.updatePetRecalledState(level, packet.petUuid, false);
+                PetIOUtil.writePetState(nbtFile, nbt, level, packet.petUuid);
                 if (!TeleportPetToPlayerPacket.summonFromDisk(nbt, packet.petUuid, player, level)) {
                     try {
-                        NbtFileIO.writeCompressed(deadSnapshot, nbtFile);
-                        trulybestfriends.updatePetRecalledState(
-                                level, packet.petUuid, deadSnapshot.getBoolean("Recalled"));
+                        PetIOUtil.writePetState(nbtFile, deadSnapshot, level, packet.petUuid);
                     } catch (IOException rollbackError) {
                         trulybestfriends.LOGGER.error("Failed to roll back revive for {}: {}",
                                 packet.petUuid, rollbackError.getMessage(), rollbackError);

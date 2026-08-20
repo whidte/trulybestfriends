@@ -1,5 +1,6 @@
 package com.whidte.trulybestfriends.tab;
 
+import com.whidte.trulybestfriends.network.PetIOUtil;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -152,6 +153,8 @@ final class TrulyConstants {
 	static final int REFERENCE_WINDOW_WIDTH = 1920;
 	/** 请求刷新已选宠物数据的间隔，单位为游戏刻。 */
 	static final int REFRESH_INTERVAL = 20;
+	/** Prevents client action buttons from sending duplicate packets on adjacent ticks. */
+	static final int BUTTON_COOLDOWN_TICKS = 5;
 	/** 生命恢复按钮的正方形边长。 */
 	static final int HEAL_BUTTON_SIZE = 18;
 	// --- Textures ---
@@ -227,7 +230,7 @@ final class TrulyConstants {
 	// --- Utility ---
 	/** 根据 1 至 6 的宠物优先级返回对应的通知图标。 */
 	static ResourceLocation prioritySprite(int priority) {
-		return PRIORITY_SPRITES[Math.max(1, Math.min(6, priority)) - 1];
+		return PRIORITY_SPRITES[PetIOUtil.clampPriority(priority) - 1];
 	}
 
 	/** Discard a preview entity from the client world. */

@@ -2,6 +2,7 @@ package com.whidte.trulybestfriends.tab;
 
 import net.neoforged.neoforge.network.PacketDistributor;
 
+import com.whidte.trulybestfriends.network.PetIOUtil;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
@@ -20,6 +21,8 @@ import static com.whidte.trulybestfriends.tab.RenderHelper.detectMultipartYBase;
 import static com.whidte.trulybestfriends.tab.RenderHelper.buildMultipartPose;
 import static com.whidte.trulybestfriends.tab.RenderHelper.multipartPitchRadians;
 import static com.whidte.trulybestfriends.tab.RenderHelper.renderEntityInInventory;
+import static com.whidte.trulybestfriends.tab.RenderHelper.applyPreviewRotation;
+import static com.whidte.trulybestfriends.tab.RenderHelper.isMultipartPreview;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 
 class PetEntry extends AbstractWidget {
@@ -66,7 +69,7 @@ class PetEntry extends AbstractWidget {
 			float miniScale = TrulyScreen.computePreviewScale(pet, BASE_SCALE * LIST_ENTRY_SCALE_RATIO);
 			int miniX = getX() + width / 2;
 			int miniY = getY() + (textY - getY()) / 2 + 7;
-			boolean multipart = pet.getScale() > 1.0001f || (pet.getParts() != null && pet.getParts().length > 0);
+			boolean multipart = isMultipartPreview(pet);
 			Quaternionf quat;
 			Quaternionf quatPitch;
 			if (multipart) {
@@ -81,20 +84,7 @@ class PetEntry extends AbstractWidget {
 				quatPitch = NORMAL_QUAT_PITCH;
 			}
 
-			if (!multipart) {
-				pet.yBodyRot = 180.0F + DEFAULT_ROT_X * 20.0F;
-				pet.setYRot(180.0F + DEFAULT_ROT_X * 40.0F);
-				pet.setXRot(-DEFAULT_ROT_Y * 20.0F);
-				pet.yHeadRot = pet.yBodyRot;
-				pet.yHeadRotO = pet.yBodyRot;
-			} else {
-				pet.yBodyRot = 0f;
-				pet.yBodyRotO = 0f;
-				pet.setYRot(0f);
-				pet.yRotO = 0f;
-				pet.yHeadRot = 0f;
-				pet.yHeadRotO = 0f;
-			}
+			applyPreviewRotation(pet, multipart, DEFAULT_ROT_X, DEFAULT_ROT_Y, false);
 
 			guiGraphics.enableScissor(getX() + 1, getY() + 1, getX() + width - 1, textY - 1);
 			try {
@@ -104,7 +94,8 @@ class PetEntry extends AbstractWidget {
 			}
 		}
 
-		int priority = Math.max(1, Math.min(6, screen.petPriorities.getOrDefault(uuid, 6)));
+		int priority = PetIOUtil.clampPriority(
+				screen.petPriorities.getOrDefault(uuid, PetIOUtil.DEFAULT_PRIORITY));
 		if (priority <= 5 || Screen.hasShiftDown()) {
 			guiGraphics.blitSprite(prioritySprite(priority), getX() + 1, getY() + 1, 8, 8);
 		}

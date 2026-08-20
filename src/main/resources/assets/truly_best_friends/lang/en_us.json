@@ -54,7 +54,7 @@
   "trulybestfriends.revive.cooldown": "Revive %ss left",
   "trulybestfriends.revive.prefix": "Use ",
   "trulybestfriends.revive.suffix": " to revive",
-  "trulybestfriends.revive.not_revivable": "This creature cannot be revived this way!",
+  "trulybestfriends.revive.not_revivable": "Cannot be resurrected!",
   "trulybestfriends.delete.tooltip": "Stop reading this pet's data",
   "trulybestfriends.delete.confirm": "Hold Shift and click to delete permanently",
   "trulybestfriends.delete.lost": "Click to delete lost pet data forever (A long time!)",

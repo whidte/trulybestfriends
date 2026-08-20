@@ -29,8 +29,6 @@ import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
  */
 class SummonToPlayerButton extends AbstractWidget {
     private static final int BUTTON_HEIGHT = 20;
-    private static final int COOLDOWN_TICKS = 5;
-
     private static final int COLOR_DISABLED = 0x555555;
     private static final int COLOR_NORMAL = 0xFFFFFF;
     private static final int COLOR_HOVERED = 0xFFFF55;
@@ -44,11 +42,6 @@ class SummonToPlayerButton extends AbstractWidget {
         this.screen = screen;
     }
 
-    private boolean isPetDead() {
-        CompoundTag nbt = screen.getSelectedNbt();
-        return nbt != null && nbt.contains("Health") && nbt.getFloat("Health") <= 0;
-    }
-
     /** Whitelisted entity types cannot be revived via this mod. */
     private boolean isPetNotRevivable() {
         CompoundTag nbt = screen.getSelectedNbt();
@@ -56,20 +49,9 @@ class SummonToPlayerButton extends AbstractWidget {
                 && Config.isNoReviveEntity(nbt.getString("EntityType"));
     }
 
-    private boolean isPetRecalled() {
-        CompoundTag nbt = screen.getSelectedNbt();
-        return nbt != null && nbt.getBoolean("Recalled");
-    }
-
     private boolean isPetOnShoulder() {
         java.util.UUID uuid = screen.getSelectedUuid();
         return uuid != null && screen.isPetOnShoulder(uuid);
-    }
-
-    private boolean isOnCooldown() {
-        if (screen.getMinecraft().level == null) return true;
-        long currentTick = screen.getMinecraft().level.getGameTime();
-        return currentTick - lastClickTick < COOLDOWN_TICKS;
     }
 
     /** Check the recall/summon cooldown (Config.recallCooldownMs), shared with ActionButton */
@@ -107,10 +89,10 @@ class SummonToPlayerButton extends AbstractWidget {
     public void renderWidget(@NotNull GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         if (!screen.hasSelection()) return;
 
-        boolean dead = isPetDead();
+        boolean dead = screen.isSelectedPetDead();
         boolean onShoulder = isPetOnShoulder();
-        boolean recalled = isPetRecalled();
-        boolean cooldown = isOnCooldown();
+        boolean recalled = screen.isSelectedPetRecalled();
+        boolean cooldown = screen.isButtonCooldownActive(lastClickTick);
         boolean recallCooldown = isRecallCooldownActive();
         boolean hasItems = hasReviveItems();
         boolean notRevivable = dead && isPetNotRevivable();
@@ -149,13 +131,7 @@ class SummonToPlayerButton extends AbstractWidget {
         if (notRevivable) {
             color = COLOR_DISABLED;
         } else if (dead) {
-            if (!hasItems || cooldown || reviveCooldown) {
-                color = COLOR_DISABLED;
-            } else if (isHovered()) {
-                color = COLOR_REVIVE_OK;
-            } else {
-                color = COLOR_REVIVE_OK;
-            }
+            color = !hasItems || cooldown || reviveCooldown ? COLOR_DISABLED : COLOR_REVIVE_OK;
         } else if (recalled && recallCooldown) {
             color = COLOR_DISABLED;
         } else if (onShoulder || cooldown) {
@@ -183,15 +159,13 @@ class SummonToPlayerButton extends AbstractWidget {
         if (!screen.hasSelection()) return;
         boolean directTeleport = Screen.hasShiftDown() && screen.canSwapToSelectedPet();
 
-        if (isPetDead()) {
+        if (screen.isSelectedPetDead()) {
             // Whitelisted entity types cannot be revived
             if (isPetNotRevivable()) return;
-            if (isOnCooldown()) return;
+            if (screen.isButtonCooldownActive(lastClickTick)) return;
             if (getReviveCooldownRemainingMs() > 0) return;
             if (!hasReviveItems()) return;
-            if (screen.getMinecraft().level != null) {
-                lastClickTick = screen.getMinecraft().level.getGameTime();
-            }
+            lastClickTick = screen.currentGameTick();
             // Optimistic update: mark pet as alive with 1 HP in cache immediately
             CompoundTag nbt = screen.getSelectedNbt();
             if (nbt != null) {
@@ -207,7 +181,7 @@ class SummonToPlayerButton extends AbstractWidget {
 
         // Recalled pet: release via RecallPetPacket (same as ActionButton),
         // gated by Config.recallCooldownMs
-        if (isPetRecalled()) {
+        if (screen.isSelectedPetRecalled()) {
             if (isRecallCooldownActive()) return;
             long now = System.currentTimeMillis();
             java.util.UUID uuid = screen.getSelectedUuid();
@@ -226,10 +200,8 @@ class SummonToPlayerButton extends AbstractWidget {
             return;
         }
 
-        if (isPetOnShoulder() || isOnCooldown()) return;
-        if (screen.getMinecraft().level != null) {
-            lastClickTick = screen.getMinecraft().level.getGameTime();
-        }
+        if (isPetOnShoulder() || screen.isButtonCooldownActive(lastClickTick)) return;
+        lastClickTick = screen.currentGameTick();
         PacketDistributor.sendToServer(directTeleport
                 ? new DirectTeleportPetToPlayerPacket(screen.getSelectedUuid())
                 : new TeleportPetToPlayerPacket(screen.getSelectedUuid()));

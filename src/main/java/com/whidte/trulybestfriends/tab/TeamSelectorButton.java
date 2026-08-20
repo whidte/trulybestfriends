@@ -1,7 +1,6 @@
 package com.whidte.trulybestfriends.tab;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
@@ -15,7 +14,6 @@ import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 /** Selects which of the eight color-coded pet teams is active. */
 class TeamSelectorButton extends AbstractWidget {
 
-    private static final long HOVER_DELAY_MILLIS = 1000L;
     private static final int ICON_SIZE = 16;
     private static final int[] CELL_TEAMS = {
             1, 0, 4,
@@ -44,10 +42,9 @@ class TeamSelectorButton extends AbstractWidget {
     };
 
     private final TrulyScreen screen;
+    private final HoverDelay hoverDelay = new HoverDelay();
     private boolean expanded;
     private int hoveredTeam = -1;
-    private int previousHoveredTeam = -1;
-    private long hoverStartMillis = -1L;
 
     TeamSelectorButton(int x, int y, TrulyScreen screen) {
         super(x, y, TEAM_SELECTOR_BUTTON_SIZE, TEAM_SELECTOR_BUTTON_SIZE,
@@ -112,18 +109,8 @@ class TeamSelectorButton extends AbstractWidget {
     }
 
     void renderTooltip(@NotNull GuiGraphics graphics, int mouseX, int mouseY) {
-        if (!visible || hoveredTeam < 0) {
-            previousHoveredTeam = -1;
-            hoverStartMillis = -1L;
-            return;
-        }
-
-        long now = Util.getMillis();
-        if (hoveredTeam != previousHoveredTeam) {
-            previousHoveredTeam = hoveredTeam;
-            hoverStartMillis = now;
-        }
-        if (now - hoverStartMillis >= HOVER_DELAY_MILLIS) {
+        Integer hoverTarget = visible && hoveredTeam >= 0 ? hoveredTeam : null;
+        if (hoverDelay.isReady(hoverTarget)) {
             graphics.renderTooltip(screen.font(), Component.translatable(TEAM_NAMES[hoveredTeam]), mouseX, mouseY);
         }
     }

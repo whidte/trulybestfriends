@@ -30,7 +30,7 @@ side="BOTH"
 [[dependencies.${mod_id}]]
 modId="l2library"
 type="optional"
-versionRange="[3.0.8,)"
+versionRange="[3.0.0,)"
 ordering="AFTER"
 side="BOTH"
 [[dependencies.${mod_id}]]

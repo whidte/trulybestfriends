@@ -35,8 +35,27 @@ import java.util.function.Predicate;
  * and reflection caching for private shoulder methods.
  */
 public final class PetIOUtil {
+	public static final int MIN_PRIORITY = 1;
+	public static final int MAX_PRIORITY = 6;
+	public static final int DEFAULT_PRIORITY = MAX_PRIORITY;
 
     private PetIOUtil() {}
+
+	public static int clampPriority(int priority) {
+		return Math.max(MIN_PRIORITY, Math.min(MAX_PRIORITY, priority));
+	}
+
+	public static int priorityFrom(CompoundTag nbt) {
+		return nbt != null && nbt.contains("Priority")
+				? clampPriority(nbt.getInt("Priority")) : DEFAULT_PRIORITY;
+	}
+
+    /** Writes a pet snapshot and keeps the recalled-state index in sync with it. */
+    public static void writePetState(File file, CompoundTag nbt,
+                                     ServerLevel level, UUID petUuid) throws IOException {
+        NbtFileIO.writeCompressed(nbt, file);
+        trulybestfriends.updatePetRecalledState(level, petUuid, nbt.getBoolean("Recalled"));
+    }
 
     // ---- Owner directory ----
 
@@ -235,9 +254,7 @@ public final class PetIOUtil {
             } catch (IOException ignored) {}
         }
 
-        int priority = oldNbt != null && oldNbt.contains("Priority")
-                ? Math.max(1, Math.min(6, oldNbt.getInt("Priority")))
-                : 6;
+        int priority = priorityFrom(oldNbt);
         boolean recalledValue = !PetDeathState.isStoredDead(snapshot)
                 && (preserveRecalled && oldNbt != null ? oldNbt.getBoolean("Recalled") : recalled);
 

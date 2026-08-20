@@ -326,8 +326,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     private static void restoreRideSwapTargetSnapshot(File nbtFile, CompoundTag snapshot,
                                                        UUID petUuid, ServerLevel level) {
         try {
-            NbtFileIO.writeCompressed(snapshot, nbtFile);
-            trulybestfriends.updatePetRecalledState(level, petUuid, snapshot.getBoolean("Recalled"));
+            PetIOUtil.writePetState(nbtFile, snapshot, level, petUuid);
         } catch (IOException e) {
             trulybestfriends.LOGGER.error("Failed to roll back ride swap target {}: {}",
                     petUuid, e.getMessage(), e);
@@ -363,8 +362,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             return true;
         }
         try {
-            NbtFileIO.writeCompressed(releasedNbt, nbtFile);
-            trulybestfriends.updatePetRecalledState(level, petUuid, false);
+            PetIOUtil.writePetState(nbtFile, releasedNbt, level, petUuid);
         } catch (IOException e) {
             trulybestfriends.LOGGER.error("Failed to prepare recalled ride swap target {}: {}",
                     petUuid, e.getMessage());
@@ -377,8 +375,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         if (restored != null && finishRideSwap(player, currentMount, restored)) return true;
         if (restored != null) restored.discard();
         try {
-            NbtFileIO.writeCompressed(recalledNbt, nbtFile);
-            trulybestfriends.updatePetRecalledState(level, petUuid, true);
+            PetIOUtil.writePetState(nbtFile, recalledNbt, level, petUuid);
         } catch (IOException rollbackError) {
             trulybestfriends.LOGGER.error("Failed to roll back recalled ride swap target {}: {}",
                     petUuid, rollbackError.getMessage(), rollbackError);

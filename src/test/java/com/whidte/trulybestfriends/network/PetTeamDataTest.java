@@ -11,6 +11,12 @@ public final class PetTeamDataTest {
     private PetTeamDataTest() {}
 
     public static void main(String[] args) {
+        require("white".equals(PetTeamData.colorAt(-1)), "negative color index not clamped");
+        require("yellow".equals(PetTeamData.colorAt(99)), "high color index not clamped");
+        require(PetTeamData.isValidSlot(1) && PetTeamData.isValidSlot(8)
+                        && !PetTeamData.isValidSlot(0) && !PetTeamData.isValidSlot(9),
+                "slot validation changed");
+
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
         UUID stale = UUID.randomUUID();
@@ -71,6 +77,8 @@ public final class PetTeamDataTest {
         require(first.equals(keptWhite.getCompound(0).getUUID("UUID")), "member UUID was not retained");
         require(keptWhite.getCompound(1).getInt("Slot") == 7, "high grid slot was not retained");
         require(second.equals(keptWhite.getCompound(1).getUUID("UUID")), "second member UUID was not retained");
+        require(PetTeamData.memberUuids(normalized, "white").equals(java.util.List.of(first, second)),
+                "member UUID projection changed");
         require(keptGreen.size() == 1 && first.equals(keptGreen.getCompound(0).getUUID("UUID")),
                 "multi-team membership was not retained");
         require("purple".equals(normalizedTeams.getCompound("purple").getString("Color")),
