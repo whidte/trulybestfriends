@@ -15,8 +15,8 @@ import java.util.function.Supplier;
  * Client → Server: summon every summonable member of one formation team.
  *
  * Reuses the existing summon paths ({@link RecallPetPacket} /
- * {@link TeleportPetToPlayerPacket}) without ride-swap. Dead and lost
- * pets are skipped silently.
+ * {@link TeleportPetToPlayerPacket}) without ride-swap. Dead pets are
+ * skipped silently; unloaded members go through the force-load summon path.
  */
 public class SummonTeamPacket {
     private final int colorIndex;
@@ -46,7 +46,9 @@ public class SummonTeamPacket {
                     if (!nbtFile.exists()) continue;
                     CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
                     if (PetDeathState.isDeadSnapshot(nbt)) continue;
-                    if (nbt.getBoolean("Lost") || !nbt.contains("Pos") || !nbt.contains("Dimension")) continue;
+                    // No "Lost" filter: an unloaded member can still be summoned
+                    // through TeleportPetToPlayerPacket's force-load path.
+                    if (!nbt.contains("Pos") || !nbt.contains("Dimension")) continue;
                     if (nbt.getBoolean("Recalled")) {
                         RecallPetPacket.handleWithoutRideSwap(uuid, ctx);
                     } else {
