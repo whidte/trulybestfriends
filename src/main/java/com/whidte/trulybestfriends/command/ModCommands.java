@@ -152,6 +152,11 @@ public class ModCommands {
     private static InteractionResult onEntityInteract(Player player, Level world, InteractionHand hand,
                                                       Entity target, EntityHitResult hitResult) {
         if (!(player instanceof ServerPlayer serverPlayer)) return InteractionResult.PASS;
+        // Fabric fires UseEntityCallback for both the INTERACT_AT and the INTERACT
+        // packets, so a single click would run the registration twice (and consume
+        // the register item twice). Only react to the position-less interact call,
+        // which is the hook the Forge version listens to (EntityInteract).
+        if (hitResult != null) return InteractionResult.PASS;
         ItemStack heldItem = serverPlayer.getItemInHand(hand);
         var heldItemId = BuiltInRegistries.ITEM.getKey(heldItem.getItem());
         if (heldItemId == null || !heldItemId.toString().equals(Config.manualRegisterItem)) {

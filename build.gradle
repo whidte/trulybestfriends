@@ -5,7 +5,9 @@ plugins {
     id 'maven-publish'
 }
 
-version = mod_version
+// Artifact naming: trulybestfriends-{mod_version}-fabric{minecraft_version}
+// e.g. trulybestfriends-0.2.2-fabric1.20.1.jar
+version = "${mod_version}-fabric${minecraft_version}"
 group = mod_group_id
 
 base {

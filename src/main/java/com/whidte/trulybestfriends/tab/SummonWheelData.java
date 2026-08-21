@@ -59,8 +59,10 @@ public final class SummonWheelData {
         CompoundTag nbt = PETS.get(uuid);
         if (nbt == null || nbt.contains("Health") && nbt.getFloat("Health") <= 0.0F) return false;
         if (nbt.getBoolean("Recalled")) return true;
-        return !nbt.getBoolean("Lost")
-                && nbt.contains("Pos")
+        // "Lost" only means the entity is not currently loaded — it may sit in an
+        // unloaded chunk, which the server can force-load and summon just like the
+        // pet-screen summon button does. Keep the data-completeness checks only.
+        return nbt.contains("Pos")
                 && nbt.contains("Dimension");
     }
 
