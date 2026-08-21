@@ -3,29 +3,27 @@ package com.whidte.trulybestfriends.client;
 import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeamDataPacket;
+import com.whidte.trulybestfriends.network.PacketContext;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
 import com.whidte.trulybestfriends.tab.SummonWheelData;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
-import net.minecraftforge.network.NetworkEvent;
-
-import java.util.function.Supplier;
 
 /**
  * Client-only handlers for server → client packets.
  *
  * <p>This class must never be loaded on a dedicated server: it references
  * {@code net.minecraft.client.*} classes which do not exist there. It is only
- * reached through the dist-guarded lambdas in
- * {@link com.whidte.trulybestfriends.trulybestfriends#commonSetup}.</p>
+ * reached through the client-side packet registrations in
+ * {@link ClientEvents#onInitializeClient()}.</p>
  */
 public final class ClientPacketHandlers {
 
     private ClientPacketHandlers() {
     }
 
-    public static void handle(PetWarningPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
+    public static void handle(PetWarningPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
             Minecraft mc = Minecraft.getInstance();
             if (mc.screen instanceof TrulyScreen screen) {
                 Component msg = Component.translatable(switch (packet.getType()) {
@@ -38,12 +36,12 @@ public final class ClientPacketHandlers {
                 screen.showWarning(msg, packet.getPetUuid());
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 
-    public static void handle(SyncPetDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
+    public static void handle(SyncPetDataPacket packet, PacketContext ctx) {
         final SyncPetDataPacket received = packet;
-        ctx.get().enqueueWork(() -> {
+        ctx.enqueueWork(() -> {
             SyncPetDataPacket applyPacket = received;
             if (applyPacket.getMode() == SyncPetDataPacket.MODE_FRAGMENT) {
                 SyncPetDataPacket complete = SyncPetDataPacket.collectFragment(applyPacket);
@@ -58,11 +56,11 @@ public final class ClientPacketHandlers {
                 TrulyScreen.cacheSyncPacket(applyPacket);
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 
-    public static void handle(TeamDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
+    public static void handle(TeamDataPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
             Minecraft mc = Minecraft.getInstance();
             SummonWheelData.applyTeamData(packet);
             if (mc.screen instanceof TrulyScreen screen) {
@@ -71,6 +69,6 @@ public final class ClientPacketHandlers {
                 TrulyScreen.cacheTeamData(packet);
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 }

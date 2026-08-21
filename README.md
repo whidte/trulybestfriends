@@ -1,6 +1,6 @@
 # 真正永恒的伙伴（Truly Best Friends Forever）
 
-> 让你的宠物永远陪伴在身边 —— 一个面向 Minecraft 1.20.1（Forge）的宠物管理模组，立志做最好的 Minecraft 宠物管理模组。
+> 让你的宠物永远陪伴在身边 —— 一个面向 Minecraft 1.20.1 的宠物管理模组，立志做最好的 Minecraft 宠物管理模组。此分支为 **Fabric 移植版**（基于 master 的 Forge 版本移植）。
 
 **版本**：0.2.0.1 · **作者**：whidte · **协议**：GPL-3.0
 
@@ -46,17 +46,17 @@
 
 ## 安装
 
-1. 安装 **Minecraft 1.20.1** + **Forge 47.4.20** 或以上版本。
+1. 安装 **Minecraft 1.20.1** + **Fabric Loader 0.15.11** 或以上版本 + **Fabric API 0.92.x**。
 2. 将以下模组 jar 放入 `.minecraft/mods/`：
    - Truly Best Friends Forever（本模组）
-   - 可选：与 Minecraft 1.20.1 兼容的 L2 Library / L2Tabs（提供物品栏标签页；未安装时使用快捷键）
+   - 可选：与 Minecraft 1.20.1 兼容的 Fabric 版 L2Tabs（提供物品栏标签页；未安装时使用快捷键）
 3. 启动游戏并进入存档。驯服宠物后，模组便会开始追踪。
 
 > 服务端与客户端均需安装本模组及其依赖。本模组包含网络同步逻辑，不能仅安装在客户端。
 
 ## 配置
 
-配置文件位于 `config/trulybestfriends-common.toml`：
+配置文件位于 `config/trulybestfriends.json`：
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
@@ -138,7 +138,8 @@
 ```
 
 - **Minecraft**：1.20.1
-- **Forge**：47.4.20
+- **Fabric Loader**：0.15.11
+- **Fabric API**：0.92.2+1.20.1
 - **Java**：17
 
 ## 协议
@@ -149,6 +150,6 @@
 
 遇到 bug 或有功能建议，请在 [GitHub Issues](https://github.com/whidte/trulybestfriends/issues) 提交，并附上：
 
-- Minecraft、Forge 和本模组的版本；
+- Minecraft、Fabric Loader 和本模组的版本；
 - 完整的 `latest.log` 或 `crash-report`；
 - 可复现问题的操作步骤。

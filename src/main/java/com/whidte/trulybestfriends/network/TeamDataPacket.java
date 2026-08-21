@@ -4,7 +4,7 @@ import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.PacketDistributor;
+import com.whidte.trulybestfriends.network.TrulyNetwork;
 
 /**
  * Server → Client: full normalized formation team data
@@ -30,7 +30,6 @@ public class TeamDataPacket {
     }
 
     public static void sendToPlayer(ServerPlayer player, CompoundTag teamData) {
-        trulybestfriends.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player), new TeamDataPacket(teamData));
+        TrulyNetwork.sendToClient(player, new TeamDataPacket(teamData));
     }
 }

@@ -6,7 +6,12 @@
   "refmap": "trulybestfriends.refmap.json",
   "mixins": [
     "EntityMixin",
-    "LivingEntityMixin"
+    "LivingEntityMixin",
+    "AnimalMixin"
+  ],
+  "client": [
+    "KeyboardInputMixin",
+    "KeyMappingAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

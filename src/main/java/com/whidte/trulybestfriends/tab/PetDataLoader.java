@@ -14,7 +14,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import com.whidte.trulybestfriends.network.NbtFileIO;
 import net.minecraft.world.level.storage.LevelResource;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /**
  * Handles all disk I/O for pet NBT data.
@@ -32,7 +32,7 @@ final class PetDataLoader {
 			} catch (Exception ignored) {}
 		}
 		ResourceLocation id = ResourceLocation.tryParse(nbt.getString("EntityType"));
-		var type = id != null ? ForgeRegistries.ENTITY_TYPES.getValue(id) : null;
+		var type = id != null ? BuiltInRegistries.ENTITY_TYPE.getOptional(id).orElse(null) : null;
 		return type != null ? type.getDescription() : Component.literal("???");
 	}
 

@@ -9,8 +9,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.entity.PartEntity;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.compat.PartEntityCompat;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.io.File;
 import java.io.IOException;
@@ -37,18 +37,18 @@ public class RecallPetPacket {
     /** Server determines action based on actual world state, not client guess.
      *  Mirrors TeleportPetToPlayerPacket's strict entity-existence checks:
      *  searches the pet's stored dimension before falling back to chunk force-load. */
-    public static void handle(RecallPetPacket packet, Supplier<NetworkEvent.Context> ctx) {
+    public static void handle(RecallPetPacket packet, PacketContext ctx) {
         handle(packet, ctx, true);
     }
 
-    static void handleWithoutRideSwap(UUID petUuid, Supplier<NetworkEvent.Context> ctx) {
+    static void handleWithoutRideSwap(UUID petUuid, PacketContext ctx) {
         handle(new RecallPetPacket(petUuid), ctx, false);
     }
 
-    private static void handle(RecallPetPacket packet, Supplier<NetworkEvent.Context> ctx,
+    private static void handle(RecallPetPacket packet, PacketContext ctx,
                                boolean allowRideSwap) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
             ServerLevel playerLevel = player.serverLevel();
 
@@ -58,7 +58,7 @@ public class RecallPetPacket {
             // Multipart sub-parts (e.g., dragon tail) are never tracked
             // directly — refuse to recall them to avoid discarding a part
             // without its parent, which would corrupt the multipart entity.
-            if (entity instanceof PartEntity<?>) return;
+            if (PartEntityCompat.isPartEntity(entity)) return;
 
             if (entity instanceof LivingEntity living && living.isAlive()) {
                 // If the entity is no longer tracked, its data was already cleared
@@ -204,7 +204,7 @@ public class RecallPetPacket {
 
             player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT, net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 
     public static boolean savePetToDisk(UUID playerUuid, LivingEntity pet, ServerLevel level) {

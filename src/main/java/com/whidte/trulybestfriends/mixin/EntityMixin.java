@@ -49,4 +49,12 @@ public abstract class EntityMixin {
             callback.cancel();
         }
     }
+
+    /** Posts the Forge EntityMountEvent (mounting only) equivalent after a ride starts. */
+    @Inject(method = "startRiding(Lnet/minecraft/world/entity/Entity;Z)Z", at = @At("RETURN"))
+    private void trulybestfriends$onMount(Entity mount, boolean force, CallbackInfoReturnable<Boolean> callback) {
+        if (!Boolean.TRUE.equals(callback.getReturnValue())) return;
+        Entity entity = (Entity) (Object) this;
+        trulybestfriends.onEntityMount(entity, mount);
+    }
 }

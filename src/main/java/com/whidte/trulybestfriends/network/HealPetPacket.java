@@ -2,7 +2,7 @@ package com.whidte.trulybestfriends.network;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -25,8 +25,7 @@ public class HealPetPacket {
         return new HealPetPacket(buf.readUUID(), buf.readBoolean());
     }
 
-    public static void handle(HealPetPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
+    public static void handle(HealPetPacket packet, PacketContext context) {
         context.enqueueWork(() -> {
             ServerPlayer player = context.getSender();
             if (player != null) PetHealingManager.activate(player, packet.petUuid, packet.advanced);

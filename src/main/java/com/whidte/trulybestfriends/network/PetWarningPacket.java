@@ -3,7 +3,7 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.PacketDistributor;
+import com.whidte.trulybestfriends.network.TrulyNetwork;
 
 import java.util.UUID;
 
@@ -32,8 +32,7 @@ public class PetWarningPacket {
     }
 
     public static void send(ServerPlayer player, int type, UUID petUuid) {
-        trulybestfriends.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player), new PetWarningPacket(type, petUuid));
+        TrulyNetwork.sendToClient(player, new PetWarningPacket(type, petUuid));
     }
 
     public int getType() { return type; }

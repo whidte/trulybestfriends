@@ -6,7 +6,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.UUID;
 
@@ -18,7 +18,7 @@ public final class PetEntitySnapshot {
         CompoundTag nbt = new CompoundTag();
         if (!entity.saveAsPassenger(nbt)) {
             entity.saveWithoutId(nbt);
-            nbt.putString("id", ForgeRegistries.ENTITY_TYPES.getKey(entity.getType()).toString());
+            nbt.putString("id", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
         }
 
         if (entity instanceof LivingEntity living) {
@@ -26,7 +26,7 @@ public final class PetEntitySnapshot {
         }
         TeleportPetToPlayerPacket.backupChestInventory(entity, nbt);
         nbt.putString("OwnerUUID", ownerUUID.toString());
-        nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(entity.getType()).toString());
+        nbt.putString("EntityType", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
         nbt.putString("Dimension", level.dimension().location().toString());
         return copyRootEntityOnly(nbt);
     }

@@ -4,7 +4,7 @@ import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -37,9 +37,9 @@ public class SetPriorityPacket {
         return new SetPriorityPacket(buf.readUUID(), buf.readVarInt());
     }
 
-    public static void handle(SetPriorityPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(SetPriorityPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
 
             // Clamp to valid range [1, 6]
@@ -72,6 +72,6 @@ public class SetPriorityPacket {
                 trulybestfriends.LOGGER.error("Failed to update priority for {}: {}", packet.petUuid, e.getMessage());
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 }

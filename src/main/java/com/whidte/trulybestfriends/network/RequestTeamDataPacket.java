@@ -3,7 +3,7 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.util.function.Supplier;
 
@@ -16,9 +16,9 @@ public class RequestTeamDataPacket {
         return new RequestTeamDataPacket();
     }
 
-    public static void handle(RequestTeamDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(RequestTeamDataPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
             try {
                 TeamDataPacket.sendToPlayer(player, PetTeamData.teamData(PetIOUtil.getOwnerDir(player)));
@@ -27,6 +27,6 @@ public class RequestTeamDataPacket {
                         player.getGameProfile().getName(), e.getMessage());
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 }

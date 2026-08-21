@@ -19,10 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.items.IItemHandler;
-import net.minecraftforge.items.IItemHandlerModifiable;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.io.File;
 import java.io.IOException;
@@ -58,18 +55,18 @@ public class TeleportPetToPlayerPacket {
         return new TeleportPetToPlayerPacket(buf.readUUID());
     }
 
-    public static void handle(TeleportPetToPlayerPacket packet, Supplier<NetworkEvent.Context> ctx) {
+    public static void handle(TeleportPetToPlayerPacket packet, PacketContext ctx) {
         handle(packet, ctx, true);
     }
 
-    static void handleWithoutRideSwap(UUID petUuid, Supplier<NetworkEvent.Context> ctx) {
+    static void handleWithoutRideSwap(UUID petUuid, PacketContext ctx) {
         handle(new TeleportPetToPlayerPacket(petUuid), ctx, false);
     }
 
-    private static void handle(TeleportPetToPlayerPacket packet, Supplier<NetworkEvent.Context> ctx,
+    private static void handle(TeleportPetToPlayerPacket packet, PacketContext ctx,
                                boolean allowRideSwap) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
             ServerLevel playerLevel = player.serverLevel();
             LivingEntity rideSwapMount = allowRideSwap
@@ -196,7 +193,7 @@ public class TeleportPetToPlayerPacket {
                 PetWarningPacket.send(player, 1, packet.petUuid);
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 
     private static void teleportEntityToPlayer(LivingEntity entity, ServerPlayer player, ServerLevel level) {
@@ -435,29 +432,28 @@ public class TeleportPetToPlayerPacket {
         }
     }
 
-    /** Restores a modded entity inventory through Forge's stable capability API. */
+    /** Restores a modded entity inventory through Fabric's transfer API. */
     public static void restoreChestInventory(Entity entity, CompoundTag nbt) {
         if (entity instanceof AbstractHorse) return;
         if (!nbt.contains("TBF_ItemHandlerSize", 3)
                 && !nbt.contains("TBF_ItemHandlerItems", 9)) return;
 
-        entity.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().ifPresent(handler -> {
-            if (!(handler instanceof IItemHandlerModifiable modifiable)) return;
-            try {
-                InventoryRestoreResult result = restoreItemHandler(modifiable, nbt);
-                if (result == InventoryRestoreResult.CONFLICT) {
-                    trulybestfriends.LOGGER.warn(
-                            "Skipped item-handler backup for {} because its live inventory is nonempty and differs",
-                            entity.getClass().getSimpleName());
-                }
-            } catch (RuntimeException e) {
-                trulybestfriends.LOGGER.error("Failed to restore item handler for {}: {}",
-                        entity.getClass().getSimpleName(), e.getMessage(), e);
+        TrulyInventory handler = inventoryOf(entity);
+        if (handler == null) return;
+        try {
+            InventoryRestoreResult result = restoreItemHandler(handler, nbt);
+            if (result == InventoryRestoreResult.CONFLICT) {
+                trulybestfriends.LOGGER.warn(
+                        "Skipped item-handler backup for {} because its live inventory is nonempty and differs",
+                        entity.getClass().getSimpleName());
             }
-        });
+        } catch (RuntimeException e) {
+            trulybestfriends.LOGGER.error("Failed to restore item handler for {}: {}",
+                    entity.getClass().getSimpleName(), e.getMessage(), e);
+        }
     }
 
-    static InventoryRestoreResult restoreItemHandler(IItemHandlerModifiable handler, CompoundTag nbt) {
+    static InventoryRestoreResult restoreItemHandler(TrulyInventory handler, CompoundTag nbt) {
         int savedSize = nbt.getInt("TBF_ItemHandlerSize");
         int restorableSlots = Math.min(Math.max(savedSize, 0), handler.getSlots());
         List<ItemStack> backup = emptyInventory(restorableSlots);
@@ -511,14 +507,15 @@ public class TeleportPetToPlayerPacket {
         return InventoryRestoreResult.RESTORED;
     }
 
-    /** Backs up modded inventory capabilities; vanilla horse data stays authoritative. */
+    /** Backs up modded inventories exposed through the transfer API; vanilla horse data stays authoritative. */
     public static void backupChestInventory(Entity entity, CompoundTag nbt) {
         if (entity instanceof AbstractHorse) return;
-        entity.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().ifPresent(handler ->
-                backupItemHandler(handler, nbt));
+        TrulyInventory handler = inventoryOf(entity);
+        if (handler == null) return;
+        backupItemHandler(handler, nbt);
     }
 
-    static void backupItemHandler(IItemHandler handler, CompoundTag nbt) {
+    static void backupItemHandler(TrulyInventory handler, CompoundTag nbt) {
         try {
             net.minecraft.nbt.ListTag items = new net.minecraft.nbt.ListTag();
             for (int slot = 0; slot < handler.getSlots(); slot++) {
@@ -535,6 +532,47 @@ public class TeleportPetToPlayerPacket {
             trulybestfriends.LOGGER.error("Failed to back up item handler for {}: {}",
                     handler.getClass().getSimpleName(), e.getMessage(), e);
         }
+    }
+
+    /** Minimal IItemHandler-like view used by the backup/restore paths. */
+    interface TrulyInventory {
+        int getSlots();
+        ItemStack getStackInSlot(int slot);
+        void setStackInSlot(int slot, ItemStack stack);
+    }
+
+    /** Adapts a vanilla {@code Container} (the common Fabric inventory contract) to the internal view. */
+    private static final class ContainerInventory implements TrulyInventory {
+        private final net.minecraft.world.Container container;
+
+        private ContainerInventory(net.minecraft.world.Container container) {
+            this.container = container;
+        }
+
+        @Override
+        public int getSlots() {
+            return container.getContainerSize();
+        }
+
+        @Override
+        public ItemStack getStackInSlot(int slot) {
+            if (slot < 0 || slot >= container.getContainerSize()) return ItemStack.EMPTY;
+            ItemStack stack = container.getItem(slot);
+            return stack == null ? ItemStack.EMPTY : stack;
+        }
+
+        @Override
+        public void setStackInSlot(int slot, ItemStack stack) {
+            if (slot < 0 || slot >= container.getContainerSize()) return;
+            container.setItem(slot, stack);
+        }
+    }
+
+    private static TrulyInventory inventoryOf(Entity entity) {
+        if (entity instanceof net.minecraft.world.Container container) {
+            return new ContainerInventory(container);
+        }
+        return null;
     }
 
     /** Resolve the ServerLevel where the pet was last saved, using NBT Dimension field. */

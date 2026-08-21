@@ -4,7 +4,7 @@ import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -33,9 +33,9 @@ public class SummonTeamPacket {
         return new SummonTeamPacket(buf.readVarInt());
     }
 
-    public static void handle(SummonTeamPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(SummonTeamPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
             String color = PetTeamData.colorAt(packet.colorIndex);
             Path ownerDir = PetIOUtil.getOwnerDir(player);
@@ -58,6 +58,6 @@ public class SummonTeamPacket {
                         color, player.getGameProfile().getName(), e.getMessage());
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 }

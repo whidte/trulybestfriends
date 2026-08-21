@@ -17,7 +17,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.joml.Quaternionf;
 import org.lwjgl.glfw.GLFW;
 
@@ -39,15 +39,15 @@ import static com.whidte.trulybestfriends.tab.TrulyConstants.LIST_ENTRY_SCALE_RA
 
 /** Hold-to-select radial screen for the eight members of the current formation team. */
 public final class SummonWheelScreen extends Screen {
-    private static final ResourceLocation WHEEL = ResourceLocation.fromNamespaceAndPath(
+    private static final ResourceLocation WHEEL = new ResourceLocation(
             "truly_best_friends", "textures/gui/wheel.png");
-    private static final ResourceLocation POINTER = ResourceLocation.fromNamespaceAndPath(
+    private static final ResourceLocation POINTER = new ResourceLocation(
             "truly_best_friends", "textures/gui/wheel_pointer.png");
-    private static final ResourceLocation IMPERIAL_ORDER = ResourceLocation.fromNamespaceAndPath(
+    private static final ResourceLocation IMPERIAL_ORDER = new ResourceLocation(
             "truly_best_friends", "textures/gui/imperial_order.png");
-    private static final ResourceLocation WORLD_IN_A_BOTTLE = ResourceLocation.fromNamespaceAndPath(
+    private static final ResourceLocation WORLD_IN_A_BOTTLE = new ResourceLocation(
             "truly_best_friends", "textures/gui/world_in_a_bottle.png");
-    private static final ResourceLocation RELEASE_BOTTLE = ResourceLocation.fromNamespaceAndPath(
+    private static final ResourceLocation RELEASE_BOTTLE = new ResourceLocation(
             "truly_best_friends", "textures/gui/release_bottle.png");
     private static final int WHEEL_SIZE = 90;
     private static final int IMPERIAL_ORDER_SIZE = 50;
@@ -248,7 +248,7 @@ public final class SummonWheelScreen extends Screen {
         CompoundTag nbt = SummonWheelData.petNbt(uuid);
         if (nbt == null || minecraft == null || minecraft.level == null) return null;
         ResourceLocation id = ResourceLocation.tryParse(nbt.getString("EntityType"));
-        EntityType<?> type = id != null ? ForgeRegistries.ENTITY_TYPES.getValue(id) : null;
+        EntityType<?> type = id != null ? BuiltInRegistries.ENTITY_TYPE.getOptional(id).orElse(null) : null;
         Entity entity = type != null ? type.create(minecraft.level) : null;
         if (!(entity instanceof LivingEntity living)) return null;
         try {
@@ -275,7 +275,7 @@ public final class SummonWheelScreen extends Screen {
         Quaternionf pose;
         Quaternionf cameraOrientation;
         if (multipart) {
-            ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(pet.getType());
+            ResourceLocation typeId = BuiltInRegistries.ENTITY_TYPE.getKey(pet.getType());
             String typeKey = typeId != null ? typeId.toString() : "unknown";
             pose = MULTIPART_QUATS.computeIfAbsent(typeKey, ignored -> buildMultipartPose(
                     detectMultipartYBase(pet) - DEFAULT_ROT_X * 20.0F * ((float) Math.PI / 180F),
@@ -363,7 +363,8 @@ public final class SummonWheelScreen extends Screen {
         if (minecraft == null) return;
         long window = minecraft.getWindow().getWindow();
         for (KeyMapping movementKey : movementKeys) {
-            InputConstants.Key key = movementKey.getKey();
+            InputConstants.Key key = ((com.whidte.trulybestfriends.mixin.KeyMappingAccessor) movementKey)
+                    .trulybestfriends$getKey();
             if (key.getType() == InputConstants.Type.KEYSYM) {
                 movementKey.setDown(InputConstants.isKeyDown(window, key.getValue()));
             } else if (key.getType() == InputConstants.Type.MOUSE) {

@@ -14,8 +14,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.registries.ForgeRegistries;
+import com.whidte.trulybestfriends.network.PacketContext;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -71,9 +71,9 @@ public class RequestPetDataPacket {
                 : requestFullList();
     }
 
-    public static void handle(RequestPetDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(RequestPetDataPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
 
             Path petDir = PetIOUtil.getOwnerDir(player);
@@ -147,7 +147,7 @@ public class RequestPetDataPacket {
                 }
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 
     private static CompoundTag getLoadedPetNbt(ServerPlayer player, UUID petUuid, CompoundTag storedNbt) {
@@ -230,7 +230,7 @@ public class RequestPetDataPacket {
             nbt.remove("CustomName");
         }
         nbt.putString("OwnerUUID", storedNbt.getString("OwnerUUID"));
-        nbt.putString("EntityType", ForgeRegistries.ENTITY_TYPES.getKey(entity.getType()).toString());
+        nbt.putString("EntityType", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
         nbt.putString("Dimension", level.dimension().location().toString());
 
         ListTag pos = new ListTag();

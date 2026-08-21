@@ -5,7 +5,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.util.function.Supplier;
 
@@ -32,9 +32,9 @@ public class TeleportToPetPacket {
         return new TeleportToPetPacket(buf.readUtf(), buf.readDouble(), buf.readDouble(), buf.readDouble());
     }
 
-    public static void handle(TeleportToPetPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(TeleportToPetPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
 
             // Only OP (level >= 2) in creative mode can teleport
@@ -49,6 +49,6 @@ public class TeleportToPetPacket {
             player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT,
                     net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 }

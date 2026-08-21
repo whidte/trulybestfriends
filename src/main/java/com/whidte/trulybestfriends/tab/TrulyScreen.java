@@ -33,7 +33,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.joml.Quaternionf;
 
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
@@ -122,6 +122,11 @@ public class TrulyScreen extends Screen {
 		super(title);
 		this.imageWidth = 176;
 		this.imageHeight = 166;
+	}
+
+	/** Forge's Screen#getMinecraft equivalent, exposed for the widget classes. */
+	public Minecraft getMinecraft() {
+		return this.minecraft;
 	}
 
 	net.minecraft.client.gui.Font font() {
@@ -247,7 +252,7 @@ public class TrulyScreen extends Screen {
 		this.topPos = (this.height - this.imageHeight) / 2;
 
 		// L2Tabs tab bar integration
-		if (net.minecraftforge.fml.ModList.get().isLoaded("l2tabs")) {
+		if (net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("l2tabs")) {
 			try {
 				Class.forName("com.whidte.trulybestfriends.tab.L2TabsIntegration")
 					.getMethod("createTabManager", TrulyScreen.class)
@@ -429,7 +434,7 @@ public class TrulyScreen extends Screen {
 
 	private static EntityType<?> getEntityType(String key) {
 		ResourceLocation resource = ResourceLocation.tryParse(key);
-		return resource != null ? ForgeRegistries.ENTITY_TYPES.getValue(resource) : null;
+		return resource != null ? BuiltInRegistries.ENTITY_TYPE.getOptional(resource).orElse(null) : null;
 	}
 
 	private void normalizeSpeciesFilter() {
@@ -703,7 +708,9 @@ public class TrulyScreen extends Screen {
 	}
 
 	Map<Integer, UUID> selectedTeamSlots() {
-		return teamMembers.get(selectedTeamColor());
+		// The team packet can arrive after the squad grid is first rendered;
+		// expose an empty map instead of null (SquadSummonButton dereferences it).
+		return teamMembers.getOrDefault(selectedTeamColor(), java.util.Collections.emptyMap());
 	}
 
 	private UUID squadMemberAtSlot(int slot) {
@@ -855,7 +862,7 @@ public class TrulyScreen extends Screen {
 	 */
 	static float computePreviewScale(LivingEntity entity, float baseSize) {
 		float scale = entity.getScale();
-		boolean multipart = entity.getParts() != null && entity.getParts().length > 0;
+		boolean multipart = com.whidte.trulybestfriends.compat.PartEntityCompat.getParts(entity).length > 0;
 		if (scale > 1.0001f) {
 			// Scaled entity (IaF dragon, ...): use the IaF formula.
 			return baseSize / scale;
@@ -1253,7 +1260,7 @@ public class TrulyScreen extends Screen {
 				return;
 			}
 			if (!Config.isReviveItemRequired()) return;
-			var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
+			var item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.tryParse(Config.reviveItem)).orElse(null);
 			if (item != null) {
 				int maxTextWidth = this.imageWidth - PET_INFO_OFFSET_X - 4;
 				g.flush();

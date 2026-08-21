@@ -3,7 +3,7 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -23,9 +23,9 @@ public class DeletePetDataPacket {
         return new DeletePetDataPacket(buf.readUUID());
     }
 
-    public static void handle(DeletePetDataPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(DeletePetDataPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
 
             if (trulybestfriends.deletePetData(player, packet.petUuid)) {
@@ -34,6 +34,6 @@ public class DeletePetDataPacket {
                 SyncPetDataPacket.sendToPlayer(player, reply);
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 }

@@ -17,8 +17,8 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.registries.ForgeRegistries;
+import com.whidte.trulybestfriends.network.PacketContext;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.io.File;
 import java.io.IOException;
@@ -44,9 +44,9 @@ public class RevivePetPacket {
         return new RevivePetPacket(buf.readUUID());
     }
 
-    public static void handle(RevivePetPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(RevivePetPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
             ServerLevel level = player.serverLevel();
             trulybestfriends.flushPendingPetSaves(player.getUUID());
@@ -118,7 +118,7 @@ public class RevivePetPacket {
                 trulybestfriends.LOGGER.error("Failed to revive pet: {}", e.getMessage());
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 
     /**
@@ -133,7 +133,7 @@ public class RevivePetPacket {
         // Try to create a temp entity for accurate dimensions
         String typeKey = nbt.getString("EntityType");
         if (!typeKey.isEmpty()) {
-            EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
+            EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(ResourceLocation.tryParse(typeKey)).orElse(null);
             if (type != null) {
                 tempEntity = type.create(level);
                 if (tempEntity instanceof LivingEntity le) {
@@ -209,7 +209,7 @@ public class RevivePetPacket {
 
     private static boolean hasItems(ServerPlayer player) {
         if (!Config.isReviveItemRequired()) return true;
-        var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
+        var item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.tryParse(Config.reviveItem)).orElse(null);
         if (item == null) return false;
 
         int remaining = Config.reviveItemCount;
@@ -225,7 +225,7 @@ public class RevivePetPacket {
 
     private static boolean consumeItems(ServerPlayer player) {
         if (!Config.isReviveItemRequired()) return true;
-        var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
+        var item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.tryParse(Config.reviveItem)).orElse(null);
         if (item == null || !hasItems(player)) return false;
 
         int remaining = Config.reviveItemCount;

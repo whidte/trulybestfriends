@@ -27,9 +27,9 @@ public final class SummonKeyHandler {
     private static final long RELEASE_TEXTURE_MILLIS = 390L;
     private static final long WHEEL_START_MILLIS = 400L;
     private static final int BOTTLE_SIZE = 16;
-    private static final ResourceLocation WORLD_IN_A_BOTTLE = ResourceLocation.fromNamespaceAndPath(
+    private static final ResourceLocation WORLD_IN_A_BOTTLE = new ResourceLocation(
             "truly_best_friends", "textures/gui/world_in_a_bottle.png");
-    private static final ResourceLocation RELEASE_BOTTLE = ResourceLocation.fromNamespaceAndPath(
+    private static final ResourceLocation RELEASE_BOTTLE = new ResourceLocation(
             "truly_best_friends", "textures/gui/release_bottle.png");
 
     public static final KeyMapping SUMMON_KEY = new KeyMapping(
@@ -48,8 +48,7 @@ public final class SummonKeyHandler {
     private SummonKeyHandler() {}
 
     /** Returns true when this handler took ownership of the event (the caller should cancel it). */
-    public static boolean onKeyInput(int keyCode, int scanCode, int action) {
-        if (!matchesKey(keyCode, scanCode)) return false;
+    public static boolean onKeyInput(int action) {
         if (action == GLFW.GLFW_PRESS) {
             keyHeld = true;
             if (canBeginPress()) {
@@ -126,6 +125,7 @@ public final class SummonKeyHandler {
         refreshPlayer(minecraft.player.getUUID());
         if (state == State.HOLDING && minecraft.screen != null) {
             state = State.IDLE;
+            keyHeld = false;
         }
         if (state == State.HOLDING
                 && keyHeld
@@ -158,15 +158,27 @@ public final class SummonKeyHandler {
     }
 
     private static boolean isMovementKeyDown(KeyMapping keyMapping) {
-        InputConstants.Key key = keyMapping.getKey();
+        InputConstants.Key key = ((com.whidte.trulybestfriends.mixin.KeyMappingAccessor) keyMapping)
+                .trulybestfriends$getKey();
         long window = Minecraft.getInstance().getWindow().getWindow();
         if (key.getType() == InputConstants.Type.KEYSYM) {
-            return InputConstants.isKeyDown(window, key.getValue());
+            // Unbound keys report value -1; polling GLFW with it would error every tick.
+            return key.getValue() >= 0 && InputConstants.isKeyDown(window, key.getValue());
         }
         if (key.getType() == InputConstants.Type.MOUSE) {
-            return GLFW.glfwGetMouseButton(window, key.getValue()) == GLFW.GLFW_PRESS;
+            return key.getValue() >= 0
+                    && GLFW.glfwGetMouseButton(window, key.getValue()) == GLFW.GLFW_PRESS;
         }
         return keyMapping.isDown();
+    }
+
+    /**
+     * Raw physical state of the bound summon key. Unlike {@link KeyMapping#isDown},
+     * it survives {@code KeyMapping#releaseAll} (invoked by {@code Minecraft#setScreen}
+     * when the wheel screen opens), so the wheel is not torn down the tick it appears.
+     */
+    public static boolean isSummonKeyDown() {
+        return isMovementKeyDown(SUMMON_KEY);
     }
 
     public static void renderBottle(GuiGraphics graphics) {

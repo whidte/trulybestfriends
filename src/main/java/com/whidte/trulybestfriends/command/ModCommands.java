@@ -4,40 +4,48 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.trulybestfriends;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.event.entity.player.PlayerInteractEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.UUID;
 
-/** Registers {@code /tbf} commands. */
-@Mod.EventBusSubscriber(modid = trulybestfriends.MODID)
+/** Registers {@code /tbf} commands and the manual-registration item interaction. */
 public class ModCommands {
     private static final double PICK_REACH = 5.0D;
     private static final long CLEAR_CONFIRMATION_TIMEOUT_MS = 30_000L;
     private static final java.util.Map<UUID, Long> pendingClearConfirmations =
             new java.util.concurrent.ConcurrentHashMap<>();
 
-    @SubscribeEvent
-    public static void onRegisterCommands(RegisterCommandsEvent event) {
-        CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
+    private ModCommands() {}
+
+    /** Called from the common mod initializer. */
+    public static void register() {
+        CommandRegistrationCallback.EVENT.register(ModCommands::onRegisterCommands);
+        UseEntityCallback.EVENT.register(ModCommands::onEntityInteract);
+    }
+
+    private static void onRegisterCommands(CommandDispatcher<CommandSourceStack> dispatcher,
+                                           net.minecraft.commands.CommandBuildContext buildContext,
+                                           net.minecraft.commands.Commands.CommandSelection environment) {
         dispatcher.register(
                 Commands.literal("tbf")
                         .then(Commands.literal("load")
@@ -75,7 +83,7 @@ public class ModCommands {
             return 0;
         }
 
-        var entityTypeId = ForgeRegistries.ENTITY_TYPES.getKey(pointed.getType());
+        var entityTypeId = BuiltInRegistries.ENTITY_TYPE.getKey(pointed.getType());
         if (entityTypeId == null) {
             source.sendFailure(Component.translatable("trulybestfriends.command.unknown_entity_type"));
             return 0;
@@ -141,25 +149,27 @@ public class ModCommands {
         return 1;
     }
 
-    @SubscribeEvent
-    public static void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
-        if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        var heldItemId = ForgeRegistries.ITEMS.getKey(event.getItemStack().getItem());
-        if (heldItemId == null || !heldItemId.toString().equals(Config.manualRegisterItem)) return;
+    private static InteractionResult onEntityInteract(Player player, Level world, InteractionHand hand,
+                                                      Entity target, EntityHitResult hitResult) {
+        if (!(player instanceof ServerPlayer serverPlayer)) return InteractionResult.PASS;
+        ItemStack heldItem = serverPlayer.getItemInHand(hand);
+        var heldItemId = BuiltInRegistries.ITEM.getKey(heldItem.getItem());
+        if (heldItemId == null || !heldItemId.toString().equals(Config.manualRegisterItem)) {
+            return InteractionResult.PASS;
+        }
 
-        CommandSourceStack source = player.createCommandSourceStack();
-        boolean shouldConsume = Config.consumeManualRegisterItem && !player.getAbilities().instabuild;
-        if (shouldConsume && event.getItemStack().getCount() < Config.manualRegisterItemConsumeCount) {
+        CommandSourceStack source = serverPlayer.createCommandSourceStack();
+        boolean shouldConsume = Config.consumeManualRegisterItem && !serverPlayer.getAbilities().instabuild;
+        if (shouldConsume && heldItem.getCount() < Config.manualRegisterItemConsumeCount) {
             source.sendFailure(Component.translatable(
                     "trulybestfriends.load.not_enough_register_items", Config.manualRegisterItemConsumeCount));
         } else {
-            int result = loadPet(source, player, event.getTarget(), false);
+            int result = loadPet(source, serverPlayer, target, false);
             if (result > 0 && shouldConsume) {
-                event.getItemStack().shrink(Config.manualRegisterItemConsumeCount);
+                heldItem.shrink(Config.manualRegisterItemConsumeCount);
             }
         }
-        event.setCancellationResult(InteractionResult.SUCCESS);
-        event.setCanceled(true);
+        return InteractionResult.SUCCESS;
     }
 
     private static int loadPointedPet(CommandSourceStack source) throws CommandSyntaxException {

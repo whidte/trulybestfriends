@@ -160,57 +160,57 @@ final class TrulyConstants {
 	// --- Textures ---
 	/** 标签页主面板背景纹理。 */
 	static final ResourceLocation TEXTURE =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/empty.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/empty.png");
 	/** 从主面板中拆分出的左上宠物预览背景。 */
 	static final ResourceLocation PET_PREVIEW_BACKGROUND =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/pet_preview_background.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/pet_preview_background.png");
 	/** Vanilla recipe book texture containing the search icon used by the list mode toggle. */
 	static final ResourceLocation RECIPE_BOOK_TEXTURE =
-			ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/recipe_book.png");
+			new ResourceLocation("minecraft", "textures/gui/recipe_book.png");
 	/** 原版生命恢复效果图标纹理。 */
-	static final ResourceLocation REGENERATION_ICON = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/mob_effect/regeneration.png");
+	static final ResourceLocation REGENERATION_ICON = new ResourceLocation("minecraft", "textures/mob_effect/regeneration.png");
 	/** Bundled copies of the vanilla 1.21.1 Realms close-button sprites for 1.20.1. */
-	static final ResourceLocation DELETE_ICON_TEXTURE = ResourceLocation.fromNamespaceAndPath(
+	static final ResourceLocation DELETE_ICON_TEXTURE = new ResourceLocation(
 			"truly_best_friends", "textures/gui/cross_button.png");
-	static final ResourceLocation DELETE_ICON_HIGHLIGHTED_TEXTURE = ResourceLocation.fromNamespaceAndPath(
+	static final ResourceLocation DELETE_ICON_HIGHLIGHTED_TEXTURE = new ResourceLocation(
 			"truly_best_friends", "textures/gui/cross_button_highlighted.png");
 	static final int DELETE_ICON_SOURCE_SIZE = 14;
 	/** 模组内通用操作按钮的自定义纹理。 */
-	static final ResourceLocation WIDGET_BUTTON = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/widget_button.png");
+	static final ResourceLocation WIDGET_BUTTON = new ResourceLocation("truly_best_friends", "textures/gui/widget_button.png");
 	/** 原版通用控件纹理。 */
-	static final ResourceLocation WIDGETS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/widgets.png");
+	static final ResourceLocation WIDGETS_TEXTURE = new ResourceLocation("minecraft", "textures/gui/widgets.png");
 	/** 原版 HUD 图标纹理，其中包含生命值心形图标。 */
-	static final ResourceLocation ICONS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/icons.png");
+	static final ResourceLocation ICONS_TEXTURE = new ResourceLocation("minecraft", "textures/gui/icons.png");
 	/** 原版状态条纹理，其中包含三段式首领生命条。 */
-	static final ResourceLocation BARS_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/bars.png");
+	static final ResourceLocation BARS_TEXTURE = new ResourceLocation("minecraft", "textures/gui/bars.png");
 	/** 1.20.1 村民交易界面纹理，其中包含 6x27 的滚动滑块。 */
-	static final ResourceLocation VILLAGER_TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "textures/gui/container/villager2.png");
+	static final ResourceLocation VILLAGER_TEXTURE = new ResourceLocation("minecraft", "textures/gui/container/villager2.png");
 	/** 宠物列表条目纹理，纵向包含普通态和选中态。 */
-	static final ResourceLocation PET_ENTRY = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/pet_entry.png");
+	static final ResourceLocation PET_ENTRY = new ResourceLocation("truly_best_friends", "textures/gui/pet_entry.png");
 	/** Squad button icon. */
 	static final ResourceLocation SQUAD_ICON =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/squad.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/squad.png");
 	/** Squad button hover highlight ring. */
 	static final ResourceLocation SQUAD_BORDER =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/border.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/border.png");
 	/** 单项模式按钮图标。 */
 	static final ResourceLocation DETAILS_ICON =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/details.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/details.png");
 	/** Squad formation slot texture. */
 	static final ResourceLocation SQUAD_SLOT =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/slot.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/slot.png");
 	/** Light slot fill used for the selected team and unavailable empty squad slots. */
 	static final ResourceLocation PLACEHOLDER =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/placeholder.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/placeholder.png");
 	/** Empty-slot add icon shown when a list pet is selected and the team is not full. */
 	static final ResourceLocation PLUS_SIGN =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/plus_sign.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/plus_sign.png");
 	/** Vanilla bundle tooltip assembled into a fixed 3x3 team selector background. */
 	static final ResourceLocation TEAM_SELECTOR_BACKGROUND =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/bundle_tooltip_3x3.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/bundle_tooltip_3x3.png");
 	/** Squad summon button icon. */
 	static final ResourceLocation SQUAD_SUMMON_ICON =
-			ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/release_bottle.png");
+			new ResourceLocation("truly_best_friends", "textures/gui/release_bottle.png");
 
 	// --- Utility ---
 

@@ -3,7 +3,7 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.nio.file.Path;
 import java.util.UUID;
@@ -71,9 +71,9 @@ public class SetTeamMemberPacket {
         return new SetTeamMemberPacket(action, colorIndex, slot, fromSlot, petUuid);
     }
 
-    public static void handle(SetTeamMemberPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(SetTeamMemberPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
             String color = PetTeamData.colorAt(packet.colorIndex);
             Path ownerDir = PetIOUtil.getOwnerDir(player);
@@ -91,6 +91,6 @@ public class SetTeamMemberPacket {
                         player.getGameProfile().getName(), e.getMessage());
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 }

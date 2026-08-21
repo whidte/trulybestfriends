@@ -1,7 +1,7 @@
 package com.whidte.trulybestfriends.network;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -26,7 +26,7 @@ public class DirectTeleportPetToPlayerPacket {
         return petUuid;
     }
 
-    public static void handle(DirectTeleportPetToPlayerPacket packet, Supplier<NetworkEvent.Context> ctx) {
+    public static void handle(DirectTeleportPetToPlayerPacket packet, PacketContext ctx) {
         TeleportPetToPlayerPacket.handleWithoutRideSwap(packet.petUuid, ctx);
     }
 }

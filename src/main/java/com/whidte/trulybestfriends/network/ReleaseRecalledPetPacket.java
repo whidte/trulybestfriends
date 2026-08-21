@@ -1,7 +1,7 @@
 package com.whidte.trulybestfriends.network;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -26,7 +26,7 @@ public class ReleaseRecalledPetPacket {
         return petUuid;
     }
 
-    public static void handle(ReleaseRecalledPetPacket packet, Supplier<NetworkEvent.Context> ctx) {
+    public static void handle(ReleaseRecalledPetPacket packet, PacketContext ctx) {
         RecallPetPacket.handleWithoutRideSwap(packet.petUuid, ctx);
     }
 }

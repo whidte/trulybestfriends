@@ -7,8 +7,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.entity.PartEntity;
-import net.minecraftforge.network.NetworkEvent;
+import com.whidte.trulybestfriends.compat.PartEntityCompat;
+import com.whidte.trulybestfriends.network.PacketContext;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -32,9 +32,9 @@ public class AreaRecallPacket {
         return new AreaRecallPacket(buf.readVarInt());
     }
 
-    public static void handle(AreaRecallPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ServerPlayer player = ctx.get().getSender();
+    public static void handle(AreaRecallPacket packet, PacketContext ctx) {
+        ctx.enqueueWork(() -> {
+            ServerPlayer player = ctx.getSender();
             if (player == null) return;
             ServerLevel level = player.serverLevel();
             int range = net.minecraft.util.Mth.clamp(packet.range, 1, 16);
@@ -42,13 +42,13 @@ public class AreaRecallPacket {
 
             Path ownerDir = PetIOUtil.getOwnerDir(player);
             if (!Files.exists(ownerDir)) {
-                ctx.get().setPacketHandled(true);
+                ctx.setPacketHandled(true);
                 return;
             }
 
             File[] files = ownerDir.toFile().listFiles((f, n) -> PetIOUtil.isPetDataFileName(n));
             if (files == null) {
-                ctx.get().setPacketHandled(true);
+                ctx.setPacketHandled(true);
                 return;
             }
 
@@ -64,7 +64,7 @@ public class AreaRecallPacket {
                     // Multipart sub-parts (e.g., dragon tail) are never tracked
                     // directly — skip them to avoid discarding a part without
                     // its parent, which would corrupt the multipart entity.
-                    if (entity instanceof PartEntity<?>) continue;
+                    if (PartEntityCompat.isPartEntity(entity)) continue;
                     if (entity instanceof LivingEntity living) {
                         // Skip untracked entities (data already cleared, e.g. clearOnDeath)
                         if (!trulybestfriends.isTrackedPet(petUuid)
@@ -138,6 +138,6 @@ public class AreaRecallPacket {
                         net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
             }
         });
-        ctx.get().setPacketHandled(true);
+        ctx.setPacketHandled(true);
     }
 }

@@ -16,7 +16,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.jetbrains.annotations.NotNull;
 
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
@@ -78,7 +78,7 @@ class SummonToPlayerButton extends AbstractWidget {
         if (player == null) return false;
         if (!Config.isReviveItemRequired()) return true;
         if (player.isCreative()) return true;
-        var item = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(Config.reviveItem));
+        var item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.tryParse(Config.reviveItem)).orElse(null);
         if (item == null) return false;
         int count = 0;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {

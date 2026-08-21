@@ -1,263 +1,154 @@
 package com.whidte.trulybestfriends;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.common.ForgeConfigSpec;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.config.ModConfigEvent;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 
-@Mod.EventBusSubscriber(modid = trulybestfriends.MODID, bus = Mod.EventBusSubscriber.Bus.MOD)
+/**
+ * JSON-based replacement for the Forge {@code ForgeConfigSpec} configuration.
+ * Values are read once at startup from {@code config/trulybestfriends.json}
+ * and kept in static fields. Runtime list additions (via {@code /tbf}
+ * commands) write the whole file back to disk.
+ */
 public class Config
 {
-    private static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final Path CONFIG_FILE =
+            FabricLoader.getInstance().getConfigDir().resolve("trulybestfriends.json");
 
-    public static final ForgeConfigSpec.BooleanValue PERFORMANCE_MODE = BUILDER
-            .comment("If true, disables automatic pet registration from tame events, entity joins, nearby scans, and full scans.",
-                    "Pets must be registered with /tbf load or the manual registration item.")
-            .define("performanceMode", false);
+    public static final boolean PERFORMANCE_MODE_DEFAULT = false;
+    public static final int PERFORMANCE_MODE_SYNC_INTERVAL_TICKS_DEFAULT = 5;
+    public static final int BOSS_FIGHT_PET_LIMIT_DEFAULT = -1;
+    public static final java.util.List<String> OWNER_NBT_FIELDS_DEFAULT = java.util.Arrays.asList(
+            "Owner",
+            "OwnerUUID",
+            "ForgeCaps.mob_controller:mob_control.ControllerUUID"
+    );
+    public static final int SYNC_INTERVAL_TICKS_DEFAULT = 103;
+    public static final int LOCAL_SYNC_INTERVAL_TICKS_DEFAULT = 5;
+    public static final int SAVE_PET_DATA_COOLDOWN_TICKS_DEFAULT = 100;
+    public static final double RECALL_RANGE_DEFAULT = 16.0;
+    public static final int RECALL_COOLDOWN_MS_DEFAULT = 3000;
+    public static final int MAX_PETS_DEFAULT = 64;
+    public static final boolean DELETE_STORED_PETS_DIRECTLY_DEFAULT = false;
+    public static final int AREA_RECALL_DEFAULT_RANGE_DEFAULT = 8;
+    public static final int MAX_PENDING_SUMMONS_DEFAULT = 6;
+    public static final int SUMMON_BOTTLE_RIGHT_OFFSET_DEFAULT = 8;
+    public static final int SUMMON_BOTTLE_VERTICAL_OFFSET_DEFAULT = 0;
+    public static final String REVIVE_ITEM_DEFAULT = "minecraft:totem_of_undying";
+    public static final String MANUAL_REGISTER_ITEM_DEFAULT = "minecraft:feather";
+    public static final boolean CONSUME_MANUAL_REGISTER_ITEM_DEFAULT = false;
+    public static final int MANUAL_REGISTER_ITEM_CONSUME_COUNT_DEFAULT = 1;
+    public static final int REVIVE_ITEM_COUNT_DEFAULT = 1;
+    public static final int REVIVE_COOLDOWN_SECONDS_DEFAULT = 120;
+    public static final int HEAL_HUNGER_COST_DEFAULT = 3;
+    public static final int ADVANCED_HEAL_HUNGER_COST_DEFAULT = 9;
+    public static final int HEAL_PULSE_INTERVAL_TICKS_DEFAULT = 50;
+    public static final int ADVANCED_HEAL_PULSE_INTERVAL_TICKS_DEFAULT = 25;
+    public static final int HEAL_DURATION_PER_CLICK_TICKS_DEFAULT = 300;
+    public static final int HEAL_MAX_DURATION_TICKS_DEFAULT = 1200;
+    public static final double HEAL_FLAT_AMOUNT_DEFAULT = 1.0;
+    public static final double HEAL_MAX_HEALTH_FRACTION_DEFAULT = 0.01;
+    public static final boolean ENABLE_LOGIN_LOAD_DIAGNOSTICS_DEFAULT = false;
 
-    public static final ForgeConfigSpec.IntValue PERFORMANCE_MODE_SYNC_INTERVAL_TICKS = BUILDER
-            .comment("In performance mode, interval in ticks for updating loaded pets by their already tracked UUIDs.")
-            .defineInRange("performanceModeSyncIntervalTicks", 5, 1, 1200);
+    public static final java.util.List<String> AUTO_REGISTER_BLACKLIST_DEFAULT = java.util.Arrays.asList(
+            "irons_spellbooks:spectral_steed",
+            "irons_spellbooks:summoned_vex",
+            "irons_spellbooks:summoned_zombie",
+            "irons_spellbooks:summoned_skeleton",
+            "irons_spellbooks:summoned_polar_bear",
+            "irons_spellbooks:summoned_sword",
+            "irons_spellbooks:summoned_claymore",
+            "irons_spellbooks:summoned_rapier",
+            "irons_spellbooks:spectral_hammer",
+            "irons_spellbooks:wisp",
+            "touhou_little_maid:broom",
+            "touhou_little_maid:chair"
+    );
 
-    public static final ForgeConfigSpec.IntValue BOSS_FIGHT_PET_LIMIT = BUILDER
-            .comment("Anti-gang-up: when a boss bar is visible to a player, every 20 ticks randomly recall",
-                    "that player's owned pets within LOCAL_SYNC_CHUNK_RADIUS chunks until this many remain.",
-                    "Pets in the player's current team, pets being ridden, and untracked pets are excluded.",
-                    "-1 disables the check entirely. Values above (maxPets - current team size) are clamped",
-                    "to that bound (0-512, default -1).")
-            .defineInRange("bossFightPetLimit", -1, -1, 512);
+    public static final java.util.List<String> NO_REVIVE_WHITELIST_DEFAULT = java.util.Arrays.asList(
+            "modulargolems:metal_golem",
+            "modulargolems:humanoid_golem",
+            "modulargolems:dog_golem"
+    );
 
-    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> OWNER_NBT_FIELDS = BUILDER
-            .comment("NBT paths used to find an owner UUID on living entities that do not implement OwnableEntity.",
-                    "Use dots to traverse nested compounds, for example ForgeData.Owner. Paths are checked in order.",
-                    "The final field may contain either a UUID tag or a UUID string. Path segments are case-sensitive.")
-            .defineListAllowEmpty("ownerNbtFields", java.util.Arrays.asList(
-                    "Owner",
-                    "OwnerUUID",
-                    "ForgeCaps.mob_controller:mob_control.ControllerUUID"
-            ), s -> s instanceof String path && OwnerNbtResolver.isValidPath(path));
-
-    public static final ForgeConfigSpec.IntValue SYNC_INTERVAL_TICKS = BUILDER
-            .comment("Interval in ticks for full fallback scan of all loaded owned entities and caching their latest pet data.",
-                    "Set to 0 to disable the full scan.")
-            .defineInRange("syncIntervalTicks", 103, 0, 1200);
-
-    public static final ForgeConfigSpec.IntValue LOCAL_SYNC_INTERVAL_TICKS = BUILDER
-            .comment("Interval in ticks for scanning nearby entities around players who completed the Truly Best Friends advancement")
-            .defineInRange("localSyncIntervalTicks", 5, 1, 100);
-
-    public static final ForgeConfigSpec.IntValue SAVE_PET_DATA_COOLDOWN_TICKS = BUILDER
-            .comment("Interval in ticks for flushing cached pet data to disk. Player logout and server stop always flush immediately.")
-            .defineInRange("savePetDataCooldownTicks", 100, 1, 1200);
-
-    public static final ForgeConfigSpec.DoubleValue RECALL_RANGE = BUILDER
-            .comment("Maximum distance (blocks) for recalling a pet back into storage. Set to -1 for unlimited range")
-            .defineInRange("recallRange", 16.0, -1.0, 64.0);
-
-    public static final ForgeConfigSpec.IntValue RECALL_COOLDOWN_MS = BUILDER
-            .comment("Cooldown in milliseconds between recall/summon actions (min 250ms = 5 ticks to ensure entity cleanup completes)")
-            .defineInRange("recallCooldownMs", 3000, 250, 30000);
-
-    public static final ForgeConfigSpec.IntValue MAX_PETS = BUILDER
-            .comment("Maximum number of pets a player can have tracked at once (1-512, default 64)")
-            .defineInRange("maxPets", 64, 1, 512);
-
-    public static final ForgeConfigSpec.BooleanValue DELETE_STORED_PETS_DIRECTLY = BUILDER
-            .comment("If true, deleting a recalled or dead pet from tracking permanently removes its stored data",
-                    "without releasing the entity into the world. Default false preserves the existing release behavior.")
-            .define("deleteStoredPetsDirectly", false);
-
-    public static final ForgeConfigSpec.IntValue AREA_RECALL_DEFAULT_RANGE = BUILDER
-            .comment("Default range (blocks) for area recall when holding Shift. Adjustable with scroll wheel (1-16).")
-            .defineInRange("areaRecallDefaultRange", 8, 1, 16);
-
-    public static final ForgeConfigSpec.IntValue MAX_PENDING_SUMMONS = BUILDER
-            .comment("Max simultaneous pending summons per player for pets in unloaded chunks.",
-                    "Also defines the number of numbered member slots in each of the eight formation teams.",
-                    "Team slot numbers range from 1 to this value (1-8, default 6). Effective pending cap = this value + 2 buffer.")
-            .defineInRange("maxPendingSummons", 6, 1, 8);
-
-    public static final ForgeConfigSpec.IntValue SUMMON_BOTTLE_RIGHT_OFFSET = BUILDER
-            .comment("Distance in GUI pixels between the summon-key bottle animation and the right screen edge.")
-            .defineInRange("summonBottleRightOffset", 8, 0, 4096);
-
-    public static final ForgeConfigSpec.IntValue SUMMON_BOTTLE_VERTICAL_OFFSET = BUILDER
-            .comment("Vertical GUI-pixel offset of the summon-key bottle animation from screen center.")
-            .defineInRange("summonBottleVerticalOffset", 0, -4096, 4096);
-
-    public static final ForgeConfigSpec.ConfigValue<String> REVIVE_ITEM = BUILDER
-            .comment("Item ID required to revive a dead pet (e.g. \"minecraft:totem_of_undying\").",
-                    "Set this to an empty string (reviveItem = \"\") to require no item.",
-                    "When empty, the item prompt is hidden and revival is available as soon as the cooldown expires.")
-            .define("reviveItem", "minecraft:totem_of_undying");
-
-    public static final ForgeConfigSpec.ConfigValue<String> MANUAL_REGISTER_ITEM = BUILDER
-            .comment("Item used to manually register a pet by right-clicking the entity.",
-                    "The registration uses the same checks and behavior as /tbf load.")
-            .define("manualRegisterItem", "minecraft:feather",
-                    value -> value instanceof String && ResourceLocation.tryParse((String) value) != null);
-
-    public static final ForgeConfigSpec.BooleanValue CONSUME_MANUAL_REGISTER_ITEM = BUILDER
-            .comment("If true, a successful manual pet registration consumes the configured number of items.",
-                    "Items are not consumed when registration fails or when the player is in creative mode.")
-            .define("consumeManualRegisterItem", false);
-
-    public static final ForgeConfigSpec.IntValue MANUAL_REGISTER_ITEM_CONSUME_COUNT = BUILDER
-            .comment("Number of held manual registration items consumed after a successful registration.")
-            .defineInRange("manualRegisterItemConsumeCount", 1, 1, 64);
-
-    public static final ForgeConfigSpec.IntValue REVIVE_ITEM_COUNT = BUILDER
-            .comment("Number of revive items required to revive a dead pet.",
-                    "Ignored when reviveItem is empty.")
-            .defineInRange("reviveItemCount", 1, 1, 64);
-
-    public static final ForgeConfigSpec.IntValue REVIVE_COOLDOWN_SECONDS = BUILDER
-            .comment("Cooldown in seconds after reviving a pet before another revive can be used.")
-            .defineInRange("reviveCooldownSeconds", 120, 0, 86400);
-
-    public static final ForgeConfigSpec.IntValue HEAL_HUNGER_COST = BUILDER
-            .comment("Food points consumed when starting or extending pet healing. Creative players pay no cost.")
-            .defineInRange("healHungerCost", 3, 0, 20);
-
-    public static final ForgeConfigSpec.IntValue ADVANCED_HEAL_HUNGER_COST = BUILDER
-            .comment("Food points consumed by Shift-click advanced pet healing. Creative players pay no cost.")
-            .defineInRange("advancedHealHungerCost", 9, 0, 20);
-
-    public static final ForgeConfigSpec.IntValue HEAL_PULSE_INTERVAL_TICKS = BUILDER
-            .comment("Ticks between pet healing pulses.")
-            .defineInRange("healPulseIntervalTicks", 50, 1, 1200);
-
-    public static final ForgeConfigSpec.IntValue ADVANCED_HEAL_PULSE_INTERVAL_TICKS = BUILDER
-            .comment("Ticks between advanced pet healing pulses.")
-            .defineInRange("advancedHealPulseIntervalTicks", 25, 1, 1200);
-
-    public static final ForgeConfigSpec.IntValue HEAL_DURATION_PER_CLICK_TICKS = BUILDER
-            .comment("Healing duration added by one click.")
-            .defineInRange("healDurationPerClickTicks", 300, 1, 72000);
-
-    public static final ForgeConfigSpec.IntValue HEAL_MAX_DURATION_TICKS = BUILDER
-            .comment("Maximum remaining healing duration. A click that would exceed this value is rejected.")
-            .defineInRange("healMaxDurationTicks", 1200, 1, 72000);
-
-    public static final ForgeConfigSpec.DoubleValue HEAL_FLAT_AMOUNT = BUILDER
-            .comment("Flat health restored by each pulse.")
-            .defineInRange("healFlatAmount", 1.0, 0.0, 1000000.0);
-
-    public static final ForgeConfigSpec.DoubleValue HEAL_MAX_HEALTH_FRACTION = BUILDER
-            .comment("Fraction of the pet's current maximum health restored by each pulse (0.01 = 1%).")
-            .defineInRange("healMaxHealthFraction", 0.01, 0.0, 1.0);
-
-    public static final ForgeConfigSpec.BooleanValue ENABLE_LOGIN_LOAD_DIAGNOSTICS = BUILDER
-            .comment("If true, validates pet .nbt files on login and reports entity NBT serialization failures in chat. Debug only.")
-            .define("enableLoginLoadDiagnostics", false);
-
-    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> AUTO_REGISTER_BLACKLIST = BUILDER
-            .comment("Entity types that should not be automatically registered as pets even if they are OwnableEntity.",
-                    "Format: entity id such as \"minecraft:wolf\", or namespace wildcard such as \"some_mod:*\".",
-                    "This only blocks future automatic registration and does not remove already tracked pets.")
-            .defineListAllowEmpty("autoRegisterBlacklist", java.util.Arrays.asList(
-                    "irons_spellbooks:spectral_steed",
-                    "irons_spellbooks:summoned_vex",
-                    "irons_spellbooks:summoned_zombie",
-                    "irons_spellbooks:summoned_skeleton",
-                    "irons_spellbooks:summoned_polar_bear",
-                    "irons_spellbooks:summoned_sword",
-                    "irons_spellbooks:summoned_claymore",
-                    "irons_spellbooks:summoned_rapier",
-                    "irons_spellbooks:spectral_hammer",
-                    "irons_spellbooks:wisp",
-                    "touhou_little_maid:broom",
-                    "touhou_little_maid:chair"
-            ), s -> s instanceof String && (((String) s).contains(":") || ((String) s).endsWith(":*")));
-
-    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> NO_REVIVE_WHITELIST = BUILDER
-            .comment("Entity types that keep their death drops and cannot be revived via this mod.",
-                    "Format: entity id, e.g. \"minecraft:villager\". Pets of these types will still be tracked,",
-                    "but on death they drop loot normally and the revive button is disabled for them.")
-            .defineListAllowEmpty("noReviveWhitelist", java.util.Arrays.asList(
-                    "modulargolems:metal_golem",
-                    "modulargolems:humanoid_golem",
-                    "modulargolems:dog_golem"
-            ), s -> s instanceof String && ((String) s).contains(":"));
-
-    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> CLEAR_ON_DEATH_WHITELIST = BUILDER
-            .comment("Entity types that, on death, behave like noReviveWhitelist entities AND additionally",
-                    "have their stored NBT data and in-memory cache completely cleared.",
-                    "Use this for disposable or summon-only entities that should leave no trace after death.",
-                    "Format: entity id, e.g. \"minecraft:horse\".")
-            .defineListAllowEmpty("clearOnDeathWhitelist", java.util.Arrays.asList(
-                    "touhou_little_maid:maid",
-                    "goety:vex_servant",
-                    "goety:wither_skeleton_servant",
-                    "goety:border_wraith_servant",
-                    "goety:haunted_armor_servant",
-                    "goety:blackguard_servant",
-                    "goety:vanguard_servant",
-                    "goety:doppelganger",
-                    "goety:guardian_servant",
-                    "goety:stone_ministrosity",
-                    "goety:redstone_ministrosity",
-                    "goety:ice_golem",
-                    "goety:blaze_servant",
-                    "goety:inferno",
-                    "goety:mini_ghast",
-                    "goety:ghast_servant",
-                    "goety:malghast",
-                    "goety:blastling_servant",
-                    "goety:snareling_servant",
-                    "goety:watchling_servant",
-                    "goety:haunted_skull",
-                    "goety:phantom_servant",
-                    "goety:reaper_servant",
-                    "goety:wraith_servant",
-                    "goety:muck_wraith_servant",
-                    "goety:zombie_servant",
-                    "goety:zombie_villager_servant",
-                    "goety:husk_servant",
-                    "goety:drowned_servant",
-                    "goety:frozen_zombie_servant",
-                    "goety:jungle_zombie_servant",
-                    "goety:frayed_servant",
-                    "goety:zpiglin_servant",
-                    "goety:zpiglin_brute_servant",
-                    "goety:zombie_vindicator",
-                    "goety:skeleton_servant",
-                    "goety:stray_servant",
-                    "goety:mossy_skeleton_servant",
-                    "goety:sunken_skeleton_servant",
-                    "goety:rattled_servant",
-                    "goety:skeleton_pillager",
-                    "goety:carrion_fly",
-                    "goety:carrion_maggot",
-                    "goety:black_wolf",
-                    "goety:skeleton_wolf",
-                    "goety:winter_wolf",
-                    "goety:stormhound",
-                    "goety:hellhound",
-                    "goety:twilight_goat",
-                    "goety:snapper",
-                    "goety:bear_servant",
-                    "goety:polar_bear_servant",
-                    "goety:hoglin_servant",
-                    "goety:gnasher",
-                    "goety:leapleaf",
-                    "goety:slime_servant",
-                    "goety:magma_cube_servant",
-                    "goety:crypt_slime_servant",
-                    "goety:tropical_slime_servant",
-                    "goety:whisperer",
-                    "goety:wavewhisperer"
-            ), s -> s instanceof String && ((String) s).contains(":"));
-
-
-    static final ForgeConfigSpec SPEC = BUILDER.build();
+    public static final java.util.List<String> CLEAR_ON_DEATH_WHITELIST_DEFAULT = java.util.Arrays.asList(
+            "touhou_little_maid:maid",
+            "goety:vex_servant",
+            "goety:wither_skeleton_servant",
+            "goety:border_wraith_servant",
+            "goety:haunted_armor_servant",
+            "goety:blackguard_servant",
+            "goety:vanguard_servant",
+            "goety:doppelganger",
+            "goety:guardian_servant",
+            "goety:stone_ministrosity",
+            "goety:redstone_ministrosity",
+            "goety:ice_golem",
+            "goety:blaze_servant",
+            "goety:inferno",
+            "goety:mini_ghast",
+            "goety:ghast_servant",
+            "goety:malghast",
+            "goety:blastling_servant",
+            "goety:snareling_servant",
+            "goety:watchling_servant",
+            "goety:haunted_skull",
+            "goety:phantom_servant",
+            "goety:reaper_servant",
+            "goety:wraith_servant",
+            "goety:muck_wraith_servant",
+            "goety:zombie_servant",
+            "goety:zombie_villager_servant",
+            "goety:husk_servant",
+            "goety:drowned_servant",
+            "goety:frozen_zombie_servant",
+            "goety:jungle_zombie_servant",
+            "goety:frayed_servant",
+            "goety:zpiglin_servant",
+            "goety:zpiglin_brute_servant",
+            "goety:zombie_vindicator",
+            "goety:skeleton_servant",
+            "goety:stray_servant",
+            "goety:mossy_skeleton_servant",
+            "goety:sunken_skeleton_servant",
+            "goety:rattled_servant",
+            "goety:skeleton_pillager",
+            "goety:carrion_fly",
+            "goety:carrion_maggot",
+            "goety:black_wolf",
+            "goety:skeleton_wolf",
+            "goety:winter_wolf",
+            "goety:stormhound",
+            "goety:hellhound",
+            "goety:twilight_goat",
+            "goety:snapper",
+            "goety:bear_servant",
+            "goety:polar_bear_servant",
+            "goety:hoglin_servant",
+            "goety:gnasher",
+            "goety:leapleaf",
+            "goety:slime_servant",
+            "goety:magma_cube_servant",
+            "goety:crypt_slime_servant",
+            "goety:tropical_slime_servant",
+            "goety:whisperer",
+            "goety:wavewhisperer"
+    );
 
     public static final java.util.List<String> ownerNbtFields = new java.util.ArrayList<>(java.util.Arrays.asList(
             "Owner", "OwnerUUID"));
@@ -308,12 +199,69 @@ public class Config
         CLEAR_ON_DEATH_WHITELIST
     }
 
-    /** Adds an entity type to the selected runtime list and persists the common config. */
+    private Config() {}
+
+    /** Loads the JSON config file (or defaults) into the static fields. Idempotent. */
+    public static void load() {
+        JsonObject root = readFile();
+        ownerNbtFields.clear();
+        ownerNbtFields.addAll(stringList(root, "ownerNbtFields", OWNER_NBT_FIELDS_DEFAULT));
+        ownerNbtPaths = OwnerNbtResolver.parsePaths(ownerNbtFields);
+
+        performanceMode = bool(root, "performanceMode", PERFORMANCE_MODE_DEFAULT);
+        performanceModeSyncIntervalTicks = clampedInt(root, "performanceModeSyncIntervalTicks",
+                PERFORMANCE_MODE_SYNC_INTERVAL_TICKS_DEFAULT, 1, 1200);
+        bossFightPetLimit = clampedInt(root, "bossFightPetLimit", BOSS_FIGHT_PET_LIMIT_DEFAULT, -1, 512);
+        syncIntervalTicks = clampedInt(root, "syncIntervalTicks", SYNC_INTERVAL_TICKS_DEFAULT, 0, 1200);
+        localSyncIntervalTicks = clampedInt(root, "localSyncIntervalTicks", LOCAL_SYNC_INTERVAL_TICKS_DEFAULT, 1, 100);
+        savePetDataCooldownTicks = clampedInt(root, "savePetDataCooldownTicks",
+                SAVE_PET_DATA_COOLDOWN_TICKS_DEFAULT, 1, 1200);
+        recallRange = clampedDouble(root, "recallRange", RECALL_RANGE_DEFAULT, -1.0, 64.0);
+        recallCooldownMs = clampedInt(root, "recallCooldownMs", RECALL_COOLDOWN_MS_DEFAULT, 250, 30000);
+        maxPets = clampedInt(root, "maxPets", MAX_PETS_DEFAULT, 1, 512);
+        deleteStoredPetsDirectly = bool(root, "deleteStoredPetsDirectly", DELETE_STORED_PETS_DIRECTLY_DEFAULT);
+        areaRecallDefaultRange = clampedInt(root, "areaRecallDefaultRange", AREA_RECALL_DEFAULT_RANGE_DEFAULT, 1, 16);
+        maxPendingSummons = clampedInt(root, "maxPendingSummons", MAX_PENDING_SUMMONS_DEFAULT, 1, 8);
+        summonBottleRightOffset = clampedInt(root, "summonBottleRightOffset",
+                SUMMON_BOTTLE_RIGHT_OFFSET_DEFAULT, 0, 4096);
+        summonBottleVerticalOffset = clampedInt(root, "summonBottleVerticalOffset",
+                SUMMON_BOTTLE_VERTICAL_OFFSET_DEFAULT, -4096, 4096);
+        reviveItem = string(root, "reviveItem", REVIVE_ITEM_DEFAULT);
+        manualRegisterItem = validItemId(root, "manualRegisterItem", MANUAL_REGISTER_ITEM_DEFAULT);
+        consumeManualRegisterItem = bool(root, "consumeManualRegisterItem", CONSUME_MANUAL_REGISTER_ITEM_DEFAULT);
+        manualRegisterItemConsumeCount = clampedInt(root, "manualRegisterItemConsumeCount",
+                MANUAL_REGISTER_ITEM_CONSUME_COUNT_DEFAULT, 1, 64);
+        reviveItemCount = clampedInt(root, "reviveItemCount", REVIVE_ITEM_COUNT_DEFAULT, 1, 64);
+        reviveCooldownSeconds = clampedInt(root, "reviveCooldownSeconds", REVIVE_COOLDOWN_SECONDS_DEFAULT, 0, 86400);
+        healHungerCost = clampedInt(root, "healHungerCost", HEAL_HUNGER_COST_DEFAULT, 0, 20);
+        advancedHealHungerCost = clampedInt(root, "advancedHealHungerCost", ADVANCED_HEAL_HUNGER_COST_DEFAULT, 0, 20);
+        healPulseIntervalTicks = clampedInt(root, "healPulseIntervalTicks", HEAL_PULSE_INTERVAL_TICKS_DEFAULT, 1, 1200);
+        advancedHealPulseIntervalTicks = clampedInt(root, "advancedHealPulseIntervalTicks",
+                ADVANCED_HEAL_PULSE_INTERVAL_TICKS_DEFAULT, 1, 1200);
+        healDurationPerClickTicks = clampedInt(root, "healDurationPerClickTicks",
+                HEAL_DURATION_PER_CLICK_TICKS_DEFAULT, 1, 72000);
+        healMaxDurationTicks = clampedInt(root, "healMaxDurationTicks", HEAL_MAX_DURATION_TICKS_DEFAULT, 1, 72000);
+        healFlatAmount = clampedDouble(root, "healFlatAmount", HEAL_FLAT_AMOUNT_DEFAULT, 0.0, 1000000.0);
+        healMaxHealthFraction = clampedDouble(root, "healMaxHealthFraction",
+                HEAL_MAX_HEALTH_FRACTION_DEFAULT, 0.0, 1.0);
+        enableLoginLoadDiagnostics = bool(root, "enableLoginLoadDiagnostics", ENABLE_LOGIN_LOAD_DIAGNOSTICS_DEFAULT);
+
+        autoRegisterBlacklist.clear();
+        autoRegisterBlacklist.addAll(stringList(root, "autoRegisterBlacklist", AUTO_REGISTER_BLACKLIST_DEFAULT));
+
+        noReviveWhitelist.clear();
+        noReviveWhitelist.addAll(stringList(root, "noReviveWhitelist", NO_REVIVE_WHITELIST_DEFAULT));
+
+        clearOnDeathWhitelist.clear();
+        clearOnDeathWhitelist.addAll(stringList(root, "clearOnDeathWhitelist", CLEAR_ON_DEATH_WHITELIST_DEFAULT));
+    }
+
+    /** Adds an entity type to the selected runtime list and persists the JSON config. */
     public static synchronized boolean addEntityType(EntityTypeList list, String entityTypeId) {
-        ForgeConfigSpec.ConfigValue<List<? extends String>> configValue = switch (list) {
-            case AUTO_REGISTER_BLACKLIST -> AUTO_REGISTER_BLACKLIST;
-            case NO_REVIVE_WHITELIST -> NO_REVIVE_WHITELIST;
-            case CLEAR_ON_DEATH_WHITELIST -> CLEAR_ON_DEATH_WHITELIST;
+        String key = switch (list) {
+            case AUTO_REGISTER_BLACKLIST -> "autoRegisterBlacklist";
+            case NO_REVIVE_WHITELIST -> "noReviveWhitelist";
+            case CLEAR_ON_DEATH_WHITELIST -> "clearOnDeathWhitelist";
         };
         java.util.Set<String> runtimeValues = switch (list) {
             case AUTO_REGISTER_BLACKLIST -> autoRegisterBlacklist;
@@ -321,68 +269,98 @@ public class Config
             case CLEAR_ON_DEATH_WHITELIST -> clearOnDeathWhitelist;
         };
 
-        List<String> updated = new java.util.ArrayList<>(configValue.get());
-        if (updated.contains(entityTypeId)) return false;
+        JsonObject root = readFile();
+        JsonArray updated = root.has(key) && root.get(key).isJsonArray()
+                ? root.get(key).getAsJsonArray()
+                : new JsonArray();
+        for (JsonElement element : updated) {
+            if (element.isJsonPrimitive() && element.getAsString().equals(entityTypeId)) return false;
+        }
         updated.add(entityTypeId);
-        configValue.set(updated);
-        configValue.save();
+        root.add(key, updated);
+        writeFile(root);
         runtimeValues.add(entityTypeId);
         return true;
     }
 
-    @SubscribeEvent
-    static void onLoad(final ModConfigEvent event)
-    {
-        ownerNbtFields.clear();
-        ownerNbtFields.addAll(OWNER_NBT_FIELDS.get());
-        ownerNbtPaths = OwnerNbtResolver.parsePaths(ownerNbtFields);
+    private static JsonObject readFile() {
+        try {
+            if (Files.exists(CONFIG_FILE)) {
+                JsonElement element = JsonParser.parseString(Files.readString(CONFIG_FILE));
+                if (element.isJsonObject()) return element.getAsJsonObject();
+            }
+        } catch (IOException | RuntimeException e) {
+            trulybestfriends.LOGGER.error("Failed to read config file {}: {}", CONFIG_FILE, e.getMessage());
+        }
+        return new JsonObject();
+    }
 
-        performanceMode = PERFORMANCE_MODE.get();
-        performanceModeSyncIntervalTicks = PERFORMANCE_MODE_SYNC_INTERVAL_TICKS.get();
-        bossFightPetLimit = BOSS_FIGHT_PET_LIMIT.get();
-        syncIntervalTicks = SYNC_INTERVAL_TICKS.get();
-        localSyncIntervalTicks = LOCAL_SYNC_INTERVAL_TICKS.get();
-        savePetDataCooldownTicks = SAVE_PET_DATA_COOLDOWN_TICKS.get();
-        recallRange = RECALL_RANGE.get();
-        recallCooldownMs = RECALL_COOLDOWN_MS.get();
-        maxPets = MAX_PETS.get();
-        deleteStoredPetsDirectly = DELETE_STORED_PETS_DIRECTLY.get();
-        areaRecallDefaultRange = AREA_RECALL_DEFAULT_RANGE.get();
-        maxPendingSummons = MAX_PENDING_SUMMONS.get();
-        summonBottleRightOffset = SUMMON_BOTTLE_RIGHT_OFFSET.get();
-        summonBottleVerticalOffset = SUMMON_BOTTLE_VERTICAL_OFFSET.get();
-        reviveItem = REVIVE_ITEM.get();
-        manualRegisterItem = MANUAL_REGISTER_ITEM.get();
-        consumeManualRegisterItem = CONSUME_MANUAL_REGISTER_ITEM.get();
-        manualRegisterItemConsumeCount = MANUAL_REGISTER_ITEM_CONSUME_COUNT.get();
-        reviveItemCount = REVIVE_ITEM_COUNT.get();
-        reviveCooldownSeconds = REVIVE_COOLDOWN_SECONDS.get();
-        healHungerCost = HEAL_HUNGER_COST.get();
-        advancedHealHungerCost = ADVANCED_HEAL_HUNGER_COST.get();
-        healPulseIntervalTicks = HEAL_PULSE_INTERVAL_TICKS.get();
-        advancedHealPulseIntervalTicks = ADVANCED_HEAL_PULSE_INTERVAL_TICKS.get();
-        healDurationPerClickTicks = HEAL_DURATION_PER_CLICK_TICKS.get();
-        healMaxDurationTicks = HEAL_MAX_DURATION_TICKS.get();
-        healFlatAmount = HEAL_FLAT_AMOUNT.get();
-        healMaxHealthFraction = HEAL_MAX_HEALTH_FRACTION.get();
-        enableLoginLoadDiagnostics = ENABLE_LOGIN_LOAD_DIAGNOSTICS.get();
+    private static void writeFile(JsonObject root) {
+        try {
+            Files.createDirectories(CONFIG_FILE.getParent());
+            Files.writeString(CONFIG_FILE, GSON.toJson(root));
+        } catch (IOException e) {
+            trulybestfriends.LOGGER.error("Failed to write config file {}: {}", CONFIG_FILE, e.getMessage());
+            throw new RuntimeException(e);
+        }
+    }
 
-        autoRegisterBlacklist.clear();
-        autoRegisterBlacklist.addAll(AUTO_REGISTER_BLACKLIST.get());
+    private static boolean bool(JsonObject root, String key, boolean fallback) {
+        if (root.has(key) && root.get(key).isJsonPrimitive()) {
+            try {
+                return root.get(key).getAsBoolean();
+            } catch (RuntimeException ignored) {}
+        }
+        return fallback;
+    }
 
-        noReviveWhitelist.clear();
-        noReviveWhitelist.addAll(NO_REVIVE_WHITELIST.get());
+    private static int clampedInt(JsonObject root, String key, int fallback, int min, int max) {
+        int value = fallback;
+        if (root.has(key) && root.get(key).isJsonPrimitive()) {
+            try {
+                value = root.get(key).getAsInt();
+            } catch (RuntimeException ignored) {}
+        }
+        return Math.max(min, Math.min(max, value));
+    }
 
-        clearOnDeathWhitelist.clear();
-        clearOnDeathWhitelist.addAll(CLEAR_ON_DEATH_WHITELIST.get());
+    private static double clampedDouble(JsonObject root, String key, double fallback, double min, double max) {
+        double value = fallback;
+        if (root.has(key) && root.get(key).isJsonPrimitive()) {
+            try {
+                value = root.get(key).getAsDouble();
+            } catch (RuntimeException ignored) {}
+        }
+        return Math.max(min, Math.min(max, value));
+    }
 
+    private static String string(JsonObject root, String key, String fallback) {
+        if (root.has(key) && root.get(key).isJsonPrimitive()) {
+            return root.get(key).getAsString();
+        }
+        return fallback;
+    }
+
+    private static String validItemId(JsonObject root, String key, String fallback) {
+        String value = string(root, key, fallback);
+        return ResourceLocation.tryParse(value) != null ? value : fallback;
+    }
+
+    private static java.util.List<String> stringList(JsonObject root, String key,
+                                                     java.util.List<String> fallback) {
+        if (!root.has(key) || !root.get(key).isJsonArray()) return new java.util.ArrayList<>(fallback);
+        java.util.List<String> result = new java.util.ArrayList<>();
+        for (JsonElement element : root.get(key).getAsJsonArray()) {
+            if (element.isJsonPrimitive()) result.add(element.getAsString());
+        }
+        return result;
     }
 
     /**
      * Get the display name for a dimension in the currently selected language.
      * Falls back to the raw dimension id when no language entry exists.
      */
-    @OnlyIn(Dist.CLIENT)
+    @Environment(EnvType.CLIENT)
     public static String getDimensionDisplayName(String dimKey) {
         String translationKey = getDimensionTranslationKey(dimKey);
         if (translationKey != null && I18n.exists(translationKey)) {

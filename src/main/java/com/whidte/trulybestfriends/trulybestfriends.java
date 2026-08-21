@@ -1,7 +1,7 @@
 package com.whidte.trulybestfriends;
 
 import com.mojang.logging.LogUtils;
-import com.whidte.trulybestfriends.client.ClientPacketHandlers;
+import com.whidte.trulybestfriends.compat.PartEntityCompat;
 import com.whidte.trulybestfriends.network.AreaRecallPacket;
 import com.whidte.trulybestfriends.network.DeletePetDataPacket;
 import com.whidte.trulybestfriends.network.DirectTeleportPetToPlayerPacket;
@@ -28,6 +28,14 @@ import com.whidte.trulybestfriends.network.SyncPetDataPacket;
 import com.whidte.trulybestfriends.network.TeamDataPacket;
 import com.whidte.trulybestfriends.network.TeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.TeleportToPetPacket;
+import com.whidte.trulybestfriends.network.TrulyNetwork;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -50,29 +58,6 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.EntityMountEvent;
-import net.minecraftforge.event.entity.EntityJoinLevelEvent;
-import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
-import net.minecraftforge.event.entity.living.AnimalTameEvent;
-import net.minecraftforge.event.entity.living.LivingAttackEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.event.server.ServerStartedEvent;
-import net.minecraftforge.event.entity.living.LivingDeathEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.entity.PartEntity;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.fml.loading.FMLEnvironment;
-import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.simple.SimpleChannel;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import java.io.File;
 import java.io.IOException;
@@ -82,14 +67,13 @@ import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Mod(value = trulybestfriends.MODID)
-public class trulybestfriends {
+public class trulybestfriends implements ModInitializer {
     public static final String MODID = "trulybestfriends";
     public static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
 
     private static final String PETS_INDEX_FILE = "pets_index.nbt";
     private static final String BLACKLISTED_UUIDS_KEY = PetIndexBlacklist.KEY;
-    private static final ResourceLocation TRULY_BEST_FRIENDS_ADVANCEMENT = ResourceLocation.fromNamespaceAndPath("minecraft", "husbandry/tame_an_animal");
+    private static final ResourceLocation TRULY_BEST_FRIENDS_ADVANCEMENT = new ResourceLocation("minecraft", "husbandry/tame_an_animal");
     private static final int LOCAL_SYNC_CHUNK_RADIUS = 2;
     private static final Map<String, List<UUID>> indexCache = new ConcurrentHashMap<>();
     private static final Set<UUID> trackedPetUUIDs = ConcurrentHashMap.newKeySet();
@@ -110,12 +94,24 @@ public class trulybestfriends {
     private static final Map<UUID, Long> petDeathTimes = new ConcurrentHashMap<>();
 
     private static final String PROTOCOL_VERSION = "5";
-    public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            ResourceLocation.fromNamespaceAndPath(MODID, "main"),
-            () -> PROTOCOL_VERSION,
-            PROTOCOL_VERSION::equals,
-            PROTOCOL_VERSION::equals
-    );
+
+    /**
+     * Fabric replacement for the Forge {@code SimpleChannel} facade. Keeps the
+     * original {@code CHANNEL.sendToServer} call sites across the GUI classes.
+     */
+    public static final TrulyChannel CHANNEL = new TrulyChannel();
+
+    public static final class TrulyChannel {
+        private TrulyChannel() {}
+
+        public void sendToServer(Object packet) {
+            TrulyNetwork.sendToServer(packet);
+        }
+
+        public void send(ServerPlayer player, Object packet) {
+            TrulyNetwork.sendToClient(player, packet);
+        }
+    }
 
     private int syncTickCounter = 0;
     private int localSyncTickCounter = 0;
@@ -126,11 +122,53 @@ public class trulybestfriends {
 
     private static trulybestfriends INSTANCE;
 
-    public trulybestfriends(FMLJavaModLoadingContext context) {
+    public trulybestfriends() {
         INSTANCE = this;
-        context.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
-        MinecraftForge.EVENT_BUS.register(this);
-        context.getModEventBus().addListener(this::commonSetup);
+    }
+
+    @Override
+    public void onInitialize() {
+        Config.load();
+        registerPackets();
+        TrulyNetwork.initServer();
+        com.whidte.trulybestfriends.command.ModCommands.register();
+
+        ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
+        ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
+        ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
+        ServerEntityEvents.ENTITY_LOAD.register(this::onEntityJoinLevel);
+        ServerEntityEvents.ENTITY_UNLOAD.register(this::onEntityLeaveLevel);
+        ServerPlayConnectionEvents.JOIN.register(
+                (handler, sender, server) -> onPlayerLogin(handler.getPlayer()));
+        ServerPlayConnectionEvents.DISCONNECT.register(
+                (handler, server) -> onPlayerLogout(handler.getPlayer()));
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register(
+                (entity, source, amount) -> !ReviveProtection.blocksDamage(entity));
+        ServerLivingEntityEvents.AFTER_DEATH.register(this::onLivingDeath);
+    }
+
+    private void registerPackets() {
+        TrulyNetwork.registerServerBound(0, HealPetPacket.class, HealPetPacket::encode, HealPetPacket::decode, HealPetPacket::handle);
+        TrulyNetwork.registerServerBound(1, RecallPetPacket.class, RecallPetPacket::encode, RecallPetPacket::decode, RecallPetPacket::handle);
+        TrulyNetwork.registerServerBound(2, TeleportToPetPacket.class, TeleportToPetPacket::encode, TeleportToPetPacket::decode, TeleportToPetPacket::handle);
+        TrulyNetwork.registerServerBound(3, TeleportPetToPlayerPacket.class, TeleportPetToPlayerPacket::encode, TeleportPetToPlayerPacket::decode, TeleportPetToPlayerPacket::handle);
+        TrulyNetwork.registerServerBound(4, AreaRecallPacket.class, AreaRecallPacket::encode, AreaRecallPacket::decode, AreaRecallPacket::handle);
+        // Server→client handlers are registered from the client initializer,
+        // keeping net.minecraft.client.* classes off dedicated servers.
+        TrulyNetwork.registerClientBound(5, PetWarningPacket.class, PetWarningPacket::encode, PetWarningPacket::decode);
+        TrulyNetwork.registerServerBound(6, RequestPetDataPacket.class, RequestPetDataPacket::encode, RequestPetDataPacket::decode, RequestPetDataPacket::handle);
+        TrulyNetwork.registerServerBound(7, RevivePetPacket.class, RevivePetPacket::encode, RevivePetPacket::decode, RevivePetPacket::handle);
+        TrulyNetwork.registerServerBound(8, SetPriorityPacket.class, SetPriorityPacket::encode, SetPriorityPacket::decode, SetPriorityPacket::handle);
+        TrulyNetwork.registerClientBound(9, SyncPetDataPacket.class, SyncPetDataPacket::encode, SyncPetDataPacket::decode);
+        TrulyNetwork.registerServerBound(10, DeletePetDataPacket.class, DeletePetDataPacket::encode, DeletePetDataPacket::decode, DeletePetDataPacket::handle);
+        TrulyNetwork.registerServerBound(11, ReleaseRecalledPetPacket.class, ReleaseRecalledPetPacket::encode, ReleaseRecalledPetPacket::decode, ReleaseRecalledPetPacket::handle);
+        TrulyNetwork.registerServerBound(12, DirectTeleportPetToPlayerPacket.class, DirectTeleportPetToPlayerPacket::encode, DirectTeleportPetToPlayerPacket::decode, DirectTeleportPetToPlayerPacket::handle);
+        TrulyNetwork.registerServerBound(13, RequestTeamDataPacket.class, RequestTeamDataPacket::encode, RequestTeamDataPacket::decode, RequestTeamDataPacket::handle);
+        TrulyNetwork.registerServerBound(14, SetTeamMemberPacket.class, SetTeamMemberPacket::encode, SetTeamMemberPacket::decode, SetTeamMemberPacket::handle);
+        TrulyNetwork.registerClientBound(15, TeamDataPacket.class, TeamDataPacket::encode, TeamDataPacket::decode);
+        TrulyNetwork.registerServerBound(16, SummonTeamPacket.class, SummonTeamPacket::encode, SummonTeamPacket::decode, SummonTeamPacket::handle);
+        TrulyNetwork.registerServerBound(17, SummonPetPacket.class, SummonPetPacket::encode, SummonPetPacket::decode, SummonPetPacket::handle);
+        TrulyNetwork.registerServerBound(18, SetLastSummonPacket.class, SetLastSummonPacket::encode, SetLastSummonPacket::decode, SetLastSummonPacket::handle);
     }
 
     /** 判断指定 UUID 当前是否在读取黑名单中。 */
@@ -191,7 +229,7 @@ public class trulybestfriends {
         if (INSTANCE == null) return LoadResult.SAVE_FAILED;
         if (!(entity instanceof LivingEntity living)
                 || entity instanceof Player
-                || entity instanceof PartEntity<?>) {
+                || PartEntityCompat.isPartEntity(entity)) {
             return LoadResult.NOT_A_PET;
         }
         return tryLoadPet(living, owner.getUUID(), level, true);
@@ -200,7 +238,7 @@ public class trulybestfriends {
     private static LoadResult tryLoadPet(LivingEntity living, UUID ownerUUID, ServerLevel level,
                                          boolean forceTracking) {
         if (!isKnownPlayer(level.getServer(), ownerUUID)) return LoadResult.UNKNOWN_OWNER;
-        ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(living.getType());
+        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(living.getType());
         String entityTypeKey = entityType != null ? entityType.toString() : null;
         if (entityTypeKey != null && Config.isAutoRegisterBlacklisted(entityTypeKey)) {
             return LoadResult.TYPE_BLACKLISTED;
@@ -252,50 +290,15 @@ public class trulybestfriends {
         return false;
     }
 
-    private void commonSetup(final FMLCommonSetupEvent event) {
-        CHANNEL.registerMessage(0, HealPetPacket.class, HealPetPacket::encode, HealPetPacket::decode, HealPetPacket::handle);
-        CHANNEL.registerMessage(1, RecallPetPacket.class, RecallPetPacket::encode, RecallPetPacket::decode, RecallPetPacket::handle);
-        CHANNEL.registerMessage(2, TeleportToPetPacket.class, TeleportToPetPacket::encode, TeleportToPetPacket::decode, TeleportToPetPacket::handle);
-        CHANNEL.registerMessage(3, TeleportPetToPlayerPacket.class, TeleportPetToPlayerPacket::encode, TeleportPetToPlayerPacket::decode, TeleportPetToPlayerPacket::handle);
-        CHANNEL.registerMessage(4, AreaRecallPacket.class, AreaRecallPacket::encode, AreaRecallPacket::decode, AreaRecallPacket::handle);
-        // Server→client handlers live in the client-only ClientPacketHandlers class.
-        // The dist guard keeps the client class from being loaded on dedicated servers,
-        // where net.minecraft.client.* does not exist.
-        CHANNEL.registerMessage(5, PetWarningPacket.class, PetWarningPacket::encode, PetWarningPacket::decode,
-                (packet, ctx) -> {
-                    if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
-                });
-        CHANNEL.registerMessage(6, RequestPetDataPacket.class, RequestPetDataPacket::encode, RequestPetDataPacket::decode, RequestPetDataPacket::handle);
-        CHANNEL.registerMessage(7, RevivePetPacket.class, RevivePetPacket::encode, RevivePetPacket::decode, RevivePetPacket::handle);
-        CHANNEL.registerMessage(8, SetPriorityPacket.class, SetPriorityPacket::encode, SetPriorityPacket::decode, SetPriorityPacket::handle);
-        CHANNEL.registerMessage(9, SyncPetDataPacket.class, SyncPetDataPacket::encode, SyncPetDataPacket::decode,
-                (packet, ctx) -> {
-                    if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
-                });
-        CHANNEL.registerMessage(10, DeletePetDataPacket.class, DeletePetDataPacket::encode, DeletePetDataPacket::decode, DeletePetDataPacket::handle);
-        CHANNEL.registerMessage(11, ReleaseRecalledPetPacket.class, ReleaseRecalledPetPacket::encode, ReleaseRecalledPetPacket::decode, ReleaseRecalledPetPacket::handle);
-        CHANNEL.registerMessage(12, DirectTeleportPetToPlayerPacket.class, DirectTeleportPetToPlayerPacket::encode, DirectTeleportPetToPlayerPacket::decode, DirectTeleportPetToPlayerPacket::handle);
-        CHANNEL.registerMessage(13, RequestTeamDataPacket.class, RequestTeamDataPacket::encode, RequestTeamDataPacket::decode, RequestTeamDataPacket::handle);
-        CHANNEL.registerMessage(14, SetTeamMemberPacket.class, SetTeamMemberPacket::encode, SetTeamMemberPacket::decode, SetTeamMemberPacket::handle);
-        CHANNEL.registerMessage(15, TeamDataPacket.class, TeamDataPacket::encode, TeamDataPacket::decode,
-                (packet, ctx) -> {
-                    if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
-                });
-        CHANNEL.registerMessage(16, SummonTeamPacket.class, SummonTeamPacket::encode, SummonTeamPacket::decode, SummonTeamPacket::handle);
-        CHANNEL.registerMessage(17, SummonPetPacket.class, SummonPetPacket::encode, SummonPetPacket::decode, SummonPetPacket::handle);
-        CHANNEL.registerMessage(18, SetLastSummonPacket.class, SetLastSummonPacket::encode, SetLastSummonPacket::decode, SetLastSummonPacket::handle);
-    }
-
-    @SubscribeEvent
-    public void onAnimalTamed(AnimalTameEvent event) {
-        Entity animal = event.getAnimal();
-        if (animal.level().isClientSide() || Config.performanceMode) return;
+    /** Called from the AnimalMixin after a vanilla tame completes. */
+    public static void onAnimalTamed(Entity animal) {
+        if (INSTANCE == null || animal.level().isClientSide() || Config.performanceMode) return;
         UUID owner = getCompatOwnerUUID(animal);
         if (owner != null) {
             if (isPetUUIDBlacklisted((ServerLevel) animal.level(), animal.getUUID())) return;
-            ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(animal.getType());
+            ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(animal.getType());
             if (entityType != null && Config.isAutoRegisterBlacklisted(entityType.toString())) return;
-            if (countOwnerPets((ServerLevel) animal.level(), owner) >= Config.maxPets) {
+            if (INSTANCE.countOwnerPets((ServerLevel) animal.level(), owner) >= Config.maxPets) {
                 ServerPlayer ownerPlayer = animal.level().getServer().getPlayerList().getPlayer(owner);
                 if (ownerPlayer != null) {
                     ownerPlayer.displayClientMessage(
@@ -304,16 +307,14 @@ public class trulybestfriends {
                 }
                 return;
             }
-            savePetData(owner, animal, (ServerLevel) animal.level());
-            updatePetIndex(animal, owner);
+            INSTANCE.savePetData(owner, animal, (ServerLevel) animal.level());
+            INSTANCE.updatePetIndex(animal, owner);
             flushPendingPetSaves(owner);
         }
     }
 
-    @SubscribeEvent
-    public void onEntityJoinLevel(EntityJoinLevelEvent event) {
-        if (event.getLevel().isClientSide() || !(event.getLevel() instanceof ServerLevel level)) return;
-        Entity entity = event.getEntity();
+    public void onEntityJoinLevel(Entity entity, ServerLevel level) {
+        if (level.isClientSide()) return;
         if (Config.performanceMode) {
             if (!petIndexLoaded) loadPetIndex(level);
             if (!trackedPetUUIDs.contains(entity.getUUID())) return;
@@ -343,21 +344,19 @@ public class trulybestfriends {
         }
     }
 
-    @SubscribeEvent(priority = EventPriority.LOWEST)
-    public void onEntityMount(EntityMountEvent event) {
-        if (!event.isMounting()
-                || !(event.getLevel() instanceof ServerLevel level)
-                || !(event.getEntityMounting() instanceof ServerPlayer player)
-                || !(event.getEntityBeingMounted() instanceof LivingEntity mount)) return;
+    /** Called from the EntityMixin after a tracked pet becomes the player's mount. */
+    public static void onEntityMount(Entity mounting, Entity mounted) {
+        if (!(mounting instanceof ServerPlayer player)
+                || !(mounted instanceof LivingEntity mount)
+                || mounting.level().isClientSide()) return;
         UUID mountUUID = mount.getUUID();
         if (isTrackedPet(mountUUID) && isOwnedBy(mount, player.getUUID())) {
-            updatePetRideableState(level, mountUUID);
+            updatePetRideableState(player.serverLevel(), mountUUID);
         }
     }
 
-    @SubscribeEvent
-    public void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
-        if (event.getLevel().isClientSide() || !(event.getEntity() instanceof LivingEntity living)) return;
+    public void onEntityLeaveLevel(Entity entity, ServerLevel level) {
+        if (level.isClientSide() || !(entity instanceof LivingEntity living)) return;
         boolean tracked = trackedPetUUIDs.contains(living.getUUID());
         if (Config.performanceMode && !tracked) return;
         UUID ownerUUID = getCompatOwnerUUID(living);
@@ -366,43 +365,35 @@ public class trulybestfriends {
         // Capture the last live state before a chunk unload. Other removal reasons
         // have dedicated persistence paths or may recreate the entity elsewhere.
         if (tracked && living.getRemovalReason() == Entity.RemovalReason.UNLOADED_TO_CHUNK) {
-            savePetData(ownerUUID, living, (ServerLevel) event.getLevel());
+            savePetData(ownerUUID, living, level);
         }
         PetHealingManager.onEntityUnloaded(living, ownerUUID);
     }
 
-    @SubscribeEvent
-    public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
-            try {
-                PetTeamData.ensureAndPrune(PetIOUtil.getOwnerDir(player));
-            } catch (IOException e) {
-                LOGGER.error("Failed to initialize team data for {}: {}",
-                        player.getUUID(), e.getMessage(), e);
-            }
-            if (Config.enableLoginLoadDiagnostics) loadPlayerPetsData(player);
+    public void onPlayerLogin(ServerPlayer player) {
+        try {
+            PetTeamData.ensureAndPrune(PetIOUtil.getOwnerDir(player));
+        } catch (IOException e) {
+            LOGGER.error("Failed to initialize team data for {}: {}",
+                    player.getUUID(), e.getMessage(), e);
         }
+        if (Config.enableLoginLoadDiagnostics) loadPlayerPetsData(player);
     }
 
-    @SubscribeEvent
-    public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
-            flushPendingPetSaves(player.getUUID());
-            PetSyncTracker.clearPlayer(player.getUUID());
-        }
+    public void onPlayerLogout(ServerPlayer player) {
+        flushPendingPetSaves(player.getUUID());
+        PetSyncTracker.clearPlayer(player.getUUID());
     }
 
-    @SubscribeEvent
-    public void onServerStarted(ServerStartedEvent event) {
-        loadPetIndex(event.getServer().overworld());
-        PetHealingManager.load(event.getServer());
+    public void onServerStarted(MinecraftServer server) {
+        loadPetIndex(server.overworld());
+        PetHealingManager.load(server);
     }
 
-    @SubscribeEvent
-    public void onServerStopping(ServerStoppingEvent event) {
+    public void onServerStopping(MinecraftServer server) {
         flushPendingPetSaves();
         PetHealingManager.shutdown();
-        ReviveProtection.clear(event.getServer());
+        ReviveProtection.clear(server);
         petDeathTimes.clear();  // 死亡时刻仅在内存，不持久化
         pendingRemovals.clear();
         PetSyncTracker.clearAll();
@@ -421,64 +412,51 @@ public class trulybestfriends {
         petIndexLoaded = false;
     }
 
-    @SubscribeEvent
-    public void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase == TickEvent.Phase.END) {
-            saveTickCounter++;
-            processPendingRemovals(event.getServer());
-            TeleportPetToPlayerPacket.tickPendingSummons(event.getServer());
-            ReviveProtection.tick(event.getServer());
-            PetHealingManager.tick(event.getServer());
+    public void onServerTick(MinecraftServer server) {
+        saveTickCounter++;
+        processPendingRemovals(server);
+        TeleportPetToPlayerPacket.tickPendingSummons(server);
+        ReviveProtection.tick(server);
+        PetHealingManager.tick(server);
 
-            if (Config.performanceMode) {
-                syncTickCounter = 0;
-                localSyncTickCounter = 0;
-                if (!localSyncCandidates.isEmpty()) localSyncCandidates.clear();
-                performanceModeSyncTickCounter++;
-                if (performanceModeSyncTickCounter >= Config.performanceModeSyncIntervalTicks) {
-                    performanceModeSyncTickCounter = 0;
-                    syncTrackedPets(event.getServer());
-                }
-            } else {
+        if (Config.performanceMode) {
+            syncTickCounter = 0;
+            localSyncTickCounter = 0;
+            if (!localSyncCandidates.isEmpty()) localSyncCandidates.clear();
+            performanceModeSyncTickCounter++;
+            if (performanceModeSyncTickCounter >= Config.performanceModeSyncIntervalTicks) {
                 performanceModeSyncTickCounter = 0;
-                if (Config.syncIntervalTicks > 0) syncTickCounter++;
-                else syncTickCounter = 0;
-                localSyncTickCounter++;
-                processLocalSyncCandidates(event.getServer());
-                if (localSyncTickCounter >= Config.localSyncIntervalTicks) {
-                    localSyncTickCounter = 0;
-                    collectLocalSyncCandidates(event.getServer());
-                }
-                if (Config.syncIntervalTicks > 0 && syncTickCounter >= Config.syncIntervalTicks) {
-                    syncTickCounter = 0;
-                    syncAllPets(event.getServer());
-                }
+                syncTrackedPets(server);
             }
-            if (Config.bossFightPetLimit >= 0) {
-                bossRecallTickCounter++;
-                if (bossRecallTickCounter >= BOSS_RECALL_INTERVAL_TICKS) {
-                    bossRecallTickCounter = 0;
-                    checkBossRecalls(event.getServer());
-                }
+        } else {
+            performanceModeSyncTickCounter = 0;
+            if (Config.syncIntervalTicks > 0) syncTickCounter++;
+            else syncTickCounter = 0;
+            localSyncTickCounter++;
+            processLocalSyncCandidates(server);
+            if (localSyncTickCounter >= Config.localSyncIntervalTicks) {
+                localSyncTickCounter = 0;
+                collectLocalSyncCandidates(server);
             }
-            if (saveTickCounter >= Config.savePetDataCooldownTicks) {
-                saveTickCounter = 0;
-                flushPendingPetSaves();
+            if (Config.syncIntervalTicks > 0 && syncTickCounter >= Config.syncIntervalTicks) {
+                syncTickCounter = 0;
+                syncAllPets(server);
             }
+        }
+        if (Config.bossFightPetLimit >= 0) {
+            bossRecallTickCounter++;
+            if (bossRecallTickCounter >= BOSS_RECALL_INTERVAL_TICKS) {
+                bossRecallTickCounter = 0;
+                checkBossRecalls(server);
+            }
+        }
+        if (saveTickCounter >= Config.savePetDataCooldownTicks) {
+            saveTickCounter = 0;
+            flushPendingPetSaves();
         }
     }
 
-    @SubscribeEvent(priority = EventPriority.HIGHEST)
-	public void onLivingIncomingDamage(LivingAttackEvent event) {
-        if (!event.getEntity().level().isClientSide()
-                && ReviveProtection.blocksDamage(event.getEntity())) {
-            event.setCanceled(true);
-        }
-    }
-
-    @SubscribeEvent(priority = EventPriority.HIGHEST)
-    public void onLivingDeath(LivingDeathEvent event) {
-        Entity entity = event.getEntity();
+    public void onLivingDeath(LivingEntity entity, DamageSource source) {
         if (!entity.level().isClientSide()) ReviveProtection.remove(entity.getUUID());
         if (entity.level().isClientSide() || !trackedPetUUIDs.contains(entity.getUUID())) return;
         PetHealingManager.clear(entity.getUUID());
@@ -486,7 +464,7 @@ public class trulybestfriends {
         UUID owner = getCompatOwnerUUID(entity);
         if (owner == null) return;
         ServerLevel level = (ServerLevel) entity.level();
-        ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         String entityTypeKey = entityType != null ? entityType.toString() : null;
 
         if (Config.isClearOnDeathEntity(entityTypeKey)) {
@@ -514,7 +492,7 @@ public class trulybestfriends {
         UUID owner = getCompatOwnerUUID(entity);
         if (owner == null) return false;
         ServerLevel level = (ServerLevel) entity.level();
-        ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         String entityTypeKey = entityType != null ? entityType.toString() : null;
         if (Config.isNoReviveEntity(entityTypeKey)) return false;
 
@@ -576,7 +554,7 @@ public class trulybestfriends {
             LOGGER.warn("Skipping pet save: owner UUID {} is not a known player", ownerUUID);
             return false;
         }
-        String entityTypeKey = ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString();
+        String entityTypeKey = BuiltInRegistries.ENTITY_TYPE.getKey(pet.getType()).toString();
         CompoundTag nbt;
         try {
             nbt = PetEntitySnapshot.capture(pet, ownerUUID, level);
@@ -867,7 +845,8 @@ public class trulybestfriends {
                 if (ownerUUID.equals(pending.ownerUUID())) petUUIDs.add(pending.petUUID());
             }
             for (ServerLevel level : player.getServer().getAllLevels()) {
-                for (Entity entity : level.getEntities().getAll()) {
+                for (Entity entity : level.getEntities(
+                        net.minecraft.world.level.entity.EntityTypeTest.forClass(Entity.class), entity -> true)) {
                     if (trackedPetUUIDs.contains(entity.getUUID()) && isOwnedBy(entity, ownerUUID)) {
                         petUUIDs.add(entity.getUUID());
                     }
@@ -985,10 +964,10 @@ public class trulybestfriends {
         // is a separate Entity with its own UUID and will be processed by
         // onEntityJoinLevel / syncAllPets on its own.  Returning null here
         // causes all tracking entry points to skip sub-parts.
-        if (entity instanceof PartEntity<?>) return null;
+        if (PartEntityCompat.isPartEntity(entity)) return null;
         UUID forcedOwner = forcedTrackingOwners.get(entity.getUUID());
         if (forcedOwner != null) return forcedOwner;
-        // Fast path: standard vanilla/Forge ownership interface
+        // Fast path: standard vanilla ownership interface
         if (entity instanceof OwnableEntity ownable) {
             UUID ownerUUID = ownable.getOwnerUUID();
             if (ownerUUID != null) return ownerUUID;
@@ -1010,7 +989,7 @@ public class trulybestfriends {
             rootCause = rootCause.getCause();
         }
 
-        ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+        ResourceLocation typeId = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         String entityType = typeId != null ? typeId.toString() : entity.getType().toString();
         String exceptionType = rootCause.getClass().getName();
         String exceptionName = rootCause.getClass().getSimpleName();
@@ -1181,7 +1160,7 @@ public class trulybestfriends {
         }
     }
 
-    private static void updatePetRideableState(ServerLevel level, UUID petUUID) {
+    public static void updatePetRideableState(ServerLevel level, UUID petUUID) {
         File indexFile = PetIOUtil.getModDir(level).resolve(PETS_INDEX_FILE).toFile();
         if (!indexFile.exists()) return;
         try {
@@ -1250,7 +1229,7 @@ public class trulybestfriends {
         try {
             ServerLevel level = (ServerLevel) pet.level();
             Path modDir = PetIOUtil.getModDir(level);
-            String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString();
+            String typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(pet.getType()).toString();
             UUID petUUID = pet.getUUID();
             updatePetIndexEntry(modDir, resolvePlayerName(level, ownerUUID), typeKey, petUUID, false);
             trackedPetUUIDs.add(petUUID);
@@ -1269,7 +1248,7 @@ public class trulybestfriends {
         if (isPetUUIDBlacklisted(level, entity.getUUID())) return false;
         if (!isKnownPlayer(level.getServer(), ownerUUID)) return false;
 
-        ResourceLocation entityType = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+        ResourceLocation entityType = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         if (entityType != null && Config.isAutoRegisterBlacklisted(entityType.toString())) return false;
 
         if (countOwnerPets(level, ownerUUID) >= Config.maxPets) return false;
@@ -1436,7 +1415,7 @@ public class trulybestfriends {
             boolean explicitlyStored = PetDeathState.isStoredDead(nbt);
             String typeKey = nbt.contains("EntityType")
                     ? nbt.getString("EntityType")
-                    : ForgeRegistries.ENTITY_TYPES.getKey(entity.getType()).toString();
+                    : BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
             if (!explicitlyStored
                     && (!PetDeathState.isDeadSnapshot(nbt) || Config.isNoReviveEntity(typeKey))) {
                 return false;
@@ -1461,7 +1440,8 @@ public class trulybestfriends {
 
     private void syncAllPets(MinecraftServer server) {
         for (ServerLevel level : server.getAllLevels()) {
-            for (Entity entity : level.getEntities().getAll()) {
+            for (Entity entity : level.getEntities(
+                    net.minecraft.world.level.entity.EntityTypeTest.forClass(Entity.class), entity -> true)) {
                 syncOwnedEntity(entity, level);
             }
         }

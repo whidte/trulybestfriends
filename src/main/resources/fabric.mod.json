@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "${mod_id}",
+  "version": "${version}",
+  "name": "${mod_name}",
+  "description": "${mod_description}",
+  "authors": [
+    "${mod_authors}"
+  ],
+  "contact": {
+    "issues": "https://github.com/whidte/trulybestfriends/issues"
+  },
+  "license": "${mod_license}",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.whidte.trulybestfriends.trulybestfriends"
+    ],
+    "client": [
+      "com.whidte.trulybestfriends.client.ClientEvents"
+    ]
+  },
+  "mixins": [
+    "trulybestfriends.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.11",
+    "fabric-api": "*",
+    "minecraft": "~1.20.1",
+    "java": ">=17"
+  },
+  "suggests": {
+    "ftbteams": "*",
+    "l2tabs": "*"
+  }
+}

@@ -7,7 +7,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.PacketDistributor;
+import com.whidte.trulybestfriends.network.TrulyNetwork;
 
 import java.util.ArrayList;
 import java.util.Map;
@@ -121,7 +121,7 @@ public class SyncPetDataPacket {
     /** Sends one logical packet, splitting its encoded form when necessary. */
     public static void sendToPlayer(ServerPlayer player, SyncPetDataPacket packet) {
         for (SyncPetDataPacket wirePacket : packet.splitForWire()) {
-            trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), wirePacket);
+            TrulyNetwork.sendToClient(player, wirePacket);
         }
     }
 

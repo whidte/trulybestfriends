@@ -14,7 +14,7 @@ import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -29,8 +29,10 @@ final class RenderHelper {
 	private RenderHelper() {}
 
 	static boolean isMultipartPreview(LivingEntity entity) {
+		net.minecraft.world.entity.Entity[] parts =
+				com.whidte.trulybestfriends.compat.PartEntityCompat.getParts(entity);
 		return entity.getScale() > 1.0001f
-				|| (entity.getParts() != null && entity.getParts().length > 0);
+				|| parts.length > 0;
 	}
 
 	static void applyPreviewRotation(LivingEntity entity, boolean multipart,
@@ -140,7 +142,7 @@ final class RenderHelper {
 	 * Results are cached per entity type id.
 	 */
 	static float detectMultipartYBase(LivingEntity entity) {
-		String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType()).toString();
+		String typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
 		Float cached = MULTIPART_Y_BASE_CACHE.get(typeKey);
 		if (cached != null) return cached;
 

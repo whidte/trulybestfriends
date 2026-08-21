@@ -20,9 +20,9 @@ import java.util.UUID;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 
 class ActionButton extends AbstractWidget {
-	private static final ResourceLocation ICON_RECALL = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/empty_bottle.png");
-	private static final ResourceLocation ICON_SUMMON = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/world_in_a_bottle.png");
-	private static final ResourceLocation ICON_AREA_RECALL = ResourceLocation.fromNamespaceAndPath("truly_best_friends", "textures/gui/absorption_bottle.png");
+	private static final ResourceLocation ICON_RECALL = new ResourceLocation("truly_best_friends", "textures/gui/empty_bottle.png");
+	private static final ResourceLocation ICON_SUMMON = new ResourceLocation("truly_best_friends", "textures/gui/world_in_a_bottle.png");
+	private static final ResourceLocation ICON_AREA_RECALL = new ResourceLocation("truly_best_friends", "textures/gui/absorption_bottle.png");
 	private static final int ICON_SIZE = 16;
 
 	private final TrulyScreen screen;

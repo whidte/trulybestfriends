@@ -6,7 +6,7 @@ import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.fml.ModList;
+import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Optional FTB Teams alliance bridge for entities tracked by this mod. */
 public final class FtbTeamsCompat {
-    private static final boolean LOADED = ModList.get().isLoaded("ftbteams");
+    private static final boolean LOADED = FabricLoader.getInstance().isModLoaded("ftbteams");
     private static final Map<OwnerCacheKey, UUID> STORED_OWNERS = new ConcurrentHashMap<>();
     private static final Set<Path> LOADED_WORLDS = ConcurrentHashMap.newKeySet();
 
