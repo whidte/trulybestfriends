@@ -48,12 +48,12 @@ public class SummonPetPacket implements CustomPacketPayload {
             try {
                 CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
                 if (PetDeathState.isDeadSnapshot(nbt)) return;
+                // Delegate unconditionally to the pet-screen summon button paths:
+                // TeleportPetToPlayerPacket handles loaded entities, cross-dimension
+                // lookups, unloaded-chunk force-loading, and ride-swap on its own.
                 if (nbt.getBoolean("Recalled")) {
                     RecallPetPacket.handle(new RecallPetPacket(packet.petUuid), context);
                 } else {
-                    if (nbt.getBoolean("Lost")
-                            || !nbt.contains("Pos")
-                            || !nbt.contains("Dimension")) return;
                     TeleportPetToPlayerPacket.handle(new TeleportPetToPlayerPacket(packet.petUuid), context);
                 }
             } catch (Exception e) {

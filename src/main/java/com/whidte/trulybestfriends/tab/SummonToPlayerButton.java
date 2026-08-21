@@ -196,7 +196,8 @@ class SummonToPlayerButton extends AbstractWidget {
             PacketDistributor.sendToServer(directTeleport
                     ? new ReleaseRecalledPetPacket(screen.getSelectedUuid())
                     : new RecallPetPacket(screen.getSelectedUuid()));
-            if (!screen.isSelectedPetLost()) SummonKeyHandler.rememberSummon(screen.getSelectedUuid());
+            // Unloaded ("lost") pets can be summoned too, so always refresh quick-summon.
+            SummonKeyHandler.rememberSummon(screen.getSelectedUuid());
             return;
         }
 
@@ -205,7 +206,7 @@ class SummonToPlayerButton extends AbstractWidget {
         PacketDistributor.sendToServer(directTeleport
                 ? new DirectTeleportPetToPlayerPacket(screen.getSelectedUuid())
                 : new TeleportPetToPlayerPacket(screen.getSelectedUuid()));
-        if (!screen.isSelectedPetLost()) SummonKeyHandler.rememberSummon(screen.getSelectedUuid());
+        SummonKeyHandler.rememberSummon(screen.getSelectedUuid());
     }
 
     @Override
