@@ -247,6 +247,17 @@ public final class PetIOUtil {
 
     private static void writePetSnapshot(File nbtFile, CompoundTag snapshot,
                                          boolean recalled, boolean preserveRecalled) throws IOException {
+        // Fast path: when the caller only carries a freshly captured live
+        // snapshot and the content already matches what we last wrote, skip the
+        // disk read, the defensive copy and the atomic write entirely. This is
+        // the common case for periodic sync passes over idle pets.
+        if (!preserveRecalled && !recalled && !PetDeathState.isStoredDead(snapshot)) {
+            UUID fastUuid = petUuidOf(nbtFile);
+            if (fastUuid != null && !PetSnapshotFingerprint.recordIfChanged(fastUuid, snapshot)) {
+                return;
+            }
+        }
+
         CompoundTag oldNbt = null;
         if (nbtFile.exists()) {
             try {
@@ -264,8 +275,27 @@ public final class PetIOUtil {
         else nbt.remove("Recalled");
         nbt.remove("LastDeathTime");
 
-        if (oldNbt == null || !oldNbt.equals(nbt)) {
-            NbtFileIO.writeCompressed(nbt, nbtFile);
+        if (oldNbt != null && oldNbt.equals(nbt)) {
+            // Content already on disk: refresh the fingerprint so the fast path
+            // above can short-circuit the next identical write.
+            UUID petUuid = petUuidOf(nbtFile);
+            if (petUuid != null) PetSnapshotFingerprint.record(petUuid, nbt);
+            return;
+        }
+
+        NbtFileIO.writeCompressed(nbt, nbtFile);
+        UUID petUuid = petUuidOf(nbtFile);
+        if (petUuid != null) PetSnapshotFingerprint.record(petUuid, nbt);
+    }
+
+    /** Derives the pet UUID from a {@code <uuid>.nbt} file, or null when unavailable. */
+    private static UUID petUuidOf(File nbtFile) {
+        String name = nbtFile.getName();
+        if (!name.endsWith(".nbt")) return null;
+        try {
+            return UUID.fromString(name.substring(0, name.length() - 4));
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 
