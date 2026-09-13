@@ -7,6 +7,7 @@ import com.whidte.trulybestfriends.network.DeletePetDataPacket;
 import com.whidte.trulybestfriends.network.DirectTeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.HealPetPacket;
 import com.whidte.trulybestfriends.network.PetIOUtil;
+import com.whidte.trulybestfriends.network.PetSnapshotFingerprint;
 import com.whidte.trulybestfriends.network.NbtFileIO;
 import com.whidte.trulybestfriends.network.PetEntitySnapshot;
 import com.whidte.trulybestfriends.network.PetDeathState;
@@ -100,6 +101,12 @@ public class trulybestfriends {
     private static final Set<ForcedChunk> chunksForcedByMod = ConcurrentHashMap.newKeySet();
     private static final Set<LocalSyncCandidate> localSyncCandidates = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, PendingPetSave> pendingPetSaves = new ConcurrentHashMap<>();
+    /** Last captured entity state per pet; skips redundant NBT serialization. */
+    private static final Map<UUID, PetStateSignature> petStateSignatures = new ConcurrentHashMap<>();
+    /** Short-lived negative cache for "pet NBT exists under another owner dir". */
+    private static final Map<UUID, Long> noForeignOwnerFileUntil = new ConcurrentHashMap<>();
+    /** How long a confirmed "no foreign owner file" result is trusted. */
+    private static final long FOREIGN_OWNER_CHECK_TTL_NANOS = 10_000_000_000L;
     private static final Set<EntityNbtSaveFailure> reportedEntityNbtSaveFailures = ConcurrentHashMap.newKeySet();
     private static volatile boolean petIndexLoaded;
     private static final long PENDING_REMOVAL_TIMEOUT_TICKS = 100L;
@@ -413,6 +420,9 @@ public class trulybestfriends {
         chunksForcedByMod.clear();
         localSyncCandidates.clear();
         pendingPetSaves.clear();
+        petStateSignatures.clear();
+        noForeignOwnerFileUntil.clear();
+        PetSnapshotFingerprint.clearAll();
         indexCache.clear();
         trackedPetUUIDs.clear();
         blacklistedPetUUIDs.clear();
@@ -556,6 +566,20 @@ public class trulybestfriends {
         petDeathTimes.remove(petUuid);
     }
 
+    /**
+     * Drops every in-memory cache entry tied to one pet UUID.
+     *
+     * <p>Must be called whenever a pet is untracked, deleted or cleared so that
+     * stale fingerprints and state signatures cannot suppress the write of a
+     * later re-registration of the same UUID.</p>
+     */
+    private static void forgetPetCaches(UUID petUuid) {
+        petDeathTimes.remove(petUuid);
+        petStateSignatures.remove(petUuid);
+        noForeignOwnerFileUntil.remove(petUuid);
+        PetSnapshotFingerprint.forget(petUuid);
+    }
+
     /** 将内存中的死亡时刻注入到 NBT（仅用于网络同步给客户端，不写盘）。
      *  客户端读 NBT 的 LastDeathTime 字段计算冷却剩余时间。 */
     public static void injectDeathTimeIntoNbt(UUID petUuid, CompoundTag nbt) {
@@ -576,6 +600,21 @@ public class trulybestfriends {
             LOGGER.warn("Skipping pet save: owner UUID {} is not a known player", ownerUUID);
             return false;
         }
+        PetHealingManager.onPetSaved(pet.getUUID(), ownerUUID);
+
+        // Cheap pre-check: capture() serializes the entire entity NBT tree, and
+        // the periodic sync passes call this for every loaded pet on a fixed
+        // tick interval. When the entity's observable state (position, health,
+        // name, sitting flag) is unchanged since the last capture, the previous
+        // pending snapshot is still accurate and re-serializing is pure waste.
+        PetStateSignature signature = storedDead ? null : PetStateSignature.of(pet);
+        if (signature != null) {
+            PetStateSignature previous = petStateSignatures.get(pet.getUUID());
+            if (signature.equals(previous) && pendingPetSaves.containsKey(pet.getUUID())) {
+                return true;
+            }
+        }
+
         String entityTypeKey = ForgeRegistries.ENTITY_TYPES.getKey(pet.getType()).toString();
         CompoundTag nbt;
         try {
@@ -585,7 +624,10 @@ public class trulybestfriends {
             LOGGER.error("Failed to capture pet snapshot for {}: {}", pet.getUUID(), e.getMessage(), e);
             return false;
         }
-        PetHealingManager.onPetSaved(pet.getUUID(), ownerUUID);
+        // Record the signature only after a successful capture so a failed
+        // serialization never suppresses the retry on the next pass.
+        if (signature != null) petStateSignatures.put(pet.getUUID(), signature);
+        else petStateSignatures.remove(pet.getUUID());
         // LastDeathTime 完全不由磁盘管理——改由服务器内存 Map (petDeathTimes) 记录，
         // 在封存死亡时写入，通过网络同步注入给客户端。不写盘避免被 syncAllPets 反复刷新。
         Path worldPath = level.getServer().getWorldPath(LevelResource.ROOT);
@@ -601,6 +643,39 @@ public class trulybestfriends {
             flushPendingPetSaves(ownerUUID);
         }
         return true;
+    }
+
+    /**
+     * Cheap, allocation-light fingerprint of an entity's externally visible
+     * state. Used to skip redundant {@link PetEntitySnapshot#capture} calls.
+     *
+     * <p>Coordinates are quantised to 1/16 block so that standing-still jitter
+     * does not defeat the check, while any meaningful movement still forces a
+     * fresh capture.</p>
+     */
+    private record PetStateSignature(long x, long y, long z, float yRot, float health,
+                                     float maxHealth, int nameHash, boolean sitting, boolean noAi) {
+        static PetStateSignature of(Entity entity) {
+            float health = entity instanceof LivingEntity living ? living.getHealth() : 0.0F;
+            float maxHealth = entity instanceof LivingEntity living
+                    ? (float) living.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH)
+                    : 0.0F;
+            boolean sitting = entity instanceof net.minecraft.world.entity.TamableAnimal tamable
+                    && tamable.isOrderedToSit();
+            boolean noAi = entity instanceof net.minecraft.world.entity.Mob mob && mob.isNoAi();
+            int nameHash = entity.hasCustomName() && entity.getCustomName() != null
+                    ? entity.getCustomName().getString().hashCode() : 0;
+            return new PetStateSignature(
+                    Math.round(entity.getX() * 16.0),
+                    Math.round(entity.getY() * 16.0),
+                    Math.round(entity.getZ() * 16.0),
+                    entity.getYRot(),
+                    health,
+                    maxHealth,
+                    nameHash,
+                    sitting,
+                    noAi);
+        }
     }
 
     public static void flushPendingPetSaves() {
@@ -690,8 +765,19 @@ public class trulybestfriends {
     private record EntityNbtSaveFailure(UUID entityUUID, String exceptionType, String exceptionMessage) {}
 
     private static boolean hasPetFileInOtherOwnerDir(Path modDir, UUID currentOwnerUUID, UUID petUUID) {
+        // Owner changes are rare, but this check runs on every save pass and
+        // would otherwise list every owner directory each time. Remember a
+        // confirmed "no stale file" result for a short window; a positive
+        // result is always re-checked so the move still happens promptly.
+        long now = System.nanoTime();
+        Long cachedUntil = noForeignOwnerFileUntil.get(petUUID);
+        if (cachedUntil != null && now < cachedUntil) return false;
+
         try {
-            return findPetFileInOtherOwnerDir(modDir, currentOwnerUUID, petUUID) != null;
+            boolean found = findPetFileInOtherOwnerDir(modDir, currentOwnerUUID, petUUID) != null;
+            if (found) noForeignOwnerFileUntil.remove(petUUID);
+            else noForeignOwnerFileUntil.put(petUUID, now + FOREIGN_OWNER_CHECK_TTL_NANOS);
+            return found;
         } catch (IOException e) {
             LOGGER.error("Failed to check old owner pet file for {}: {}", petUUID, e.getMessage());
             return false;
@@ -767,7 +853,7 @@ public class trulybestfriends {
         pendingPetSaves.remove(petUUID);
         removePendingRemovals(ownerUUID, petUUID);
         trackedPetUUIDs.remove(petUUID);
-        petDeathTimes.remove(petUUID);
+        forgetPetCaches(petUUID);
         try {
             removePetFromIndex(modDir, petUUID);
         } catch (IOException e) {
@@ -822,7 +908,7 @@ public class trulybestfriends {
         TeleportPetToPlayerPacket.cancelPendingSummons(player.getUUID(), petUUID);
         ReviveProtection.remove(petUUID);
         trackedPetUUIDs.remove(petUUID);
-        petDeathTimes.remove(petUUID);
+        forgetPetCaches(petUUID);
 
         try {
             Path modDir = PetIOUtil.getModDir(player);
@@ -913,7 +999,7 @@ public class trulybestfriends {
                 ReviveProtection.remove(petUUID);
                 trackedPetUUIDs.remove(petUUID);
                 forcedTrackingOwners.remove(petUUID);
-                petDeathTimes.remove(petUUID);
+                forgetPetCaches(petUUID);
             }
             indexCache.values().forEach(uuids -> uuids.removeAll(petUUIDs));
             indexCache.entrySet().removeIf(entry -> entry.getValue().isEmpty());
@@ -1498,10 +1584,30 @@ public class trulybestfriends {
                         new BlockPos(chunk.getMinBlockX(), levelMinY(level), chunk.getMinBlockZ()),
                         new BlockPos(chunk.getMaxBlockX(), levelMaxY(level), chunk.getMaxBlockZ()));
                 for (Entity entity : level.getEntities(null, area)) {
+                    // Pre-filter here rather than in processLocalSyncCandidates:
+                    // a chunk scan returns every entity (items, mobs, projectiles),
+                    // and queueing them all meant each one was re-resolved and
+                    // rejected on the following tick. Only entities that can
+                    // actually be pets are worth queueing.
+                    if (!isPetSyncCandidate(entity)) continue;
                     localSyncCandidates.add(new LocalSyncCandidate(dimension, entity.getUUID()));
                 }
             }
         }
+    }
+
+    /**
+     * True when an entity could plausibly be a tracked pet, and is therefore
+     * worth adding to the local sync queue.
+     *
+     * <p>Skips non-living entities, multipart sub-parts, and entities that are
+     * neither already tracked nor resolvable to an owner.</p>
+     */
+    private boolean isPetSyncCandidate(Entity entity) {
+        if (!(entity instanceof LivingEntity)) return false;
+        if (entity instanceof PartEntity<?>) return false;
+        if (trackedPetUUIDs.contains(entity.getUUID())) return true;
+        return getCompatOwnerUUID(entity) != null;
     }
 
     private int levelMinY(ServerLevel level) {
