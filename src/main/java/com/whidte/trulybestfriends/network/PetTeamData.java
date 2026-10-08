@@ -72,16 +72,19 @@ public final class PetTeamData {
     /** 以规范化方式读取队伍文件，文件不存在时创建它。 */
     public static synchronized CompoundTag teamData(Path ownerDir) throws IOException {
         Files.createDirectories(ownerDir);
-        return commit(ownerDir, readRaw(ownerDir));
+        CompoundTag stored = readRaw(ownerDir);
+        return commit(ownerDir, stored, stored);
     }
 
     /** 把宠物放入某个颜色队伍的一个编号槽位，踢出先前的
      *  占用者。该宠物可保留其在其他队伍中的成员身份。 */
     public static synchronized CompoundTag setMember(Path ownerDir, String color, int slot, UUID uuid) throws IOException {
-        CompoundTag raw = teamData(ownerDir);
-        ListTag currentMembers = teamMembers(raw, color);
+        CompoundTag stored = teamData(ownerDir);
+        ListTag currentMembers = teamMembers(stored, color);
         if (!isValidSlot(slot) || uuid == null
-                || !Files.isRegularFile(ownerDir.resolve(uuid + ".nbt"))) return raw;
+                || !Files.isRegularFile(ownerDir.resolve(uuid + ".nbt"))) {
+            return commit(ownerDir, stored, stored);
+        }
 
         boolean alreadyMember = false;
         boolean slotOccupied = false;
@@ -90,10 +93,13 @@ public final class PetTeamData {
             alreadyMember |= member.hasUUID("UUID") && uuid.equals(member.getUUID("UUID"));
             slotOccupied |= member.getInt("Slot") == slot;
         }
-        if (currentMembers.size() >= raw.getInt("Capacity") && !alreadyMember && !slotOccupied) return raw;
+        if (currentMembers.size() >= stored.getInt("Capacity") && !alreadyMember && !slotOccupied) {
+            return commit(ownerDir, stored, stored);
+        }
 
-        removeFromTeam(raw, color, uuid);
-        CompoundTag team = teamTag(raw, color);
+        CompoundTag updated = stored.copy();
+        removeFromTeam(updated, color, uuid);
+        CompoundTag team = teamTag(updated, color);
         ListTag members = new ListTag();
         for (Tag tag : team.getList("Members", Tag.TAG_COMPOUND)) {
             CompoundTag member = (CompoundTag) tag;
@@ -104,7 +110,7 @@ public final class PetTeamData {
         entry.putUUID("UUID", uuid);
         members.add(entry);
         team.put("Members", members);
-        return commit(ownerDir, raw);
+        return commit(ownerDir, stored, updated);
     }
 
     /** 把成员移动到另一个编号槽位，若该槽位有占用者则与之交换。 */
@@ -112,8 +118,9 @@ public final class PetTeamData {
         if (!isValidSlot(fromSlot) || !isValidSlot(toSlot) || fromSlot == toSlot) {
             return teamData(ownerDir);
         }
-        CompoundTag raw = readRaw(ownerDir);
-        CompoundTag team = teamTag(raw, color);
+        CompoundTag stored = readRaw(ownerDir);
+        CompoundTag updated = stored.copy();
+        CompoundTag team = teamTag(updated, color);
         CompoundTag from = null;
         CompoundTag to = null;
         for (Tag tag : team.getList("Members", Tag.TAG_COMPOUND)) {
@@ -129,33 +136,36 @@ public final class PetTeamData {
             from.putInt("Slot", toSlot);
             to.putInt("Slot", fromSlot);
         }
-        return commit(ownerDir, raw);
+        return commit(ownerDir, stored, updated);
     }
 
     /** 从某个颜色队伍中移除某个宠物。 */
     public static synchronized CompoundTag removeMember(Path ownerDir, String color, UUID uuid) throws IOException {
         if (uuid == null) return teamData(ownerDir);
-        CompoundTag raw = readRaw(ownerDir);
-        removeFromTeam(raw, color, uuid);
-        return commit(ownerDir, raw);
+        CompoundTag stored = readRaw(ownerDir);
+        CompoundTag updated = stored.copy();
+        removeFromTeam(updated, color, uuid);
+        return commit(ownerDir, stored, updated);
     }
 
     /** 持久化当前选中的队伍颜色。 */
     public static synchronized CompoundTag setSelectedTeam(Path ownerDir, String color) throws IOException {
-        CompoundTag raw = readRaw(ownerDir);
-        raw.putString("SelectedTeam", color);
-        return commit(ownerDir, raw);
+        CompoundTag stored = readRaw(ownerDir);
+        CompoundTag updated = stored.copy();
+        updated.putString("SelectedTeam", color);
+        return commit(ownerDir, stored, updated);
     }
 
     /** 把最后一次通过轮盘召唤的成员持久化为队伍颜色 + 槽位编号。 */
     public static synchronized CompoundTag setLastSummon(Path ownerDir, String color, int slot) throws IOException {
         if (!isValidSlot(slot)) return teamData(ownerDir);
-        CompoundTag raw = readRaw(ownerDir);
+        CompoundTag stored = readRaw(ownerDir);
+        CompoundTag updated = stored.copy();
         CompoundTag lastSummon = new CompoundTag();
         lastSummon.putString("Color", color);
         lastSummon.putInt("Slot", slot);
-        raw.put("LastSummon", lastSummon);
-        return commit(ownerDir, raw);
+        updated.put("LastSummon", lastSummon);
+        return commit(ownerDir, stored, updated);
     }
 
     private static CompoundTag readRaw(Path ownerDir) throws IOException {
@@ -163,11 +173,23 @@ public final class PetTeamData {
         return file.exists() ? NbtFileIO.readCompressed(file) : new CompoundTag();
     }
 
-    private static CompoundTag commit(Path ownerDir, CompoundTag raw) throws IOException {
+    /**
+     * 把改动规范化后写回文件，并返回规范化结果。
+     *
+     * <p>{@code stored} 必须是「改动之前文件里的内容」，{@code updated} 才是
+     * 改动后的版本：是否需要写盘，看的是规范化结果与磁盘上的旧内容是否一致。
+     * 这里曾经比较的是「已被就地改写的内存 tag」自己——只要改动本身就是规范
+     * 形态（把 SelectedTeam 换成另一个合法颜色、把新成员追加在末尾、写入合法
+     * 的 LastSummon），比对就相等、写盘被跳过，文件停留在旧值。而每个数据包
+     * 处理器都是「先改、再用 {@link #teamData} 从文件读回权威快照」，读回旧值
+     * 后客户端会把刚切过去的队伍又拉回原来那支（表现为「点旗帜闪一下就回到
+     * 原队」）。</p>
+     */
+    private static CompoundTag commit(Path ownerDir, CompoundTag stored, CompoundTag updated) throws IOException {
         Path file = ownerDir.resolve(FILE_NAME);
-        CompoundTag normalized = normalize(raw, Config.maxPendingSummons,
+        CompoundTag normalized = normalize(updated, Config.maxPendingSummons,
                 uuid -> Files.isRegularFile(ownerDir.resolve(uuid + ".nbt")));
-        if (!Files.isRegularFile(file) || !normalized.equals(raw)) {
+        if (!Files.isRegularFile(file) || !normalized.equals(stored)) {
             NbtFileIO.writeCompressed(normalized, file.toFile());
         }
         return normalized;
