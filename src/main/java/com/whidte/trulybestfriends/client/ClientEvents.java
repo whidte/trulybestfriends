@@ -1,6 +1,7 @@
 package com.whidte.trulybestfriends.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import com.whidte.trulybestfriends.tab.SummonWheelData;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.client.KeyMapping;
@@ -40,6 +41,7 @@ public final class ClientEvents {
         MinecraftForge.EVENT_BUS.addListener(ClientEvents::onRenderGui);
         MinecraftForge.EVENT_BUS.addListener(ClientEvents::onMouseScroll);
         MinecraftForge.EVENT_BUS.addListener(AreaRecallRangeRenderer::onRenderLevelStage);
+        MinecraftForge.EVENT_BUS.addListener(ClientEvents::onClientLoggingOut);
         event.enqueueWork(() -> {
             if (ModList.get().isLoaded("l2tabs")) {
                 try {
@@ -111,6 +113,14 @@ public final class ClientEvents {
             AreaRecallKeyHandler.tick();
         }
     }
+
+    /** 断开连接时清空仅客户端持有的静态快照，避免跨服务器残留过期宠物数据。 */
+    private static void onClientLoggingOut(
+            net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut event) {
+        SummonWheelData.clear();
+        TrulyScreen.clearPendingSyncState();
+    }
+
 
     private static void onMovementInputUpdate(MovementInputUpdateEvent event) {
         SummonKeyHandler.applyMovementInput(event.getInput());

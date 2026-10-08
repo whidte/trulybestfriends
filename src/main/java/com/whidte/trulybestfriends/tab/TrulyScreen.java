@@ -326,8 +326,15 @@ public class TrulyScreen extends Screen {
 
 	@Override
 	public void removed() {
-		// 清理 PetEntry 渲染遗留的预览实体
+		// 清理 PetEntry 渲染遗留的预览实体（此前只调用了 super，与注释不符）
 		super.removed();
+		clearPreviewEntities();
+	}
+
+	/** 断开连接时丢弃「界面关闭期间」缓存的同步包，避免跨服务器残留过期宠物数据。 */
+	public static void clearPendingSyncState() {
+		pendingSyncPackets.clear();
+		pendingTeamData = null;
 	}
 
 	private void saveSelectionThenReload() {
@@ -540,7 +547,10 @@ public class TrulyScreen extends Screen {
 		String activeSpeciesFilter = searchMode ? "" : speciesFilter;
 		String activeSearchQuery = searchMode ? searchQuery : "";
 		for (Map.Entry<UUID, CompoundTag> entry : petNbtCache.entrySet()) {
-			String displayName = getPetDisplayName(entry.getKey()).getString();
+			// matchesPetFilter 仅在搜索词非空时读取 displayName；未启用搜索时跳过，
+			// 可省下每只宠物一次潜在的 Component.Serializer.fromJson（Gson）解析。
+			String displayName = activeSearchQuery == null || activeSearchQuery.trim().isEmpty()
+			        ? "" : getPetDisplayName(entry.getKey()).getString();
 			if (matchesPetFilter(entry.getValue(), activeSpeciesFilter, activeSearchQuery, displayName)) {
 				petUuids.add(entry.getKey());
 			}

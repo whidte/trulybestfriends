@@ -2,8 +2,12 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.trulybestfriends;
 import io.netty.buffer.Unpooled;
+import net.minecraft.nbt.ByteArrayTag;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.LongArrayTag;
+import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
@@ -131,8 +135,61 @@ public class SyncPetDataPacket {
         return packet.splitForWire();
     }
 
+    /** FULL_LIST / UPDATE 外层 holder 与包头的保守余量。 */
+    private static final long HOLDER_OVERHEAD_UPPER_BOUND = 128L;
+
+    /**
+     * NBT 负载字节数的保守上界，保证不小于真实序列化长度。
+     *
+     * <p>用于让 {@link #splitForWire()} 快速判定"肯定放得下"，从而省掉一次仅
+     * 为量尺寸而做的完整编码。遇到未知标签类型时返回 {@link Long#MAX_VALUE}，
+     * 强制调用方回退到精确编码路径，因此不可能漏判超大包。</p>
+     */
+    private static long nbtSizeUpperBound(Tag tag) {
+        if (tag == null) return 0L;
+        return switch (tag.getId()) {
+            case Tag.TAG_END -> 1L;
+            case Tag.TAG_BYTE -> 2L;                        // 类型 1 + 数据 1
+            case Tag.TAG_SHORT -> 3L;
+            case Tag.TAG_INT, Tag.TAG_FLOAT -> 5L;
+            case Tag.TAG_LONG, Tag.TAG_DOUBLE -> 9L;
+            case Tag.TAG_BYTE_ARRAY -> 6L + ((ByteArrayTag) tag).size();
+            // 长度前缀 2 + UTF-8 每字符最多 3 字节（增补字符按代理对计，同样 3 字节/字符）
+            case Tag.TAG_STRING -> 4L + 3L * ((StringTag) tag).getAsString().length();
+            case Tag.TAG_LIST -> {
+                long total = 5L;                            // 元素类型 1 + 计数 4
+                for (Tag element : (ListTag) tag) {
+                    total += nbtSizeUpperBound(element);
+                }
+                yield total;
+            }
+            case Tag.TAG_COMPOUND -> {
+                CompoundTag compound = (CompoundTag) tag;
+                long total = 1L;
+                for (String key : compound.getAllKeys()) {
+                    // 类型 1 + 名称长度 2 + 名称（每字符最多 3 字节）
+                    total += 3L + 3L * key.length() + nbtSizeUpperBound(compound.get(key));
+                }
+                yield total;
+            }
+            case Tag.TAG_INT_ARRAY -> 6L + 4L * ((IntArrayTag) tag).size();
+            case Tag.TAG_LONG_ARRAY -> 6L + 8L * ((LongArrayTag) tag).size();
+            default -> Long.MAX_VALUE;                      // 未知类型：强制走精确编码
+        };
+    }
+
+    /** 本数据包 NBT 负载的保守上界，不含固定包头（由 WIRE_OVERHEAD_RESERVE_BYTES 覆盖）。 */
+    private long payloadSizeUpperBound() {
+        long bound = nbtSizeUpperBound(mode == MODE_FULL_LIST ? fullList : petNbt);
+        return bound == Long.MAX_VALUE ? Long.MAX_VALUE : bound + HOLDER_OVERHEAD_UPPER_BOUND;
+    }
+
     private List<SyncPetDataPacket> splitForWire() {
         if (mode == MODE_FRAGMENT) return List.of(this);
+
+        // 绝大多数数据包远小于上限。先用保守上界快速判定，只有上界超限时才真正编码，
+        // 因此"跳过分片"的结论不会漏掉任何超大包，结果与原来完全一致。
+        if (payloadSizeUpperBound() <= MAX_LOGICAL_PACKET_BYTES) return List.of(this);
 
         byte[] encoded = encodeLogical(this);
         if (encoded.length <= MAX_LOGICAL_PACKET_BYTES) return List.of(this);

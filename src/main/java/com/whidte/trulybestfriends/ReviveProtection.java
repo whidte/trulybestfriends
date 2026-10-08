@@ -35,6 +35,9 @@ public final class ReviveProtection {
     }
 
     public static void tick(MinecraftServer server) {
+        // 空表时 removeIf 没有副作用；提前返回同时消除 ConcurrentHashMap
+        // 容量不收缩（表永不缩小）导致的固定扫描开销与每 tick 的对象分配。
+        if (PROTECTIONS.isEmpty()) return;
         long currentTick = server.overworld().getGameTime();
         PROTECTIONS.entrySet().removeIf(entry ->
                 entry.getValue().server() == server
