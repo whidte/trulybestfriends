@@ -2,6 +2,7 @@ package com.whidte.trulybestfriends.network;
 
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.PetIndexState;
+import com.whidte.trulybestfriends.TbfOwnerTag;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -17,11 +18,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Server-authoritative healing state that remains active while pets are unloaded or recalled. */
+/** 服务端权威的治疗状态，在宠物未加载或已收回时仍保持生效。 */
 public final class PetHealingManager {
     public static final String CLIENT_DATA_TAG = "TBF_Healing";
     private static final int CLIENT_DATA_SIZE = 11;
@@ -85,7 +87,9 @@ public final class PetHealingManager {
             trulybestfriends.LOGGER.error("Failed to read pet {} before healing", petUuid, e);
             return ActivationResult.NOT_FOUND;
         }
-        if (!player.getUUID().toString().equals(stored.getString("OwnerUUID"))) {
+        // TBF 自己的主人字段：优先使用新键，以旧版 "OwnerUUID" 字符串作为兜底，使重命名之前
+        // 写入的文件仍能正常工作。
+        if (!player.getUUID().toString().equals(TbfOwnerTag.readString(stored))) {
             clear(petUuid);
             return ActivationResult.NOT_OWNED;
         }
@@ -165,12 +169,13 @@ public final class PetHealingManager {
         if (ENTRIES.isEmpty()) return;
         long now = server.overworld().getGameTime();
         boolean persistenceRequired = false;
-        for (HealingEntry entry : new ArrayList<>(ENTRIES.values())) {
+        for (Iterator<HealingEntry> iterator = ENTRIES.values().iterator(); iterator.hasNext();) {
+            HealingEntry entry = iterator.next();
             Entity any = PetIOUtil.findEntity(server, entry.petUuid);
             if (any != null && (!(any instanceof LivingEntity living)
                     || !living.isAlive()
                     || !trulybestfriends.isOwnedBy(living, entry.ownerUuid))) {
-                ENTRIES.remove(entry.petUuid);
+                iterator.remove();
                 PENDING_APPLY_ATTEMPTED.remove(entry.petUuid);
                 persistenceRequired = true;
                 continue;
@@ -179,7 +184,7 @@ public final class PetHealingManager {
             LivingEntity living = any instanceof LivingEntity value ? value : null;
             if (living != null && entry.pendingHeal > 0.0F
                     && PENDING_APPLY_ATTEMPTED.add(entry.petUuid)) {
-                // Normally handled by onEntityLoaded; this covers entities discovered first by tick().
+                // 通常由 onEntityLoaded 处理；这里覆盖首先被 tick() 发现的实体。
                 persistenceRequired |= applyPendingDurably(entry, living);
             }
 
@@ -191,7 +196,7 @@ public final class PetHealingManager {
             if (entry.normalTimer.expired(now)
                     && entry.advancedTimer.expired(now)
                     && !shouldRetainExpired(entry.pendingHeal)) {
-                ENTRIES.remove(entry.petUuid);
+                iterator.remove();
                 PENDING_APPLY_ATTEMPTED.remove(entry.petUuid);
                 persistenceRequired = true;
             }
@@ -227,9 +232,9 @@ public final class PetHealingManager {
     }
 
     /**
-     * Applies pending healing and durably stores the healed snapshot before clearing it from the index.
+     * 应用待处理治疗，并在从索引中清除之前持久化存储已治疗的快照。
      *
-     * @return whether this call already persisted the current live pet snapshot
+     * @return 本次调用是否已持久化当前存活宠物的快照
      */
     public static boolean onEntityLoaded(LivingEntity living, UUID ownerUuid) {
         HealingEntry entry = ENTRIES.get(living.getUUID());
@@ -260,7 +265,7 @@ public final class PetHealingManager {
     public static void onEntityUnloaded(LivingEntity living, UUID ownerUuid) {
         HealingEntry entry = ENTRIES.get(living.getUUID());
         if (entry == null) return;
-        // Unload and dimension transfer mark a healthy entity as removed before this event.
+        // 卸载和维度转移会在该事件之前把健康的实体标记为已移除。
         if (!entry.ownerUuid.equals(ownerUuid) || living.getHealth() <= 0.0F) {
             clear(living.getUUID());
             return;
@@ -290,7 +295,7 @@ public final class PetHealingManager {
         if (changed) save();
     }
 
-    /** Adds transient healing fields and theoretical unloaded health to a client-only NBT copy. */
+    /** 向仅供客户端使用的 NBT 副本添加临时治疗字段和理论上的未加载生命值。 */
     public static void decorateClientNbt(MinecraftServer server, UUID ownerUuid, UUID petUuid,
                                          CompoundTag storedNbt, CompoundTag clientNbt) {
         HealingEntry entry = ENTRIES.get(petUuid);
@@ -440,7 +445,7 @@ public final class PetHealingManager {
     static Set<UUID> syncPersistedEntries(CompoundTag indexRoot,
                                           Map<UUID, CompoundTag> healingByPet) {
         Set<UUID> unmatched = new HashSet<>(healingByPet.keySet());
-        // Remove the short-lived top-level format from development builds without reading it.
+        // 从开发构建中移除短命的顶层格式，且不读取它。
         indexRoot.remove("TBF_HealingEntries");
         PetIndexState.visit(indexRoot, (petUuid, state) -> {
             CompoundTag healing = healingByPet.get(petUuid);

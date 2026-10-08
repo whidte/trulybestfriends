@@ -14,11 +14,11 @@ import java.nio.file.Path;
 import java.util.UUID;
 
 /**
- * Client → Server: summon every summonable member of one formation team.
+ * 客户端 → 服务端：召唤某一阵型队伍中所有可召唤的成员。
  *
- * Reuses the existing summon paths ({@link RecallPetPacket} /
- * {@link TeleportPetToPlayerPacket}) without ride-swap. Dead pets are
- * skipped silently; unloaded members go through the force-load summon path.
+ * 复用现有的召唤路径（{@link RecallPetPacket} /
+ * {@link TeleportPetToPlayerPacket}），不做骑乘交换。已死亡的宠物
+ * 会被静默跳过；未加载的成员会走强制加载的召唤路径。
  */
 public class SummonTeamPacket implements CustomPacketPayload {
     public static final Type<SummonTeamPacket> TYPE = new Type<>(
@@ -54,8 +54,8 @@ public class SummonTeamPacket implements CustomPacketPayload {
                     if (!nbtFile.exists()) continue;
                     CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
                     if (PetDeathState.isDeadSnapshot(nbt)) continue;
-                    // No "Lost" filter: an unloaded member can still be summoned
-                    // through TeleportPetToPlayerPacket's force-load path.
+                    // 不设 "Lost" 过滤：未加载的成员仍可通过
+                    // TeleportPetToPlayerPacket 的强制加载路径被召唤。
                     if (!nbt.contains("Pos") || !nbt.contains("Dimension")) continue;
                     if (nbt.getBoolean("Recalled")) {
                         RecallPetPacket.handleWithoutRideSwap(uuid, context);

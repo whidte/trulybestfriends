@@ -46,7 +46,7 @@ import java.util.function.IntFunction;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 
-/** Server-side: teleport a released (non-recalled) pet to the player's current position. */
+/** 服务端：把已释放（未收回）的宠物传送到玩家当前位置。 */
 public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     private enum RideSwapResult { SUCCESS, NO_SPACE, FAILED }
 
@@ -87,7 +87,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                     : null;
             UUID rideSwapMountUuid = rideSwapMount != null ? rideSwapMount.getUUID() : null;
 
-            // Case 1: pet is alive in player's current dimension — teleport it directly
+            // 情况 1：宠物在玩家当前维度中存活——直接传送它
             Entity entity = playerLevel.getEntity(packet.petUuid);
             if (entity instanceof LivingEntity living && living.isAlive()) {
                 if (!trulybestfriends.isTrackedPet(packet.petUuid)
@@ -103,11 +103,11 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                 return;
             }
 
-            // Read NBT for cross-dimension lookup
+            // 读取 NBT 以进行跨维度查找
             java.nio.file.Path ownerDir = PetIOUtil.getOwnerDir(player);
             File nbtFile = ownerDir.resolve(packet.petUuid + ".nbt").toFile();
             if (!nbtFile.exists()) {
-                PetWarningPacket.send(player, 1, packet.petUuid); // lost / no data
+                PetWarningPacket.send(player, 1, packet.petUuid); // 丢失 / 无数据
                 return;
             }
 
@@ -119,25 +119,25 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                 return;
             }
 
-            // Filter: recalled or dead pets should not be summoned
+            // 过滤：已收回或已死亡的宠物不应被召唤
             if (nbt.getBoolean("Recalled")) {
-                PetWarningPacket.send(player, 0, packet.petUuid); // recalled
+                PetWarningPacket.send(player, 0, packet.petUuid); // 已收回
                 return;
             }
             if (PetDeathState.isDeadSnapshot(nbt)) {
-                PetWarningPacket.send(player, 1, packet.petUuid); // dead
+                PetWarningPacket.send(player, 1, packet.petUuid); // 死亡
                 return;
             }
 
-            // Resolve pet's dimension from NBT (no need to scan all dimensions)
+            // 从 NBT 解析宠物所在维度（无需扫描所有维度）
             ServerLevel petLevel = resolvePetLevel(player.server, nbt);
             if (petLevel == null) {
-                PetWarningPacket.send(player, 1, packet.petUuid); // unknown dimension
+                PetWarningPacket.send(player, 1, packet.petUuid); // 维度未知
                 return;
             }
 
-            // Case 2: pet is alive in another dimension (or same dim loaded chunk) —
-            // find and discard original, then summon from disk at player's location
+            // 情况 2：宠物在另一个维度中存活（或同一维度中已加载的区块）——
+            // 找到并丢弃原实体，然后在玩家位置从磁盘召唤
             Entity petEntity = petLevel.getEntity(packet.petUuid);
             if (petEntity instanceof LivingEntity living && living.isAlive()) {
                 if (!trulybestfriends.isTrackedPet(packet.petUuid)
@@ -155,7 +155,8 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                 }
                 try {
                     CompoundTag freshSnapshot = NbtFileIO.readCompressed(nbtFile);
-                    if (summonFromDisk(freshSnapshot, packet.petUuid, player, playerLevel)) {
+                    if (summonFromDisk(freshSnapshot, packet.petUuid, player, playerLevel,
+                            ownerHintFor(nbtFile, player))) {
                         living.discard();
                     } else {
                         PetWarningPacket.send(player, 1, packet.petUuid);
@@ -167,23 +168,23 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                 return;
             }
 
-            // Case 3: pet is in an unloaded chunk — force-load and defer to next tick.
-            // setChunkForced cannot return entities in the same tick (async entity
-            // loading), so we queue the request and process it in onServerTick.
-            // ChunkX/ChunkZ are derived from the entity's Pos (vanilla NBT stores
-            // only world coordinates, not chunk coordinates).
+            // 情况 3：宠物位于未加载的区块中——强制加载并推迟到下一个 tick。
+            // setChunkForced 无法在同一 tick 内返回实体（实体加载是异步的），
+            // 因此我们把请求排入队列，并在 onServerTick 中处理。
+            // ChunkX/ChunkZ 由实体的 Pos 推导而来（原版 NBT 只存储
+            // 世界坐标，不存储区块坐标）。
             var storedChunk = PetIOUtil.getStoredChunk(nbt);
             if (storedChunk != null) {
                 int cx = storedChunk.x;
                 int cz = storedChunk.z;
-                // If the chunk is already loaded but the entity wasn't found,
-                // it truly doesn't exist — don't waste time in the pending queue.
+                // 如果区块已加载但未找到该实体，
+                // 说明它确实不存在——不要浪费待处理队列中的时间。
                 if (petLevel.hasChunk(cx, cz)) {
                     PetWarningPacket.send(player, 1, packet.petUuid);
                     return;
                 }
 
-                // Per-player limit: prevent unbounded queue growth from rapid re-summons
+                // 每名玩家的限制：防止快速重复召唤导致队列无限增长
                 long playerPending = pendingSummons.stream()
                         .filter(p -> p.playerUuid.equals(player.getUUID()))
                         .count();
@@ -212,10 +213,12 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     private static void teleportEntityToPlayer(LivingEntity entity, ServerPlayer player, ServerLevel level) {
         standPetUp(entity);
 
-        // If the pet is a Mob, within 16 blocks, and can path to the player —
-        // make it walk to a safe point near the player instead of teleporting.
+        // 如果宠物是 Mob、距离在 16 格以内且能寻路到玩家——
+        // 就让它走到玩家附近的安全点，而不是传送。
         if (entity instanceof Mob mob && mob.isAlive()) {
-            double distance = entity.position().distanceTo(player.position());
+            // 用 Entity#distanceTo(Entity)（Sable 会 @Overwrite 它）；别用
+            // entity.position().distanceTo(player.position())——那是 Vec3 的方法，Sable 不会修正。
+            double distance = entity.distanceTo(player);
             if (distance <= 16.0) {
                 BlockPos safePos = findSafeBlockNearPlayer(level, player, entity);
                 if (safePos != null) {
@@ -229,7 +232,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             }
         }
 
-        // Fallback: teleport directly
+        // 兜底：直接传送
         int radius = Math.max(1, (int) Math.ceil(entity.getBbWidth()));
         Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(level, player, entity, radius, 6, 16);
         if (safePosition != null) {
@@ -279,8 +282,8 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             target.setXRot(xRot);
             target.setYHeadRot(yRot);
         } finally {
-            // Recreate the tracker so even a sub-threshold move is sent as an
-            // absolute spawn position before the passenger update.
+            // 重建追踪器，这样即使是低于阈值的移动也会在乘客更新之前
+            // 作为绝对生成位置发送出去。
             level.getChunkSource().addEntity(target);
         }
     }
@@ -300,7 +303,8 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         try {
             CompoundTag snapshot = NbtFileIO.readCompressed(nbtFile);
             Entity restored = summonFromDiskAt(snapshot, originalTarget.getUUID(), player,
-                    player.serverLevel(), currentMount.position(), currentMount.getYRot(), currentMount.getXRot());
+                    player.serverLevel(), currentMount.position(), currentMount.getYRot(),
+                    currentMount.getXRot(), ownerHintFor(nbtFile, player));
             if (restored == null) return RideSwapResult.FAILED;
             if (finishRideSwap(player, currentMount, restored)) {
                 originalTarget.discard();
@@ -355,7 +359,8 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
 
         CompoundTag releasedNbt = recalledNbt.copy();
         releasedNbt.remove("Recalled");
-        Entity spaceProbe = PetEntitySnapshot.restore(prepareSummonSnapshot(releasedNbt), petUuid, level);
+        UUID ownerHint = ownerHintFor(nbtFile, player);
+        Entity spaceProbe = PetEntitySnapshot.restore(prepareSummonSnapshot(releasedNbt), petUuid, level, ownerHint);
         if (spaceProbe != null) standPetUp(spaceProbe);
         if (spaceProbe != null && !hasRideSwapSpace(level, spaceProbe, currentMount.position())) {
             PetWarningPacket.send(player, 4, petUuid);
@@ -371,7 +376,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         }
 
         Entity restored = summonFromDiskAt(releasedNbt, petUuid, player, level,
-                currentMount.position(), currentMount.getYRot(), currentMount.getXRot());
+                currentMount.position(), currentMount.getYRot(), currentMount.getXRot(), ownerHint);
         if (restored != null && finishRideSwap(player, currentMount, restored)) return true;
         if (restored != null) restored.discard();
         try {
@@ -385,17 +390,28 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     }
 
     /**
-     * Find a safe, pathable BlockPos near the player for the pet to walk to.
-     * Searches in expanding rings around the player's position.
+     * 为宠物寻找玩家附近一个安全且可寻路的 BlockPos 供其走过去。
+     * 围绕玩家位置以不断扩大的环形进行搜索。
      */
     private static BlockPos findSafeBlockNearPlayer(ServerLevel level, ServerPlayer player, Entity entity) {
         Vec3 safePosition = PetIOUtil.findSafePositionNearPlayer(level, player, entity, 1, 4, 12);
         return safePosition != null ? BlockPos.containing(safePosition) : null;
     }
 
-    static boolean summonFromDisk(CompoundTag nbt, UUID petUuid, ServerPlayer player, ServerLevel level) {
+    /**
+     * 为已存储的宠物记录的 TBF 主人，当快照本身不再携带主人时用作还原提示。
+     * 宠物以 {@code {modDir}/{ownerUuid}/{petUuid}.nbt} 形式存储，因此
+     * 父目录名就是其主人；对于不遵循该布局的路径，则以操作的玩家作为兜底。
+     */
+    private static UUID ownerHintFor(File nbtFile, ServerPlayer player) {
+        UUID fromDirectory = PetIOUtil.ownerFromPetFile(nbtFile);
+        return fromDirectory != null ? fromDirectory : player.getUUID();
+    }
+
+    static boolean summonFromDisk(CompoundTag nbt, UUID petUuid, ServerPlayer player, ServerLevel level,
+                                  UUID ownerHint) {
         CompoundTag summonNbt = prepareSummonSnapshot(nbt);
-        Entity entity = PetEntitySnapshot.restore(summonNbt, petUuid, level);
+        Entity entity = PetEntitySnapshot.restore(summonNbt, petUuid, level, ownerHint);
         if (entity == null) return false;
         restoreChestInventory(entity, summonNbt);
         standPetUp(entity);
@@ -421,9 +437,10 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     }
 
     private static Entity summonFromDiskAt(CompoundTag nbt, UUID petUuid, ServerPlayer player,
-                                           ServerLevel level, Vec3 position, float yRot, float xRot) {
+                                           ServerLevel level, Vec3 position, float yRot, float xRot,
+                                           UUID ownerHint) {
         CompoundTag summonNbt = prepareSummonSnapshot(nbt);
-        Entity entity = PetEntitySnapshot.restore(summonNbt, petUuid, level);
+        Entity entity = PetEntitySnapshot.restore(summonNbt, petUuid, level, ownerHint);
         if (entity == null) return null;
         restoreChestInventory(entity, summonNbt);
         standPetUp(entity);
@@ -439,11 +456,12 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         return UNTRACKED_DEATH_RELEASES.contains(petUuid);
     }
 
-    /** Adds a stored-dead pet alive so untracking can finish before fatal damage is applied. */
+    /** 以存活状态添加一个已存储的死亡宠物，使取消追踪能在施加致命伤害之前完成。 */
     public static Entity releaseDeadPetForUntracking(CompoundTag nbt, UUID petUuid,
-                                                      ServerPlayer player, ServerLevel level) {
+                                                      ServerPlayer player, ServerLevel level,
+                                                      UUID ownerHint) {
         CompoundTag releaseNbt = PetDeathState.prepareForUntrackedRelease(nbt);
-        Entity entity = PetEntitySnapshot.restore(releaseNbt, petUuid, level);
+        Entity entity = PetEntitySnapshot.restore(releaseNbt, petUuid, level, ownerHint);
         if (!(entity instanceof LivingEntity living)) return null;
         restoreChestInventory(entity, releaseNbt);
         living.setHealth(1.0F);
@@ -478,14 +496,14 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
 
     private static void finishRestoredEntity(Entity entity, CompoundTag nbt,
                                                ServerPlayer player, ServerLevel level) {
-        // Capabilities may only be exposed after the entity joins the world.
+        // 能力可能只有在实体加入世界之后才会暴露。
         restoreChestInventory(entity, nbt);
         if (!trulybestfriends.persistRestoredPet(player.getUUID(), entity, level)) {
             trulybestfriends.LOGGER.error("Failed to persist restored container snapshot for {}", entity.getUUID());
         }
     }
 
-    /** Restores a horse/container inventory without replacing its live container. */
+    /** 还原马/容器的物品栏，但不替换其当前容器。 */
     public static void restoreChestInventory(Entity entity, CompoundTag nbt) {
         boolean hasContainerBackup = nbt.contains("TBF_ChestSize", 3)
                 || nbt.contains("TBF_ChestItems", 9)
@@ -516,14 +534,14 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             int restorableSlots = Math.min(Math.max(savedSize, 0), inventory.getContainerSize());
             List<ItemStack> backup = emptyInventory(restorableSlots);
 
-            // TBF container backups use absolute live-container slot indices.
+            // TBF 容器备份使用当前容器的绝对槽位索引。
             if (nbt.contains("TBF_ChestItems", 9)) {
                 readBackupItems(backup, nbt.getList("TBF_ChestItems", 10),
                         entity.registryAccess(), 0);
             }
 
-            // Vanilla 1.21 horse Items are chest-relative. Their whole range,
-            // including omitted empty slots, is authoritative over legacy data.
+            // 原版 1.21 马匹的 Items 相对于箱子。它们的整个范围，
+            // 包括被省略的空槽位，对旧数据具有权威性。
             if (nbt.contains("Items", 9)) {
                 int slotOffset = entity instanceof AbstractChestedHorse ? 1 : 0;
                 for (int slot = slotOffset; slot < restorableSlots; slot++) {
@@ -550,7 +568,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         }
     }
 
-    /** Backs up the live inventory using stable NeoForge/public container APIs. */
+    /** 使用稳定的 NeoForge/公开容器 API 备份当前物品栏。 */
     public static void backupChestInventory(Entity entity, CompoundTag nbt) {
         try {
             Container inventory = getEntityInventory(entity);
@@ -673,17 +691,17 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         }
     }
 
-    /** Resolve the ServerLevel where the pet was last saved, using NBT Dimension field. */
+    /** 使用 NBT 的 Dimension 字段解析宠物最后一次保存时所在的 ServerLevel。 */
     private static ServerLevel resolvePetLevel(MinecraftServer server, CompoundTag nbt) {
         if (!nbt.contains("Dimension", 8)) return null;
         return PetIOUtil.getLevel(server, nbt.getString("Dimension"));
     }
 
-    // ---- Pending summon queue for pets in unloaded chunks ----
+    // ---- 用于未加载区块中宠物的待处理召唤队列 ----
 
     private static final List<PendingSummon> pendingSummons = new CopyOnWriteArrayList<>();
-    private static final int MAX_PENDING_ATTEMPTS = 100; // ~5s at 20 TPS
-    /** Max simultaneous pending summons per player. = Config.maxPendingSummons + 2 buffer. */
+    private static final int MAX_PENDING_ATTEMPTS = 100; // 20 TPS 下约 5 秒
+    /** 每名玩家同时待处理召唤的最大数量。= Config.maxPendingSummons + 2 的缓冲。 */
     private static int maxPendingPerPlayer() {
         return Config.maxPendingSummons + 2;
     }
@@ -709,10 +727,10 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     }
 
     /**
-     * Called from trulybestfriends.onServerTick each tick.
-     * Processes pending summon requests for pets in unloaded chunks.
-     * Once the chunk loads and the original entity is found, discards it and
-     * summons the pet from disk at the player's location.
+     * 每个 tick 由 trulybestfriends.onServerTick 调用。
+     * 处理未加载区块中宠物的待处理召唤请求。
+     * 一旦区块加载且找到原实体，就将其丢弃，并在玩家位置
+     * 从磁盘召唤该宠物。
      */
     public static void tickPendingSummons(MinecraftServer server) {
         if (pendingSummons.isEmpty()) return;
@@ -721,7 +739,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
             ServerPlayer player = server.getPlayerList().getPlayer(pending.playerUuid);
 
             if (player == null) {
-                // Player logged out — clean up forced chunk and cancel
+                // 玩家已登出——清理强制加载的区块并取消
                 finishPendingSummon(pending);
                 continue;
             }
@@ -757,7 +775,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
                 else failPendingSummon(pending, player);
                 continue;
             }
-            // Chunk loaded: discard original and summon at player.
+            // 区块已加载：丢弃原实体并在玩家处召唤。
             if (RecallPetPacket.savePetToDisk(player.getUUID(), living, pending.petLevel, false)
                     && completeSummon(player, pending.petUuid)) {
                 living.discard();
@@ -784,9 +802,9 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
     }
 
     /**
-     * Re-adds a pet loaded from a forced chunk so nearby clients receive a fresh
-     * tracking/spawn sequence. A coordinate-only teleport can leave the entity
-     * tracked from its old section until after that section is unloaded.
+     * 重新添加从强制加载区块中载入的宠物，使附近客户端收到全新的
+     * 追踪/生成序列。仅进行坐标传送可能使实体一直从其旧区段被追踪，
+     * 直到该区段卸载之后才结束。
      */
     private static boolean recreateAfterForcedLoad(LivingEntity original, ServerPlayer player, ServerLevel level) {
         UUID petUuid = original.getUUID();
@@ -802,18 +820,19 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         }
 
         original.discard();
-        if (summonFromDisk(snapshot, petUuid, player, level)) return true;
+        UUID ownerHint = ownerHintFor(nbtFile, player);
+        if (summonFromDisk(snapshot, petUuid, player, level, ownerHint)) return true;
 
         trulybestfriends.LOGGER.error("Failed to re-add forced-chunk pet {}; restoring its original snapshot", petUuid);
-        if (!restoreAtStoredPosition(snapshot, petUuid, player, level)) {
+        if (!restoreAtStoredPosition(snapshot, petUuid, player, level, ownerHint)) {
             trulybestfriends.LOGGER.error("Failed to restore pet {} after a failed forced-chunk teleport", petUuid);
         }
         return false;
     }
 
     private static boolean restoreAtStoredPosition(CompoundTag snapshot, UUID petUuid,
-                                                    ServerPlayer player, ServerLevel level) {
-        Entity restored = PetEntitySnapshot.restore(snapshot, petUuid, level);
+                                                    ServerPlayer player, ServerLevel level, UUID ownerHint) {
+        Entity restored = PetEntitySnapshot.restore(snapshot, petUuid, level, ownerHint);
         if (restored == null) return false;
         restoreChestInventory(restored, snapshot);
         if (!level.tryAddFreshEntityWithPassengers(restored)) return false;
@@ -821,7 +840,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         return true;
     }
 
-    /** Read NBT and summon pet from disk at player's current location. */
+    /** 读取 NBT 并在玩家当前位置从磁盘召唤宠物。 */
     private static boolean completeSummon(ServerPlayer player, UUID petUuid) {
         ServerLevel playerLevel = player.serverLevel();
         java.nio.file.Path ownerDir = PetIOUtil.getOwnerDir(player);
@@ -829,7 +848,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         if (!nbtFile.exists()) return false;
         try {
             CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
-            return summonFromDisk(nbt, petUuid, player, playerLevel);
+            return summonFromDisk(nbt, petUuid, player, playerLevel, ownerHintFor(nbtFile, player));
         } catch (IOException e) {
             trulybestfriends.LOGGER.error("Failed to complete summon for {}: {}", petUuid, e.getMessage());
             return false;
@@ -840,7 +859,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         pendingSummons.clear();
     }
 
-    /** Cancel a queued summon when its pet is explicitly untracked/deleted. */
+    /** 当宠物被显式取消追踪/删除时，取消其排队的召唤。 */
     public static void cancelPendingSummons(UUID playerUuid, UUID petUuid) {
         for (PendingSummon pending : new ArrayList<>(pendingSummons)) {
             if (pending.playerUuid.equals(playerUuid) && pending.petUuid.equals(petUuid)) {
@@ -849,7 +868,7 @@ public class TeleportPetToPlayerPacket implements CustomPacketPayload {
         }
     }
 
-    /** Cancel every queued summon belonging to one player. */
+    /** 取消属于某一名玩家的所有排队召唤。 */
     public static void cancelPendingSummons(UUID playerUuid) {
         for (PendingSummon pending : new ArrayList<>(pendingSummons)) {
             if (pending.playerUuid.equals(playerUuid)) finishPendingSummon(pending);

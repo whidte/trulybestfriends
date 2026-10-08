@@ -13,7 +13,7 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.UUID;
 
-/** Summons one tracked pet through the same paths used by the pet-screen summon button. */
+/** 通过与宠物界面召唤按钮相同的路径召唤一只已追踪的宠物。 */
 public class SummonPetPacket implements CustomPacketPayload {
     public static final Type<SummonPetPacket> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "summon_pet"));
@@ -48,9 +48,9 @@ public class SummonPetPacket implements CustomPacketPayload {
             try {
                 CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
                 if (PetDeathState.isDeadSnapshot(nbt)) return;
-                // Delegate unconditionally to the pet-screen summon button paths:
-                // TeleportPetToPlayerPacket handles loaded entities, cross-dimension
-                // lookups, unloaded-chunk force-loading, and ride-swap on its own.
+                // 无条件委托给宠物界面召唤按钮的路径：
+                // TeleportPetToPlayerPacket 会自行处理已加载实体、跨维度
+                // 查找、未加载区块的强制加载以及骑乘交换。
                 if (nbt.getBoolean("Recalled")) {
                     RecallPetPacket.handle(new RecallPetPacket(packet.petUuid), context);
                 } else {

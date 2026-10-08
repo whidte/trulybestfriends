@@ -12,8 +12,8 @@ import java.nio.file.Path;
 import java.util.UUID;
 
 /**
- * Client → Server: assign, move, or remove a pet inside the formation teams.
- * The server answers with an authoritative {@link TeamDataPacket}.
+ * 客户端 → 服务端：在阵型队伍中分配、移动或移除宠物。
+ * 服务端以权威的 {@link TeamDataPacket} 回应。
  */
 public class SetTeamMemberPacket implements CustomPacketPayload {
     public static final Type<SetTeamMemberPacket> TYPE = new Type<>(
@@ -41,22 +41,22 @@ public class SetTeamMemberPacket implements CustomPacketPayload {
         this.petUuid = petUuid;
     }
 
-    /** Place a pet into a slot, replacing (kicking) the previous occupant. */
+    /** 把宠物放入一个槽位，替换（踢出）原有的占用者。 */
     public static SetTeamMemberPacket assign(int colorIndex, int slot, UUID petUuid) {
         return new SetTeamMemberPacket(ACTION_ASSIGN, colorIndex, slot, -1, petUuid);
     }
 
-    /** Move a member to another slot, swapping with the occupant when present. */
+    /** 把成员移动到另一个槽位，若目标槽位有占用者则与之交换。 */
     public static SetTeamMemberPacket move(int colorIndex, int fromSlot, int toSlot) {
         return new SetTeamMemberPacket(ACTION_MOVE, colorIndex, toSlot, fromSlot, null);
     }
 
-    /** Remove a pet from one color team. */
+    /** 从某个颜色队伍中移除一只宠物。 */
     public static SetTeamMemberPacket remove(int colorIndex, UUID petUuid) {
         return new SetTeamMemberPacket(ACTION_REMOVE, colorIndex, -1, -1, petUuid);
     }
 
-    /** Persist the currently selected team color. */
+    /** 持久化当前选中的队伍颜色。 */
     public static SetTeamMemberPacket select(int colorIndex) {
         return new SetTeamMemberPacket(ACTION_SELECT, colorIndex, -1, -1, null);
     }

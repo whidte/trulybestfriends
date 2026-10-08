@@ -7,8 +7,9 @@ import com.whidte.trulybestfriends.network.DeletePetDataPacket;
 import com.whidte.trulybestfriends.network.DirectTeleportPetToPlayerPacket;
 import com.whidte.trulybestfriends.network.HealPetPacket;
 import com.whidte.trulybestfriends.network.PetIOUtil;
+import com.whidte.trulybestfriends.network.PetPresenceProbe;
 import com.whidte.trulybestfriends.network.NbtFileIO;
-import com.whidte.trulybestfriends.network.PetSnapshotFingerprint;
+import com.whidte.trulybestfriends.network.OpenPetScreenPacket;
 import com.whidte.trulybestfriends.network.PetSyncTracker;
 import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.PetEntitySnapshot;
@@ -103,11 +104,11 @@ public class trulybestfriends {
     private static final Set<ForcedChunk> chunksForcedByMod = ConcurrentHashMap.newKeySet();
     private static final Set<LocalSyncCandidate> localSyncCandidates = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, PendingPetSave> pendingPetSaves = new ConcurrentHashMap<>();
-    /** Last captured entity state per pet; skips redundant NBT serialization. */
+    /** 每个宠物最近一次捕获的实体状态；用于跳过冗余的 NBT 序列化。 */
     private static final Map<UUID, PetStateSignature> petStateSignatures = new ConcurrentHashMap<>();
-    /** Short-lived negative cache for "pet NBT exists under another owner dir". */
+    /** 针对“宠物 NBT 存在于其它主人目录下”的短时负缓存。 */
     private static final Map<UUID, Long> noForeignOwnerFileUntil = new ConcurrentHashMap<>();
-    /** How long a confirmed "no foreign owner file" result is trusted. */
+    /** 已确认的“无其它主人文件”结果的可信时长。 */
     private static final long FOREIGN_OWNER_CHECK_TTL_NANOS = 10_000_000_000L;
     private static final Set<EntityNbtSaveFailure> reportedEntityNbtSaveFailures = ConcurrentHashMap.newKeySet();
     private static volatile boolean petIndexLoaded;
@@ -134,6 +135,7 @@ public class trulybestfriends {
         modEventBus.addListener(Config::onLoad);
         modEventBus.addListener(this::registerPayloads);
         if (FMLEnvironment.dist == Dist.CLIENT) {
+            com.whidte.trulybestfriends.client.ModParticleTypes.attach(modEventBus);
             registerClientIntegration(modEventBus);
         }
     }
@@ -214,8 +216,8 @@ public class trulybestfriends {
     }
 
     /**
-     * Uses the normal /tbf load policy while taking ownership from the executing player instead
-     * of OwnableEntity or configured owner NBT paths.
+     * 使用正常的 /tbf load 策略，但归属取自执行指令的玩家，
+     * 而非 OwnableEntity 或配置的主人 NBT 路径。
      */
     public static LoadResult tryForceLoadPet(Entity entity, ServerPlayer owner, ServerLevel level) {
         if (INSTANCE == null) return LoadResult.SAVE_FAILED;
@@ -272,10 +274,10 @@ public class trulybestfriends {
         }
     }
 
-    /** Replace a join-time pending save with the fully restored live snapshot. */
+    /** 用完全还原后的实时快照替换加入时排队的待处理保存。 */
     public static boolean persistRestoredPet(UUID ownerUUID, Entity pet, ServerLevel level) {
         if (INSTANCE == null || !INSTANCE.savePetData(ownerUUID, pet, level)) return false;
-        // Moving a pet between owner directories may have flushed this snapshot inside savePetData.
+        // 在主人目录之间迁移宠物时，savePetData 内部可能已经落盘了该快照。
         if (!pendingPetSaves.containsKey(pet.getUUID())) return true;
         if (flushPendingPetSave(pet.getUUID())) return true;
         pendingPetSaves.remove(pet.getUUID());
@@ -289,10 +291,10 @@ public class trulybestfriends {
         registrar.playToServer(TeleportToPetPacket.TYPE, TeleportToPetPacket.STREAM_CODEC, TeleportToPetPacket::handle);
         registrar.playToServer(TeleportPetToPlayerPacket.TYPE, TeleportPetToPlayerPacket.STREAM_CODEC, TeleportPetToPlayerPacket::handle);
         registrar.playToServer(AreaRecallPacket.TYPE, AreaRecallPacket.STREAM_CODEC, AreaRecallPacket::handle);
-        // Server→client handlers live in the client-only ClientPacketHandlers class.
-        // The dist guard keeps the client class from being loaded on dedicated servers,
-        // where net.minecraft.client.* does not exist (loading it would mark the mod
-        // as a client-only mod and break server-client compatibility).
+        // 服务端→客户端的处理器位于仅客户端可用的 ClientPacketHandlers 类中。
+        // dist 守卫可避免该客户端类在专用服务端上被加载，
+        // 因为专用服务端不存在 net.minecraft.client.*（加载它会把本模组标记为
+        // 仅客户端模组，从而破坏服务端与客户端的兼容性）。
         registrar.playToClient(PetWarningPacket.TYPE, PetWarningPacket.STREAM_CODEC,
                 (packet, ctx) -> {
                     if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
@@ -317,6 +319,10 @@ public class trulybestfriends {
         registrar.playToServer(SetLastSummonPacket.TYPE, SetLastSummonPacket.STREAM_CODEC, SetLastSummonPacket::handle);
         registrar.playToServer(SummonPetPacket.TYPE, SummonPetPacket.STREAM_CODEC, SummonPetPacket::handle);
         registrar.playToClient(TeamDataPacket.TYPE, TeamDataPacket.STREAM_CODEC,
+                (packet, ctx) -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
+                });
+        registrar.playToClient(OpenPetScreenPacket.TYPE, OpenPetScreenPacket.STREAM_CODEC,
                 (packet, ctx) -> {
                     if (FMLEnvironment.dist == Dist.CLIENT) ClientPacketHandlers.handle(packet, ctx);
                 });
@@ -365,9 +371,9 @@ public class trulybestfriends {
             return;
         }
         if (ownerUUID != null) {
-            // Save tracked pets on (re)join — covers cross-dimension portal travel
-            // (e.g. End portal) where the entity is recreated with the same UUID.
-            // registerUntrackedOwnedPet handles first-time registration + index update.
+            // 在（重新）加入时保存已追踪的宠物——覆盖跨维度传送门旅行
+            // （例如末地传送门）中实体以相同 UUID 被重新创建的情况。
+            // registerUntrackedOwnedPet 负责首次注册与索引更新。
             if (trackedPetUUIDs.contains(entity.getUUID())
                     || registerUntrackedOwnedPet(entity, ownerUUID, level)) {
                 boolean healingSnapshotPersisted = false;
@@ -399,8 +405,8 @@ public class trulybestfriends {
         UUID ownerUUID = getCompatOwnerUUID(living);
         if (ownerUUID == null) return;
 
-        // Capture the last live state before a chunk unload. Other removal reasons
-        // have dedicated persistence paths or may recreate the entity elsewhere.
+        // 在区块卸载前捕获最后的实时状态。其它移除原因
+        // 有专门的持久化路径，或可能在别处重新创建该实体。
         if (tracked && living.getRemovalReason() == Entity.RemovalReason.UNLOADED_TO_CHUNK) {
             savePetData(ownerUUID, living, (ServerLevel) event.getLevel());
         }
@@ -443,6 +449,7 @@ public class trulybestfriends {
         pendingRemovals.clear();
         PetSyncTracker.clearAll();
         TeleportPetToPlayerPacket.clearPendingSummons();
+        PetPresenceProbe.clear();
         chunksForcedByMod.forEach(chunk ->
                 chunk.level().setChunkForced(chunk.chunkX(), chunk.chunkZ(), false));
         forcedChunkReferences.clear();
@@ -451,7 +458,6 @@ public class trulybestfriends {
         pendingPetSaves.clear();
         petStateSignatures.clear();
         noForeignOwnerFileUntil.clear();
-        PetSnapshotFingerprint.clearAll();
         indexCache.clear();
         trackedPetUUIDs.clear();
         blacklistedPetUUIDs.clear();
@@ -465,6 +471,7 @@ public class trulybestfriends {
             saveTickCounter++;
             processPendingRemovals(event.getServer());
             TeleportPetToPlayerPacket.tickPendingSummons(event.getServer());
+            PetPresenceProbe.tick(event.getServer());
             ReviveProtection.tick(event.getServer());
             PetHealingManager.tick(event.getServer());
 
@@ -536,12 +543,12 @@ public class trulybestfriends {
         }
     }
 
-    /** Called from LivingEntity#die before NeoForge posts LivingDeathEvent. */
+    /** 在 NeoForge 发布 LivingDeathEvent 之前，由 LivingEntity#die 调用。 */
     public static boolean tryStoreFatalPet(LivingEntity entity) {
         return tryStoreFatalPet(entity, null);
     }
 
-    /** Stores a fatal pet removed without entering LivingEntity#die. */
+    /** 存储一只未进入 LivingEntity#die 即被移除的致死宠物。 */
     public static boolean tryStoreFatalPet(LivingEntity entity, DamageSource directDeathSource) {
         if (INSTANCE == null || entity.level().isClientSide()
                 || !trackedPetUUIDs.contains(entity.getUUID())) return false;
@@ -594,17 +601,15 @@ public class trulybestfriends {
     }
 
     /**
-     * Drops every in-memory cache entry tied to one pet UUID.
+     * 丢弃与某个宠物 UUID 关联的所有内存缓存条目。
      *
-     * <p>Must be called whenever a pet is untracked, deleted or cleared so that
-     * stale fingerprints and state signatures cannot suppress the write of a
-     * later re-registration of the same UUID.</p>
+     * <p>每当宠物被取消追踪、删除或清除时都必须调用，
+     * 以免过期的状态签名抑制同一 UUID 之后重新注册时的写入。</p>
      */
     private static void forgetPetCaches(UUID petUuid) {
         petDeathTimes.remove(petUuid);
         petStateSignatures.remove(petUuid);
         noForeignOwnerFileUntil.remove(petUuid);
-        PetSnapshotFingerprint.forget(petUuid);
     }
 
     /** 将内存中的死亡时刻注入到 NBT（仅用于网络同步给客户端，不写盘）。
@@ -629,11 +634,10 @@ public class trulybestfriends {
         }
         PetHealingManager.onPetSaved(pet.getUUID(), ownerUUID);
 
-        // Cheap pre-check: capture() serializes the entire entity NBT tree, and
-        // the periodic sync passes call this for every loaded pet on a fixed
-        // tick interval. When the entity's observable state (position, health,
-        // name, sitting flag) is unchanged since the last capture, the previous
-        // pending snapshot is still accurate and re-serializing is pure waste.
+        // 低成本预检：capture() 会序列化整棵实体 NBT 树，而周期性同步会在固定
+        // 的 tick 间隔对每个已加载宠物调用它。当实体的可观测状态（坐标、生命值、
+        // 名称、坐下标记）自上次捕获以来未变化时，之前的待处理快照依然准确，
+        // 重新序列化纯属浪费。
         PetStateSignature signature = storedDead ? null : PetStateSignature.of(pet);
         if (signature != null) {
             PetStateSignature previous = petStateSignatures.get(pet.getUUID());
@@ -651,8 +655,8 @@ public class trulybestfriends {
             LOGGER.error("Failed to capture pet snapshot for {}: {}", pet.getUUID(), e.getMessage(), e);
             return false;
         }
-        // Record the signature only after a successful capture so a failed
-        // serialization never suppresses the retry on the next pass.
+        // 仅在捕获成功后才记录签名，这样序列化失败
+        // 就不会抑制下一轮的重新尝试。
         if (signature != null) petStateSignatures.put(pet.getUUID(), signature);
         else petStateSignatures.remove(pet.getUUID());
         // LastDeathTime 完全不由磁盘管理——改由服务器内存 Map (petDeathTimes) 记录，
@@ -673,12 +677,12 @@ public class trulybestfriends {
     }
 
     /**
-     * Cheap, allocation-light fingerprint of an entity's externally visible
-     * state. Used to skip redundant {@link PetEntitySnapshot#capture} calls.
+     * 实体的外部可见状态的低成本、少分配指纹。
+     * 用于跳过冗余的 {@link PetEntitySnapshot#capture} 调用。
      *
-     * <p>Coordinates are quantised to 1/16 block so that standing-still jitter
-     * does not defeat the check, while any meaningful movement still forces a
-     * fresh capture.</p>
+     * <p>坐标被量化到 1/16 方块，这样站立不动时的抖动
+     * 不会使该检查失效，而任何有意义的移动仍会强制
+     * 重新捕获。</p>
      */
     private record PetStateSignature(long x, long y, long z, float yRot, float health,
                                      float maxHealth, int nameHash, boolean sitting, boolean noAi) {
@@ -792,10 +796,9 @@ public class trulybestfriends {
     private record EntityNbtSaveFailure(UUID entityUUID, String exceptionType, String exceptionMessage) {}
 
     private static boolean hasPetFileInOtherOwnerDir(Path modDir, UUID currentOwnerUUID, UUID petUUID) {
-        // Owner changes are rare, but this check runs on every save pass and
-        // would otherwise list every owner directory each time. Remember a
-        // confirmed "no stale file" result for a short window; a positive
-        // result is always re-checked so the move still happens promptly.
+        // 主人变更很少发生，但该检查在每轮保存中都会运行，否则
+        // 每次都要列出所有主人目录。对已确认的“无过期文件”结果
+        // 记住一小段时间；正结果始终会重新检查，以便迁移仍能及时发生。
         long now = System.nanoTime();
         Long cachedUntil = noForeignOwnerFileUntil.get(petUUID);
         if (cachedUntil != null && now < cachedUntil) return false;
@@ -860,13 +863,13 @@ public class trulybestfriends {
     }
 
     /**
-     * Clear all stored NBT data and in-memory cache for a pet.
-     * Used when a clear-on-death entity dies — it should leave no trace.
+     * 清除某个宠物的所有已存储 NBT 数据与内存缓存。
+     * 用于 clear-on-death 实体死亡时——它不应留下任何痕迹。
      */
     private static void clearPetDataAndCache(Entity entity, UUID ownerUUID, ServerLevel level) {
         UUID petUUID = entity.getUUID();
         PetHealingManager.clear(petUUID);
-        // Remove NBT file from disk
+        // 从磁盘删除 NBT 文件
         Path modDir = PetIOUtil.getModDir(level);
         Path ownerDir = modDir.resolve(ownerUUID.toString());
         Path petFile = ownerDir.resolve(petUUID + ".nbt");
@@ -876,7 +879,7 @@ public class trulybestfriends {
         } catch (IOException e) {
             LOGGER.warn("Failed to delete pet NBT for {}: {}", petUUID, e.getMessage());
         }
-        // Clean in-memory caches
+        // 清理内存缓存
         pendingPetSaves.remove(petUUID);
         removePendingRemovals(ownerUUID, petUUID);
         trackedPetUUIDs.remove(petUUID);
@@ -916,8 +919,10 @@ public class trulybestfriends {
         if (PetDeathState.shouldReleaseBeforeUntracking(
                 storedSnapshot, Config.deleteStoredPetsDirectly, noReviveSnapshot)) {
             if (deadSnapshot != null) {
+                UUID releaseHint = PetIOUtil.ownerFromPetFile(petFile.toFile());
                 releasedDeadEntity = TeleportPetToPlayerPacket.releaseDeadPetForUntracking(
-                        deadSnapshot, petUUID, player, player.serverLevel());
+                        deadSnapshot, petUUID, player, player.serverLevel(),
+                        releaseHint != null ? releaseHint : player.getUUID());
                 if (releasedDeadEntity == null) {
                     LOGGER.warn("Aborted deletePetData for {}: dead pet could not be released", petUUID);
                     return false;
@@ -928,8 +933,8 @@ public class trulybestfriends {
             }
         }
 
-        // Stop queued writes and summons before touching disk so stale data
-        // cannot recreate the entry after this deletion.
+        // 在操作磁盘之前先停止排队的写入与召唤，这样过期数据
+        // 就无法在本次删除之后重新创建该条目。
         pendingPetSaves.remove(petUUID);
         PetHealingManager.clear(petUUID);
         removePendingRemovals(player.getUUID(), petUUID);
@@ -953,10 +958,10 @@ public class trulybestfriends {
     }
 
     /**
-     * Removes every stored pet entry belonging to one player without UUID-blacklisting it.
-     * Loaded pets remain in the world and may be registered again by the normal tracking pass.
+     * 移除属于某个玩家的所有已存储宠物条目，但不将其 UUID 加入黑名单。
+     * 已加载的宠物会保留在世界中，并可能被正常的追踪流程重新注册。
      *
-     * @return the number of distinct pet UUIDs cleared, or {@code -1} when storage could not be updated
+     * @return 被清除的不同宠物 UUID 数量；当存储无法更新时为 {@code -1}
      */
     public static int clearAllPetData(ServerPlayer player) {
         UUID ownerUUID = player.getUUID();
@@ -997,13 +1002,13 @@ public class trulybestfriends {
                         try {
                             petUUIDs.add(UUID.fromString(fileName.substring(0, fileName.length() - 4)));
                         } catch (IllegalArgumentException ignored) {
-                            // The command still removes malformed or legacy NBT filenames.
+                            // 该指令仍会移除格式错误或遗留的 NBT 文件名。
                         }
                     }
                 }
             }
 
-            // Stop queued work first so it cannot recreate files while this command is clearing them.
+            // 先停止排队的工作，使其无法在该指令清理文件时重新创建它们。
             pendingPetSaves.entrySet().removeIf(entry -> ownerUUID.equals(entry.getValue().ownerUUID()));
             for (PendingRemoval pending : new ArrayList<>(pendingRemovals)) {
                 if (ownerUUID.equals(pending.ownerUUID())) removePendingRemoval(pending);
@@ -1022,9 +1027,9 @@ public class trulybestfriends {
             removeMissingPetsFromTeams(ownerDir);
 
             PetHealingManager.clearAll(petUUIDs);
+            localSyncCandidates.removeIf(candidate -> petUUIDs.contains(candidate.entityUUID()));
             for (UUID petUUID : petUUIDs) {
                 pendingPetSaves.remove(petUUID);
-                localSyncCandidates.removeIf(candidate -> candidate.entityUUID().equals(petUUID));
                 ReviveProtection.remove(petUUID);
                 trackedPetUUIDs.remove(petUUID);
                 forcedTrackingOwners.remove(petUUID);
@@ -1064,17 +1069,16 @@ public class trulybestfriends {
         }
     }
 
-    /** Check whether a pet UUID is currently tracked (in-memory). */
+    /** 检查某个宠物 UUID 当前是否被追踪（内存中）。 */
     public static boolean isTrackedPet(UUID petUUID) {
         return trackedPetUUIDs.contains(petUUID);
     }
 
     /**
-     * Check whether a UUID corresponds to a player who has played on this
-     * server.  A player is "known" if they are currently online or have a
-     * playerdata file on disk.  This prevents saving pets whose "Owner"
-     * NBT field does not correspond to a real player (e.g. mod entities
-     * with non-standard ownership fields).
+     * 检查某个 UUID 是否对应一位曾在本服务器游玩过的玩家。
+     * 若玩家当前在线，或磁盘上存在 playerdata 文件，则视为“已知”。
+     * 这可以防止保存那些 "Owner" NBT 字段并不对应真实玩家的宠物
+     * （例如使用非标准归属字段的模组实体）。
      */
     public static boolean isKnownPlayer(net.minecraft.server.MinecraftServer server, UUID uuid) {
         if (server.getPlayerList().getPlayer(uuid) != null) return true;
@@ -1085,30 +1089,40 @@ public class trulybestfriends {
     }
 
     /**
-     * Resolve an owner UUID from any tameable/pet entity, even if it does
-     * not implement {@link OwnableEntity}.  This covers Ice &amp; Fire dragons
-     * and other mods that use NBT-based ownership.
+     * 从任何可驯服/宠物实体解析出主人 UUID，即使它
+     * 未实现 {@link OwnableEntity}。这可覆盖 Ice &amp; Fire 龙
+     * 及其它使用基于 NBT 归属的模组。
      */
     public static UUID getCompatOwnerUUID(Entity entity) {
-        // Only living entities can be pets.  This filters out projectiles
-        // (thrown potions, arrows, ...) and AreaEffectCloud, which all save
-        // an "Owner" UUID in their NBT representing the thrower/creator —
-        // not a pet ownership relationship.
+        // 只有生物实体才能成为宠物。这会过滤掉弹射物
+        // （投掷的药水、箭……）和 AreaEffectCloud，它们都会在 NBT 中
+        // 保存一个 "Owner" UUID，代表投掷者/创建者，
+        // 而非宠物归属关系。
         if (!(entity instanceof LivingEntity)) return null;
-        // Multipart sub-parts (e.g., Ice & Fire dragon tail/wing) are never
-        // tracked directly — only the parent entity is tracked.  The parent
-        // is a separate Entity with its own UUID and will be processed by
-        // onEntityJoinLevel / syncAllPets on its own.  Returning null here
-        // causes all tracking entry points to skip sub-parts.
+        // 多部件子部件（例如 Ice & Fire 龙的尾/翼）从不会被
+        // 直接追踪——只追踪父实体。父实体是一个拥有自身 UUID 的
+        // 独立 Entity，会自行被 onEntityJoinLevel / syncAllPets
+        // 处理。此处返回 null 会让所有追踪入口点
+        // 跳过子部件。
         if (entity instanceof PartEntity<?>) return null;
         UUID forcedOwner = forcedTrackingOwners.get(entity.getUUID());
         if (forcedOwner != null) return forcedOwner;
-        // Fast path: standard vanilla/Forge ownership interface
+        return getEntityOwnerUUID(entity);
+    }
+
+    /**
+     * 实体自身报告的归属，忽略强制追踪覆盖。从
+     * {@link #getCompatOwnerUUID} 拆分出来，以便调用方（例如快照修复）能区分
+     * “该实体确实知道自己的主人”与“TBF 为它记录了一个主人”。
+     */
+    public static UUID getEntityOwnerUUID(Entity entity) {
+        if (!(entity instanceof LivingEntity)) return null;
+        if (entity instanceof PartEntity<?>) return null;
+        // 快速通道：标准的原版/Forge 归属接口
         if (entity instanceof OwnableEntity ownable) {
             UUID ownerUUID = ownable.getOwnerUUID();
             if (ownerUUID != null) return ownerUUID;
         }
-        // Compatibility: read ownership from configured top-level or nested NBT paths.
         CompoundTag nbt;
         try {
             nbt = entity.saveWithoutId(new CompoundTag());
@@ -1116,6 +1130,31 @@ public class trulybestfriends {
             reportEntityNbtSaveFailure(entity, exception);
             return null;
         }
+        // 接下来是 TBF 记录的主人，解析时不查询配置，因此在 ownerNbtFields
+        // 被清空或裁剪后仍能工作。这里实际上只可能出现纯字符串形式：
+        // 快照的 TBF_OwnerUUID 在加载时会被丢弃，因为 Forge/NeoForge
+        // 会还原命名字段（外加嵌套的 ForgeData compound）并丢弃未知的根键。
+        UUID ownRecord = TbfOwnerTag.read(nbt);
+        if (ownRecord != null) return ownRecord;
+        // 兼容性：从配置的顶层或嵌套 NBT 路径读取归属。
+        return OwnerNbtResolver.resolve(nbt, Config.ownerNbtPaths);
+    }
+
+    /**
+     * 从一个<b>存储快照 NBT</b>（而非活体实体）解析归属，
+     * 顺序与 {@link #getEntityOwnerUUID(Entity)} 的 NBT 部分一致：
+     * 先读 TBF 自己的 {@code TBF_OwnerUUID}，再回退到配置的归属路径。
+     *
+     * <p>用于校验「纯磁盘」宠物是否真的属于某个玩家——这类宠物没有
+     * 实体可供查询，只能读快照。解析不查询 {@code OwnableEntity}
+     * 接口，因为快照里没有实体对象。</p>
+     *
+     * @return 快照中记录的主人 UUID；无法解析时返回 {@code null}。
+     */
+    public static UUID getSnapshotOwnerUUID(CompoundTag nbt) {
+        if (nbt == null) return null;
+        UUID ownRecord = TbfOwnerTag.read(nbt);
+        if (ownRecord != null) return ownRecord;
         return OwnerNbtResolver.resolve(nbt, Config.ownerNbtPaths);
     }
 
@@ -1440,10 +1479,6 @@ public class trulybestfriends {
                 LOGGER.error("Keeping recalled pet {} loaded because its final snapshot could not be persisted", petUUID);
                 return false;
             }
-            if (!savePetData(ownerUUID, entity, level) || !flushPendingPetSave(petUUID)) {
-                LOGGER.error("Keeping recalled pet {} loaded because its final snapshot could not be persisted", petUUID);
-                return false;
-            }
             entity.discard();
             pendingRemoval.ifPresent(trulybestfriends::removePendingRemoval);
             return true;
@@ -1547,6 +1582,7 @@ public class trulybestfriends {
     private void syncAllPets(MinecraftServer server) {
         for (ServerLevel level : server.getAllLevels()) {
             for (Entity entity : level.getEntities().getAll()) {
+                if (!(entity instanceof LivingEntity)) continue;
                 syncOwnedEntity(entity, level);
             }
         }
@@ -1587,9 +1623,11 @@ public class trulybestfriends {
     }
 
     private void syncTrackedPets(MinecraftServer server) {
+        // 性能模式只需刷新已追踪的宠物；按 UUID 查询，避免遍历所有已加载实体。
         for (UUID petUUID : new ArrayList<>(trackedPetUUIDs)) {
             Entity entity = PetIOUtil.findEntity(server, petUUID);
-            UUID ownerUUID = entity != null ? getCompatOwnerUUID(entity) : null;
+            if (!(entity instanceof LivingEntity)) continue;
+            UUID ownerUUID = getCompatOwnerUUID(entity);
             if (ownerUUID != null) savePetData(ownerUUID, entity, (ServerLevel) entity.level());
         }
     }
@@ -1617,11 +1655,11 @@ public class trulybestfriends {
                         chunk.getMinBlockX(), levelMinY(level), chunk.getMinBlockZ(),
                         chunk.getMaxBlockX() + 1, levelMaxY(level) + 1, chunk.getMaxBlockZ() + 1);
                 for (Entity entity : level.getEntities(null, area)) {
-                    // Pre-filter here rather than in processLocalSyncCandidates:
-                    // a chunk scan returns every entity (items, mobs, projectiles),
-                    // and queueing them all meant each one was re-resolved and
-                    // rejected on the following tick. Only entities that can
-                    // actually be pets are worth queueing.
+                    // 在此处预过滤，而不是在 processLocalSyncCandidates 中：
+                    // 区块扫描会返回所有实体（物品、生物、弹射物），
+                    // 若把它们全部入队，就意味着每个都会在下一 tick 被重新解析
+                    // 并拒绝。只有真正可能成为宠物的实体
+                    // 才值得入队。
                     if (!isPetSyncCandidate(entity)) continue;
                     localSyncCandidates.add(new LocalSyncCandidate(dimension, entity.getUUID()));
                 }
@@ -1630,11 +1668,10 @@ public class trulybestfriends {
     }
 
     /**
-     * True when an entity could plausibly be a tracked pet, and is therefore
-     * worth adding to the local sync queue.
+     * 当某实体有可能是一只被追踪的宠物、因而值得加入本地同步队列时返回 true。
      *
-     * <p>Skips non-living entities, multipart sub-parts, and entities that are
-     * neither already tracked nor resolvable to an owner.</p>
+     * <p>会跳过非生物实体、多部件子部件，以及既未被追踪
+     * 也无法解析出主人的实体。</p>
      */
     private boolean isPetSyncCandidate(Entity entity) {
         if (!(entity instanceof LivingEntity)) return false;
@@ -1671,7 +1708,7 @@ public class trulybestfriends {
         }
     }
 
-    // === Boss anti-gang-up recall ===
+    // === Boss 防群殴收回 ===
 
     private void checkBossRecalls(MinecraftServer server) {
         int configured = Config.bossFightPetLimit;
@@ -1774,7 +1811,7 @@ public class trulybestfriends {
             Path ownerDir = PetIOUtil.getOwnerDir(player);
 
             if (Files.exists(ownerDir)) {
-                int[] counts = new int[2]; // [0]=success, [1]=failed
+                int[] counts = new int[2]; // [0]=成功, [1]=失败
                 try (var files = Files.list(ownerDir)) {
                     files.filter(PetIOUtil::isPetDataFile).forEach(file -> {
                         try {

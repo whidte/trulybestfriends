@@ -11,15 +11,15 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import java.util.UUID;
 
 /**
- * Server → client: tells the GUI to show a transient warning at the coordinate
- * display position for 3 seconds.  Used when summon/teleport/recall fails because the
- * pet is recalled, lost, or the summon queue is busy.
+ * 服务端 → 客户端：告诉界面在坐标
+ * 显示位置处展示 3 秒的瞬时警告。用于召唤/传送/收回因
+ * 宠物已被收回、已丢失，或召唤队列繁忙而失败时。
  */
 public class PetWarningPacket implements CustomPacketPayload {
     public static final Type<PetWarningPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "pet_warning"));
     public static final StreamCodec<FriendlyByteBuf, PetWarningPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), PetWarningPacket::decode);
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
-    /** 0 = recalled, 1 = lost (summon), 2 = busy, 3 = lost (recall), 4 = no swap space */
+    /** 0 = 已收回，1 = 已丢失（召唤），2 = 繁忙，3 = 已丢失（收回），4 = 无交换空间 */
     private final int type;
     private final UUID petUuid;
 

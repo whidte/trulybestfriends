@@ -39,6 +39,26 @@ import java.util.UUID;
  *       防止 rubber-banding。</li>
  * </ol>
  *
+ * <p><b>距离判定不需要本类。</b>Sable 的 {@code mixin/interaction_distance/EntityMixin}
+ * 用 {@code @Overwrite} 改写了三个原版方法，让它们内部调用
+ * {@code SableCompanion.distanceSquaredWithSubLevels}（把两侧坐标都投影到全局空间再算距离）：</p>
+ * <ul>
+ *   <li>{@code Entity#distanceTo(Entity)} —— 直接可用，无需兼容代码</li>
+ *   <li>{@code Entity#distanceToSqr(double, double, double)} —— 直接可用，无需兼容代码</li>
+ *   <li>{@code Entity#distanceToSqr(Vec3)} —— 直接可用，无需兼容代码</li>
+ * </ul>
+ * <p>所以「判断两只实体/一个坐标离玩家多远」只要用上面这几个原版方法即可，
+ * <b>千万不要自己写 {@code dx*dx+dy*dy+dz*dz}</b>——子级 plot 网格内的坐标是极端值，
+ * 手算会得到毫无意义的结果（官方文档明确点名的错误写法）。
+ * 唯一要注意的坑：{@code Entity#distanceToSqr(Entity)} <b>并没有</b>被改写
+ * （companion README 把它一并列了出来，但源码里只有上面三个重载），别用。</p>
+ *
+ * <p><b>区块坐标要反过来用原始值。</b>子级内的实体在父维度里就登记在 plot 网格的那一格上
+ * ——Sable 判定「实体是否在子级内」用的正是 {@code entity.chunkPosition()}
+ * （见 {@code SableCompanion.getContaining(Entity)}）。所以要把实体所在的区块
+ * 强制加载时，必须用<b>未投影</b>的坐标算 chunk；用 {@link #projectToWorld} 投影后的
+ * 全局坐标反而会加载错区块。{@code projectToWorld} 只该用于「要传送到宠物身边」。</p>
+ *
  * <p>所有 Sable 类引用均通过 {@link Class#forName} + 反射访问，因为 Sable 不是
  * 编译期依赖。</p>
  */
@@ -226,7 +246,7 @@ public final class SableCompat {
 	 * 客户端和服务端均可调用（使用通用的 SubLevelContainer）。</p>
 	 *
 	 * @param level      父维度
-	 * @param subLevelId SubLevel UUID
+	 * @param subLevelId SubLevel 的 UUID
 	 * @return SubLevel 对象（Object 类型，调用者无需关心具体类），或 null
 	 */
 	public static Object resolveSubLevel(Level level, UUID subLevelId) {

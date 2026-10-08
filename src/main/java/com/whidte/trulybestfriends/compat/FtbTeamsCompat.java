@@ -16,7 +16,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Optional FTB Teams alliance bridge for entities tracked by this mod. */
+/** 可选的 FTB Teams 联盟桥接，用于本模组追踪的实体。 */
 public final class FtbTeamsCompat {
     private static final boolean LOADED = ModList.get().isLoaded("ftbteams");
     private static final Map<OwnerCacheKey, UUID> STORED_OWNERS = new ConcurrentHashMap<>();

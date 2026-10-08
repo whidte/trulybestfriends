@@ -1,5 +1,6 @@
 package com.whidte.trulybestfriends.network;
 
+import com.whidte.trulybestfriends.TbfOwnerTag;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -30,9 +31,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
 /**
- * Shared utilities for pet I/O operations extracted from the various packet handlers.
- * Centralizes: owner directory resolution, safe-Y search, shoulder-entity manipulation,
- * and reflection caching for private shoulder methods.
+ * 从各个数据包处理器中提取出的宠物 I/O 操作共享工具。
+ * 集中处理：主人目录解析、安全 Y 搜索、肩上实体操作，
+ * 以及私有肩上方法的反射缓存。
  */
 public final class PetIOUtil {
 	public static final int MIN_PRIORITY = 1;
@@ -50,14 +51,92 @@ public final class PetIOUtil {
 				? clampPriority(nbt.getInt("Priority")) : DEFAULT_PRIORITY;
 	}
 
-    /** Writes a pet snapshot and keeps the recalled-state index in sync with it. */
+	/** 记录宠物首次注册进模组的时间戳（毫秒）所用的 NBT 键。 */
+	public static final String REGISTERED_AT_KEY = "TBF_RegisteredAt";
+
+	/** 读取宠物的注册时间戳；键缺失时返回 0，表示注册时间未知。 */
+	public static long registeredAtFrom(CompoundTag nbt) {
+		return nbt != null && nbt.contains(REGISTERED_AT_KEY)
+				? nbt.getLong(REGISTERED_AT_KEY) : 0L;
+	}
+
+	/**
+	 * 为即将落盘的快照补齐注册时间戳：优先沿用旧文件里已有的值，
+	 * 只有在文件尚不存在（即首次注册）时才写入当前时间。
+	 *
+	 * <p>升级前就已存在、且不含该键的旧文件保持缺失，
+	 * 这样旧宠物会统一归入“注册时间未知”（读取为 0，排在最早一端），
+	 * 而不会被升级那一刻刷成同一批“新宠物”。
+	 * 另外，只要旧文件里已有该键就一定原样沿用，
+	 * 因此内容未变化的重复保存仍能与旧文件逐键相等，
+	 * 不会因为补写时间戳而触发多余的重写。</p>
+	 */
+	static void applyRegisteredAt(File nbtFile, CompoundTag nbt, CompoundTag oldNbt) {
+		if (nbt.contains(REGISTERED_AT_KEY)) return;
+		long carried = registeredAtFrom(oldNbt);
+		if (carried > 0L) {
+			nbt.putLong(REGISTERED_AT_KEY, carried);
+		} else if (!nbtFile.exists()) {
+			nbt.putLong(REGISTERED_AT_KEY, System.currentTimeMillis());
+		}
+	}
+
+	/** 最大生命值属性的注册名（1.21.1 及更早的写法）。 */
+	private static final String MAX_HEALTH_ATTRIBUTE = "minecraft:generic.max_health";
+	/** 部分上游模组省略命名空间时写入的简写形式。 */
+	private static final String LEGACY_MAX_HEALTH_ATTRIBUTE = "generic.max_health";
+	/** 无法从快照推断最大生命值时的兜底值（与原版多数生物一致）。 */
+	public static final float DEFAULT_MAX_HEALTH = 20.0F;
+
+	/** 读取宠物快照的当前生命值；键缺失视为 0。 */
+	public static float healthFrom(CompoundTag nbt) {
+		return nbt != null && nbt.contains("Health") ? Math.max(0.0F, nbt.getFloat("Health")) : 0.0F;
+	}
+
+	/**
+	 * 读取宠物快照的最大生命值。
+	 *
+	 * <p>优先使用顶层 MaxHealth（由快照捕获时从 getAttributeValue 写入）。
+	 * 该键缺失或为零时才回退扫描原版 Attributes 列表——因为 Attributes.Base
+	 * 记录的是未驯服时的基础值（例如已驯服的狼为 20 而非 40），
+	 * 只应作为最后手段。两者都拿不到时返回 {@link #DEFAULT_MAX_HEALTH}。</p>
+	 */
+	public static float maxHealthFrom(CompoundTag nbt) {
+		if (nbt == null) return DEFAULT_MAX_HEALTH;
+		float maxHealth = nbt.contains("MaxHealth") ? nbt.getFloat("MaxHealth") : 0.0F;
+		if (maxHealth <= 0.0F && nbt.contains("Attributes")) {
+			for (Tag raw : nbt.getList("Attributes", Tag.TAG_COMPOUND)) {
+				CompoundTag attribute = (CompoundTag) raw;
+				String name = attribute.getString("Name");
+				if (MAX_HEALTH_ATTRIBUTE.equals(name) || LEGACY_MAX_HEALTH_ATTRIBUTE.equals(name)) {
+					maxHealth = attribute.getFloat("Base");
+					break;
+				}
+			}
+		}
+		return maxHealth > 0.0F ? maxHealth : DEFAULT_MAX_HEALTH;
+	}
+
+	/**
+	 * 当前生命值占最大生命值的比例，钳制在 [0, 1]。
+	 *
+	 * <p>口径刻意与界面上那条血条（{@code renderHealthBar}）保持一致：
+	 * 超出满血的值一律按 1 处理，因此“按生命值排序”与玩家肉眼看到的血条
+	 * 长度永远同序。已死亡（Health 为 0）的宠物比例为 0，排在“最需要治疗”的一端。</p>
+	 */
+	public static float healthRatioFrom(CompoundTag nbt) {
+		float ratio = healthFrom(nbt) / maxHealthFrom(nbt);
+		return Math.max(0.0F, Math.min(1.0F, ratio));
+	}
+
+    /** 写入宠物快照，并使收回状态索引与其保持同步。 */
     public static void writePetState(File file, CompoundTag nbt,
                                      ServerLevel level, UUID petUuid) throws IOException {
         NbtFileIO.writeCompressed(nbt, file);
         trulybestfriends.updatePetRecalledState(level, petUuid, nbt.getBoolean("Recalled"));
     }
 
-    // ---- Owner directory ----
+    // ---- 主人目录 ----
 
     public static Path getModDir(ServerLevel level) {
         return level.getServer().getWorldPath(LevelResource.ROOT).resolve("trulybestfriends");
@@ -71,7 +150,7 @@ public final class PetIOUtil {
         return worldPath.resolve("trulybestfriends");
     }
 
-    /** Resolve the per-owner pet storage directory under {world}/trulybestfriends/{ownerUuid}. */
+    /** 解析 {world}/trulybestfriends/{ownerUuid} 下每个主人的宠物存储目录。 */
     public static Path getOwnerDir(Path modDir, UUID playerUuid) {
         return modDir.resolve(playerUuid.toString());
     }
@@ -84,7 +163,25 @@ public final class PetIOUtil {
         return getModDir(player).resolve(player.getUUID().toString());
     }
 
-    /** True only for a UUID-named pet snapshot, excluding metadata files such as team.nbt. */
+    /**
+     * 已存储宠物路径中记录的主人 UUID：宠物存放于
+     * {@code {world}/trulybestfriends/{ownerUuid}/{petUuid}.nbt}，因此父目录名就是
+     * TBF 为该宠物记录的主人。当快照不再携带主人时，用作最后手段的主人提示。
+     *
+     * @return 主人 UUID；当路径不遵循该布局时返回 {@code null}。
+     */
+    public static UUID ownerFromPetFile(File petFile) {
+        if (petFile == null) return null;
+        File parent = petFile.getParentFile();
+        if (parent == null) return null;
+        try {
+            return UUID.fromString(parent.getName());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /** 仅对以 UUID 命名的宠物快照返回 true，排除 team.nbt 之类的元数据文件。 */
     public static boolean isPetDataFileName(String fileName) {
         if (fileName == null || !fileName.endsWith(".nbt")) return false;
         try {
@@ -129,16 +226,16 @@ public final class PetIOUtil {
                 : null;
     }
 
-    // ---- Safe Y search ----
+    // ---- 安全 Y 搜索 ----
 
-    /** Find a safe Y near (x, yBase, z) for the given entity, scanning upward up to 5 blocks. */
+    /** 为给定实体在 (x, yBase, z) 附近寻找安全的 Y，向上最多扫描 5 格。 */
     public static double findSafeY(ServerLevel level, double x, double yBase, double z, Entity entity) {
         float hw = entity instanceof LivingEntity le ? le.getBbWidth() / 2f : 0.3f;
         float h = entity instanceof LivingEntity le ? le.getBbHeight() : 1.8f;
         return findSafeY(level, x, yBase, z, hw, h, entity);
     }
 
-    /** Find a safe Y near (x, yBase, z) given explicit half-width and height. */
+    /** 在给定显式半宽和高度的情况下，寻找 (x, yBase, z) 附近安全的 Y。 */
     public static double findSafeY(ServerLevel level, double x, double yBase, double z, float hw, float h) {
         return findSafeY(level, x, yBase, z, hw, h, null);
     }
@@ -147,8 +244,8 @@ public final class PetIOUtil {
         for (int dy = 0; dy <= 5; dy++) {
             double y = yBase + dy;
             AABB box = new AABB(x - hw, y, z - hw, x + hw, y + h, z + hw);
-            // RevivePetPacket passes no entity (uses noCollision(box) overload);
-            // other callers pass the entity (uses noCollision(entity, box) overload).
+            // RevivePetPacket 不传实体（使用 noCollision(box) 重载）；
+            // 其他调用方传入实体（使用 noCollision(entity, box) 重载）。
             boolean safe = (entity != null)
                     ? level.noCollision(entity, box) && !level.containsAnyLiquid(box)
                     : level.noCollision(box) && !level.containsAnyLiquid(box);
@@ -182,7 +279,9 @@ public final class PetIOUtil {
                 double x = player.getX() + Math.cos(angle) * radius;
                 double z = player.getZ() + Math.sin(angle) * radius;
                 for (int verticalDistance = 0; verticalDistance <= 5; verticalDistance++) {
-                    for (int direction : verticalDirections(verticalDistance)) {
+                    int directionStart = verticalDistance == 0 ? 1 : -1;
+                    int directionEnd = 1;
+                    for (int direction = directionStart; direction <= directionEnd; direction += 2) {
                         double y = player.getY() + direction * verticalDistance;
                         if (!hasClearVerticalPath(level, entity, x, y, z, halfWidth, height, player.getY())) {
                             continue;
@@ -194,8 +293,8 @@ public final class PetIOUtil {
                                 : level.noCollision(box);
                         if (!clear || level.containsAnyLiquid(box)) continue;
 
-                        // The summon/teleport paths pass the restored/live Mob, so use
-                        // the same block-level evaluator as vanilla pet teleportation.
+                        // 召唤/传送路径会传入还原后/存活的 Mob，因此使用
+                        // 与原版宠物传送相同的方块级评估器。
                         if (entity instanceof Mob mob
                                 && WalkNodeEvaluator.getPathTypeStatic(mob, BlockPos.containing(x, y, z))
                                 != PathType.WALKABLE) continue;
@@ -208,12 +307,7 @@ public final class PetIOUtil {
         return null;
     }
 
-    /** Returns the height search order: same level, then down/up by increasing distance. */
-    private static int[] verticalDirections(int distance) {
-        return distance == 0 ? new int[]{1} : new int[]{-1, 1};
-    }
-
-    /** Prevents a vertical teleport through a floor or ceiling into another level. */
+    /** 防止垂直传送穿过地板或天花板进入另一层。 */
     private static boolean hasClearVerticalPath(ServerLevel level, Entity entity,
                                                  double x, double y, double z,
                                                  float halfWidth, float height,
@@ -247,17 +341,6 @@ public final class PetIOUtil {
 
     private static void writePetSnapshot(File nbtFile, CompoundTag snapshot,
                                          boolean recalled, boolean preserveRecalled) throws IOException {
-        // Fast path: when the caller only carries a freshly captured live
-        // snapshot and the content already matches what we last wrote, skip the
-        // disk read, the defensive copy and the atomic write entirely. This is
-        // the common case for periodic sync passes over idle pets.
-        if (!preserveRecalled && !recalled && !PetDeathState.isStoredDead(snapshot)) {
-            UUID fastUuid = petUuidOf(nbtFile);
-            if (fastUuid != null && !PetSnapshotFingerprint.recordIfChanged(fastUuid, snapshot)) {
-                return;
-            }
-        }
-
         CompoundTag oldNbt = null;
         if (nbtFile.exists()) {
             try {
@@ -274,34 +357,20 @@ public final class PetIOUtil {
         if (recalledValue) nbt.putBoolean("Recalled", true);
         else nbt.remove("Recalled");
         nbt.remove("LastDeathTime");
+        applyRegisteredAt(nbtFile, nbt, oldNbt);
 
-        if (oldNbt != null && oldNbt.equals(nbt)) {
-            // Content already on disk: refresh the fingerprint so the fast path
-            // above can short-circuit the next identical write.
-            UUID petUuid = petUuidOf(nbtFile);
-            if (petUuid != null) PetSnapshotFingerprint.record(petUuid, nbt);
-            return;
-        }
+        // 内容已在磁盘上时跳过写入。这里“读一次旧文件 + 整树比较”是有意的重复写入防线：
+        // 落盘内容并不等同于调用方给的快照（要补 Priority、可能剔除 Recalled 与 LastDeathTime、
+        // 可能补写注册时间），而且其它落盘路径（SetPriorityPacket、writePetState 的各个调用方）
+        // 也会改写同一个文件，所以“快照没变”不足以证明磁盘内容没变，必须真的比对一次。
+        if (oldNbt != null && oldNbt.equals(nbt)) return;
 
         NbtFileIO.writeCompressed(nbt, nbtFile);
-        UUID petUuid = petUuidOf(nbtFile);
-        if (petUuid != null) PetSnapshotFingerprint.record(petUuid, nbt);
     }
 
-    /** Derives the pet UUID from a {@code <uuid>.nbt} file, or null when unavailable. */
-    private static UUID petUuidOf(File nbtFile) {
-        String name = nbtFile.getName();
-        if (!name.endsWith(".nbt")) return null;
-        try {
-            return UUID.fromString(name.substring(0, name.length() - 4));
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-    }
+    // ---- 肩上实体辅助方法 ----
 
-    // ---- Shoulder entity helpers ----
-
-    /** Return the shoulder NBT matching petUuid, or null if not on either shoulder. */
+    /** 返回与 petUuid 匹配的肩上 NBT，若不在任一肩上则返回 null。 */
     public static CompoundTag getShoulderEntity(ServerPlayer player, UUID petUuid) {
         return findShoulderEntity(player.getShoulderEntityLeft(), player.getShoulderEntityRight(), petUuid);
     }
@@ -312,17 +381,20 @@ public final class PetIOUtil {
         return null;
     }
 
-    /** Clear the shoulder slot (left or right) that currently holds petUuid. */
+    /** 清除当前持有 petUuid 的肩上槽位（左或右）。 */
     public static void clearShoulderSlot(ServerPlayer player, UUID petUuid) {
         CompoundTag left = player.getShoulderEntityLeft();
         if (left.contains("UUID") && left.getUUID("UUID").equals(petUuid)) {
             setShoulderEntity(player, true, new CompoundTag());
             return;
         }
-        setShoulderEntity(player, false, new CompoundTag());
+        CompoundTag right = player.getShoulderEntityRight();
+        if (right.contains("UUID") && right.getUUID("UUID").equals(petUuid)) {
+            setShoulderEntity(player, false, new CompoundTag());
+        }
     }
 
-    /** Save a shoulder pet's NBT to disk under the owner's directory, marking it Recalled. */
+    /** 将肩上宠物的 NBT 保存到主人的目录下，并标记为 Recalled。 */
     public static boolean saveShoulderToDisk(UUID playerUuid, CompoundTag shoulderNbt, ServerLevel level) {
         try {
             Path ownerDir = getOwnerDir(level, playerUuid);
@@ -332,7 +404,7 @@ public final class PetIOUtil {
             UUID uuid = snapshot.getUUID("UUID");
             String typeKey = snapshot.getString("id");
             snapshot.putString("EntityType", typeKey);
-            snapshot.putString("OwnerUUID", playerUuid.toString());
+            TbfOwnerTag.write(snapshot, playerUuid);
             snapshot.putString("Dimension", level.dimension().location().toString());
             snapshot.putBoolean("Recalled", true);
 
@@ -346,26 +418,26 @@ public final class PetIOUtil {
         }
     }
 
-    // ---- Reflection cache for setShoulderEntityLeft / setShoulderEntityRight ----
+    // ---- setShoulderEntityLeft / setShoulderEntityRight 的反射缓存 ----
 
-    /** Sentinel Method used to mark "this side has no setter" in SHOULDER_SETTER_CACHE. */
+    /** 用于在 SHOULDER_SETTER_CACHE 中标记“该侧没有 setter”的哨兵 Method。 */
     private static final Method NO_METHOD = sentinelMethod();
 
     private static Method sentinelMethod() {
         try {
-            // Any readily available method; never actually invoked.
+            // 任意一个现成可用的方法；实际从不会被调用。
             return Object.class.getDeclaredMethod("getClass");
         } catch (NoSuchMethodException e) {
             throw new RuntimeException(e);
         }
     }
 
-    /** Cache key: true = left, false = right. Value: the setter Method, or NO_METHOD if absent. */
+    /** 缓存键：true = 左，false = 右。值：setter Method，若不存在则为 NO_METHOD。 */
     private static final ConcurrentHashMap<Boolean, Method> SHOULDER_SETTER_CACHE = new ConcurrentHashMap<>();
 
     /**
-     * Invoke the private setShoulderEntityLeft/Right method on the player.
-     * Uses a cached Method to avoid repeated getDeclaredMethod + setAccessible calls.
+     * 在玩家上调用私有的 setShoulderEntityLeft/Right 方法。
+     * 使用缓存的 Method 以避免重复的 getDeclaredMethod + setAccessible 调用。
      */
     public static void setShoulderEntity(ServerPlayer player, boolean left, CompoundTag tag) {
         try {

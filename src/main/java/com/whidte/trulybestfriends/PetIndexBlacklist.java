@@ -7,7 +7,7 @@ import net.minecraft.nbt.Tag;
 
 import java.util.UUID;
 
-/** Pure NBT operations for the persistent pet-index blacklist. */
+/** 对持久化宠物索引黑名单进行纯 NBT 操作。 */
 final class PetIndexBlacklist {
     static final String KEY = "TBF_BlacklistedUUIDs";
 

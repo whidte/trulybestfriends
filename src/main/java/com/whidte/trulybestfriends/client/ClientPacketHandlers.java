@@ -1,6 +1,7 @@
 package com.whidte.trulybestfriends.client;
 
 import com.whidte.trulybestfriends.compat.SableCompat;
+import com.whidte.trulybestfriends.network.OpenPetScreenPacket;
 import com.whidte.trulybestfriends.network.PetWarningPacket;
 import com.whidte.trulybestfriends.network.SableSubLevelSyncPacket;
 import com.whidte.trulybestfriends.network.SyncPetDataPacket;
@@ -12,12 +13,13 @@ import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
- * Client-only handlers for server → client packets.
+ * 仅客户端的服务端 → 客户端数据包处理器。
  *
- * <p>This class must never be loaded on a dedicated server: it references
- * {@code net.minecraft.client.*} classes which do not exist there. It is only
- * reached through the dist-guarded lambdas in
- * {@link com.whidte.trulybestfriends.trulybestfriends#registerPayloads}.</p>
+ * <p>本类绝不能加载到专用服务端上：它引用了
+ * {@code net.minecraft.client.*} 类，而这些类在专用服务端并不存在。它只能
+ * 通过
+ * {@link com.whidte.trulybestfriends.trulybestfriends#registerPayloads} 中
+ * 受 dist 保护的 lambda 到达。</p>
  */
 public final class ClientPacketHandlers {
 
@@ -76,6 +78,19 @@ public final class ClientPacketHandlers {
                 screen.applyTeamData(packet);
             } else {
                 TrulyScreen.cacheTeamData(packet);
+            }
+        });
+    }
+
+    public static void handle(OpenPetScreenPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.screen instanceof TrulyScreen screen) {
+                // 标签页已经开着：直接切换选中项，不要重建整个界面。
+                screen.selectPet(packet.getPetUuid());
+            } else {
+                mc.setScreen(new TrulyScreen(
+                        Component.translatable("tab.trulybestfriends.pets"), packet.getPetUuid()));
             }
         });
     }

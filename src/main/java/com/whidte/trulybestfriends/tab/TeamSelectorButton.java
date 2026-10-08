@@ -11,7 +11,7 @@ import org.jetbrains.annotations.NotNull;
 
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 
-/** Selects which of the eight color-coded pet teams is active. */
+/** 选择八支带颜色标识的宠物队伍中哪一支处于激活状态。 */
 class TeamSelectorButton extends AbstractWidget {
 
     private static final int ICON_SIZE = 16;
@@ -195,7 +195,7 @@ class TeamSelectorButton extends AbstractWidget {
         return row * 3 + column;
     }
 
-    /** Vanilla container-screen slot highlight overlaid on the hovered banner. */
+    /** 叠加在悬停旗帜上的原版容器界面槽位高亮。 */
     private void renderSlotHighlight(GuiGraphics graphics, int x, int y) {
         RenderSystem.disableDepthTest();
         RenderSystem.colorMask(true, true, true, false);

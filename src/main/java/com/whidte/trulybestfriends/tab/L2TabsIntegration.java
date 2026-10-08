@@ -16,9 +16,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Items;
 
 /**
- * Isolated L2Tabs integration layer.
- * Only loaded via Class.forName when L2Tabs is present at runtime.
- * When absent, the mod functions normally via keybinding.
+ * 隔离的 L2Tabs 集成层。
+ * 仅在运行时存在 L2Tabs 时通过 Class.forName 加载。
+ * 不存在时，模组通过按键绑定正常工作。
  */
 public final class L2TabsIntegration {
     private static final Reg REG = new Reg(trulybestfriends.MODID);
@@ -31,7 +31,7 @@ public final class L2TabsIntegration {
 
     private L2TabsIntegration() {}
 
-    /** Forces static registration while NeoForge registries are still open. */
+    /** 在 NeoForge 注册表仍处于开放状态时强制进行静态注册。 */
     public static void register() {}
 
     public static void validateRegistration() {

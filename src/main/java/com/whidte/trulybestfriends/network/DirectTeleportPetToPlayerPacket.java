@@ -9,7 +9,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
 
-/** Teleports a released pet normally without attempting a ride swap. */
+/** 以常规方式传送一只已释放的宠物，不尝试骑乘交换。 */
 public class DirectTeleportPetToPlayerPacket implements CustomPacketPayload {
     public static final Type<DirectTeleportPetToPlayerPacket> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "direct_teleport_pet_to_player"));

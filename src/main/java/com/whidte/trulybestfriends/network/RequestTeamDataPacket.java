@@ -8,7 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-/** Client → Server: request the current formation team data. */
+/** 客户端 → 服务端：请求当前的阵型队伍数据。 */
 public class RequestTeamDataPacket implements CustomPacketPayload {
     public static final Type<RequestTeamDataPacket> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "request_team_data"));

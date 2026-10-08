@@ -10,7 +10,7 @@ import org.jetbrains.annotations.NotNull;
 
 import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 
-/** Center button for summoning every member of the selected team. */
+/** 用于召唤已选队伍全部成员的居中按钮。 */
 class SquadSummonButton extends AbstractWidget {
 
     private static final Component LABEL = Component.translatable("trulybestfriends.action.squad_summon");

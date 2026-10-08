@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.ToIntFunction;
 
 import com.whidte.trulybestfriends.Config;
 import com.whidte.trulybestfriends.compat.SableCompat;
@@ -45,7 +47,7 @@ public class TrulyScreen extends Screen {
 
 	protected int leftPos, topPos, imageWidth, imageHeight;
 
-	// --- State ---
+	// --- 状态 ---
 	List<UUID> petUuids = new ArrayList<>();
 	Map<UUID, CompoundTag> petNbtCache = new LinkedHashMap<>();
 	private final Map<UUID, LivingEntity> previewEntities = new java.util.HashMap<>();
@@ -55,15 +57,19 @@ public class TrulyScreen extends Screen {
 	int selectedPetIndex = -1;
 	int scrollOffset = 0;
 	float currentScale = 17;
-	/** Auto-computed scale for the currently selected entity; scroll-zoom
-	 * bounds are derived proportionally from this value so that every
-	 * entity (tiny pet or huge dragon) has the same relative zoom range. */
+	/** 当前选中实体自动计算出的缩放值；滚轮缩放的
+	 * 边界按比例由此值推导，使每个
+	 * 实体（微小宠物或巨型龙）都拥有相同的相对缩放范围。 */
 	float referenceScale = 17;
 	float rotX = DEFAULT_ROT_X;
 	float rotY = DEFAULT_ROT_Y;
 	boolean isDraggingEntity = false;
 	boolean isDraggingScrollbar = false;
 	boolean sortNeeded = false;
+	/** 列表当前的排序依据。 */
+	private ListSortMode sortMode = ListSortMode.PRIORITY;
+	/** 列表当前的排序方向：true 为升序（优先级数值小的在前，或注册时间早的在前）。 */
+	private boolean sortAscending = true;
 	int tickCounter = 0;
 	UUID deletePromptUuid;
 	HealButton healButton;
@@ -71,6 +77,8 @@ public class TrulyScreen extends Screen {
 	ActionButton actionButton;
 	SummonToPlayerButton summonToPlayerButton;
 	private SpeciesDropdown speciesFilterButton;
+	SortModeDropdown sortModeDropdown;
+	SortToggleButton sortButton;
 	SquadButton squadButton;
 	DetailsButton detailsButton;
 	SquadSummonButton squadSummonButton;
@@ -102,51 +110,105 @@ public class TrulyScreen extends Screen {
 	long warningUntil;
 	UUID warningUuid;
 
-	/** Full-list batches received before the screen was open. Applied in order on init(). */
+	/** 界面打开前收到的全量列表批次。在 init() 时按顺序应用。 */
 	private static final List<com.whidte.trulybestfriends.network.SyncPetDataPacket> pendingSyncPackets = new ArrayList<>();
 
-	/** Latest team data received while the screen was closed. Applied on next init(). */
+	/** 界面关闭期间收到的最新队伍数据。在下一次 init() 时应用。 */
 	private static TeamDataPacket pendingTeamData;
 
-	/** Cache state from before the current batched full-list snapshot. */
+	/** 当前分批全量列表快照之前的缓存状态。 */
 	private Map<UUID, CompoundTag> fullListPreviousNbt;
 	private Map<UUID, CompoundTag> pendingFullListNbt;
 	private Map<UUID, Integer> pendingFullListPriorities;
 
-	/** The pet UUID that was selected when saveSelectionThenReload was called.
-     *  Used by applySyncPacket(MODE_FULL_LIST) to restore the selection. */
+	/** 调用 saveSelectionThenReload 时被选中的宠物 UUID。
+     *  供 applySyncPacket(MODE_FULL_LIST) 用于还原选中项。 */
     private UUID lastRequestedSelection;
+
+    /** 界面首次 init 时要选中的宠物 UUID。由「已被收回」消息里点击名字打开时写入，
+     *  在 saveSelectionThenReload 里消费一次后清空，避免影响后续的列表刷新。 */
+    private UUID initialSelection;
 
     public Object tabManager;
 
-	// --- Constructor ---
+	// --- 构造函数 ---
 	public TrulyScreen(Component title) {
+		this(title, null);
+	}
+
+	/**
+	 * @param initialSelection 打开后要选中的宠物；为 null 时沿用列表首项。
+	 */
+	public TrulyScreen(Component title, UUID initialSelection) {
 		super(title);
 		this.imageWidth = 176;
 		this.imageHeight = 166;
+		this.initialSelection = initialSelection;
 	}
 
 	net.minecraft.client.gui.Font font() {
 		return this.font;
 	}
 
-	/** Expose protected addRenderableWidget for L2Tabs TabManager. */
+	/** 为 L2Tabs TabManager 暴露受保护的 addRenderableWidget。 */
 	public <T extends net.minecraft.client.gui.components.events.GuiEventListener & net.minecraft.client.gui.components.Renderable & net.minecraft.client.gui.narration.NarratableEntry> T addWidgetPublic(T widget) {
 		return this.addRenderableWidget(widget);
 	}
 
-	// === Selection helpers ===
+	// === 选中辅助方法 ===
 
 	UUID getSelectedUuid() {
 		if (selectedPetIndex < 0 || selectedPetIndex >= petUuids.size()) return null;
 		return petUuids.get(selectedPetIndex);
 	}
 
-	/** Called from PetWarningPacket (client thread) to show a timed warning at the coordinates position. */
+	/** 由 PetWarningPacket（客户端线程）调用，在坐标位置显示限时警告。 */
 	public void showWarning(Component msg, UUID uuid) {
 		this.warningText = msg;
 		this.warningUntil = System.currentTimeMillis() + 3000;
 		this.warningUuid = uuid;
+	}
+
+	/**
+	 * 由 OpenPetScreenPacket（客户端线程）调用，把列表选中项切到指定宠物。
+	 *
+	 * <p>界面已经开着时用它，比重建整个界面更稳妥（不会把搜索/筛选状态清掉）。
+	 * 若该宠物还不在当前列表里（例如首次打开时全量列表快照尚未到达），
+	 * 就记下来交给 {@code applySyncPacket} 通过 {@link #lastRequestedSelection} 还原。</p>
+	 */
+	public void selectPet(UUID uuid) {
+		if (uuid == null) return;
+		int index = petUuids.indexOf(uuid);
+		// 被当前的搜索/物种筛选挡住了：清掉筛选再找一次，
+		// 否则玩家点了名字却毫无反应。
+		if (index < 0 && isListFiltered()) {
+			clearListFilters();
+			index = petUuids.indexOf(uuid);
+		}
+		if (index < 0) {
+			initialSelection = uuid;
+			lastRequestedSelection = uuid;
+			return;
+		}
+		selectedPetIndex = index;
+		scrollOffset = (index / COLUMNS) * COLUMNS;
+		snapScrollOffset();
+		finishPetListUpdate(false, true);
+	}
+
+	/** 列表当前是否被搜索或物种筛选收窄过。 */
+	private boolean isListFiltered() {
+		return searchMode || !speciesFilter.isEmpty() || !searchQuery.isEmpty();
+	}
+
+	/** 清空搜索词与物种筛选（不改搜索/筛选模式本身）。 */
+	private void clearListFilters() {
+		speciesFilter = "";
+		searchQuery = "";
+		if (searchBox != null) searchBox.setValue("");
+		applyPetFilters();
+		// 物种筛选按钮的文字由它自己维护，程序化改值后要重建一次才不会显示旧值。
+		if (!searchMode) refreshSpeciesFilterButton();
 	}
 
 	CompoundTag getSelectedNbt() {
@@ -198,7 +260,7 @@ public class TrulyScreen extends Screen {
 
 	/** 数据损坏（无 Pos 或 Dimension）的宠物：单击直接删除，无需两步确认。
 	 *  与 isSelectedPetLost() 的区别：仅检查数据完整性，不包含 Lost 标志。
-	 *  Lost=true 仅表示实体当前未加载（可能在卸载区块中），数据本身可能完好，
+	 *  NBT 的 Lost=true 仅表示实体当前未加载（可能在卸载区块中），数据本身可能完好，
 	 *  不应跳过确认。 */
 	boolean isSelectedPetDataCorrupted() {
 		CompoundTag nbt = getSelectedNbt();
@@ -237,7 +299,7 @@ public class TrulyScreen extends Screen {
 		previewEntities.clear();
 	}
 
-	// === Lifecycle ===
+	// === 生命周期 ===
 
 	@Override
 	public void init() {
@@ -248,7 +310,7 @@ public class TrulyScreen extends Screen {
 		this.leftPos = (this.width - this.imageWidth) / 2;
 		this.topPos = (this.height - this.imageHeight) / 2;
 
-		// L2Tabs tab bar integration
+		// L2Tabs 标签栏集成
 		if (net.neoforged.fml.ModList.get().isLoaded("l2tabs")) {
 			try {
 				Class.forName("com.whidte.trulybestfriends.tab.L2TabsIntegration")
@@ -266,12 +328,16 @@ public class TrulyScreen extends Screen {
 
 	@Override
 	public void removed() {
-		// Clean up any preview entities left behind from PetEntry renders
+		// 清理 PetEntry 渲染遗留的预览实体
 		super.removed();
 	}
 
 	private void saveSelectionThenReload() {
 		UUID selectedUuid = getSelectedUuid();
+		// 首次 init 时还没有选中项：若本次是「点击已被收回的宠物名」打开的，
+		// 就用那一只作为初始选中项。只消费一次，后续刷新不受影响。
+		if (selectedUuid == null && initialSelection != null) selectedUuid = initialSelection;
+		initialSelection = null;
 		lastRequestedSelection = selectedUuid;
 
 		if (pendingTeamData != null) {
@@ -286,7 +352,7 @@ public class TrulyScreen extends Screen {
 		selectedPetIndex = -1;
 		scrollOffset = 0;
 
-		// 1. Apply any cached full-list snapshot (arrived while screen was closed).
+		// 1. 应用任何已缓存的全量列表快照（界面关闭期间收到）。
 		if (!pendingSyncPackets.isEmpty()) {
 			List<com.whidte.trulybestfriends.network.SyncPetDataPacket> packets = new ArrayList<>(pendingSyncPackets);
 			pendingSyncPackets.clear();
@@ -295,8 +361,8 @@ public class TrulyScreen extends Screen {
 			}
 		}
 
-		// 2. Singleplayer: also load from disk for instant feedback (server is
-		//    same process, no network round-trip needed).
+		// 2. 单人模式：同时从磁盘加载以即时反馈（服务端是
+		//    同一进程，无需网络往返）。
 		Minecraft mc = getMinecraft();
 		if (mc.hasSingleplayerServer() && mc.getSingleplayerServer() != null && petNbtCache.isEmpty()) {
 			PetDataLoader.loadAll(mc, petNbtCache, petPriorities);
@@ -305,10 +371,10 @@ public class TrulyScreen extends Screen {
 		rebuildFilteredPetUuids(selectedUuid, true);
 		rebuildPetWidgets();
 
-		// 3. Always ask the server for a fresh full-list snapshot (works for both
-		//    singleplayer and multiplayer). The reply updates the cache via
-		//    applySyncPacket(). In singleplayer this overwrites the disk-loaded
-		//    data with the authoritative server version.
+		// 3. 始终向服务端请求一份全新的全量列表快照（单人
+		//    与多人模式都适用）。回复会通过
+		//    applySyncPacket() 更新缓存。在单人模式下这会用
+		//    权威的服务端版本覆盖磁盘加载的数据。
 		if (mc.player != null && mc.getConnection() != null) {
 			PacketDistributor.sendToServer(
 					com.whidte.trulybestfriends.network.RequestPetDataPacket.requestFullList());
@@ -364,6 +430,20 @@ public class TrulyScreen extends Screen {
 				this.topPos + LIST_CONTROLS_OFFSET_Y,
 				this);
 		this.addRenderableWidget(searchModeButton);
+
+		sortModeDropdown = new SortModeDropdown(
+				this.leftPos + SORT_MODE_SELECTOR_X,
+				this.topPos + LIST_CONTROLS_OFFSET_Y,
+				SORT_MODE_SELECTOR_WIDTH,
+				LIST_CONTROL_HEIGHT,
+				this,
+				sortMode,
+				this::setSortMode);
+		this.addRenderableWidget(sortModeDropdown);
+
+		sortButton = new SortToggleButton(
+				this.leftPos + SORT_BUTTON_X, this.topPos + SORT_BUTTON_Y, this);
+		this.addRenderableWidget(sortButton);
 	}
 
 	private void refreshSpeciesFilterButton() {
@@ -496,7 +576,7 @@ public class TrulyScreen extends Screen {
 				&& displayName.toLowerCase(Locale.ROOT).contains(query));
 	}
 
-	// === Real-time refresh ===
+	// === 实时刷新 ===
 
 	@Override
 	public void tick() {
@@ -509,9 +589,9 @@ public class TrulyScreen extends Screen {
 	}
 
 	private void refreshSelectedFromDisk() {
-		// Replaced by server-driven sync: ask the server for the latest NBT of
-		// the selected pet.  Server replies with SyncPetDataPacket (update/delete),
-		// handled in applySyncPacket().  No client disk I/O.
+		// 已由服务端驱动的同步取代：向服务端请求所选宠物的
+		// 最新 NBT。服务端以 SyncPetDataPacket（更新/删除）回复，
+		// 在 applySyncPacket() 中处理。无客户端磁盘 I/O。
 		UUID selUuid = getSelectedUuid();
 		if (selUuid == null) return;
 		Minecraft mc = getMinecraft();
@@ -520,8 +600,8 @@ public class TrulyScreen extends Screen {
 				com.whidte.trulybestfriends.network.RequestPetDataPacket.requestSelected(selUuid));
 	}
 
-	/** Apply a server-pushed sync packet. Called from SyncPetDataPacket.handle
-	 *  when this screen is open. */
+	/** 应用服务端推送的同步数据包。当此界面打开时由 SyncPetDataPacket.handle
+	 *  调用。 */
 	public void applySyncPacket(com.whidte.trulybestfriends.network.SyncPetDataPacket packet) {
 		serverTimeOffsetMs = packet.getServerTime() - System.currentTimeMillis();
 		switch (packet.getMode()) {
@@ -613,11 +693,11 @@ public class TrulyScreen extends Screen {
 		}
 	}
 
-	/** Cache a sync packet that arrived while the screen was not open.
-	 *  Applied on next init(). */
+	/** 缓存界面未打开期间收到的同步数据包。
+	 *  在下一次 init() 时应用。 */
 	public static void cacheSyncPacket(com.whidte.trulybestfriends.network.SyncPetDataPacket packet) {
-		// Only full-list snapshots are worth caching for the next screen open;
-		// updates/deletes for a closed screen are stale and can be dropped.
+		// 只有全量列表快照值得为下一次界面打开而缓存；
+		// 界面关闭期间的更新/删除已过期，可以丢弃。
 		if (packet.getMode() == com.whidte.trulybestfriends.network.SyncPetDataPacket.MODE_FULL_LIST) {
 			if (packet.isFirstBatch()) pendingSyncPackets.clear();
 			else if (pendingSyncPackets.isEmpty()) return;
@@ -664,9 +744,9 @@ public class TrulyScreen extends Screen {
 		}
 	}
 
-	// === Formation team data ===
+	// === 编队队伍数据 ===
 
-	/** Replace the cached formation team data with an authoritative server snapshot. */
+	/** 用权威的服务端快照替换缓存的编队队伍数据。 */
 	public void applyTeamData(TeamDataPacket packet) {
 		CompoundTag data = packet.teamData();
 		if (data.contains("Capacity")) {
@@ -694,7 +774,7 @@ public class TrulyScreen extends Screen {
 		teamMembers.putAll(rebuilt);
 	}
 
-	/** Cache team data received while the screen was closed. */
+	/** 缓存界面关闭期间收到的队伍数据。 */
 	public static void cacheTeamData(TeamDataPacket packet) {
 		pendingTeamData = packet;
 	}
@@ -712,7 +792,7 @@ public class TrulyScreen extends Screen {
 		return slots != null ? slots.get(slot) : null;
 	}
 
-	/** Returns the formation slot under the mouse, or -1. */
+	/** 返回鼠标下方的编队槽位，若没有则返回 -1。 */
 	private int squadSlotAt(double mouseX, double mouseY) {
 		int gridX = this.leftPos + SQUAD_GRID_X;
 		int gridY = this.topPos + SQUAD_GRID_Y;
@@ -793,21 +873,21 @@ public class TrulyScreen extends Screen {
 	}
 
 	private void cleanExpiredCooldowns() {
-		// Cooldowns never exceed recallCooldownMs; keep 2x as safety margin for clock skew.
+		// 冷却时间不会超过 recallCooldownMs；保留 2 倍作为时钟偏差的安全余量。
 		long cutoff = System.currentTimeMillis() - (Config.recallCooldownMs * 2L);
 		cooldowns.values().removeIf(t -> t < cutoff);
 	}
 
-	// === Scale ===
+	// === 缩放 ===
 
 	void adjustScaleForCurrentPet() {
 		UUID uuid = getSelectedUuid();
 		if (uuid == null) return;
 		LivingEntity entity = getPreviewEntity(uuid);
 		if (entity == null) return;
-		// Store the raw auto-computed scale as the reference for scroll-zoom
-		// bounds.  currentScale is reset to it so switching pets discards the
-		// previous pet's manual zoom.
+		// 存储原始自动计算的缩放值，作为滚轮缩放的参考
+		// 边界。currentScale 被重置为该值，这样切换宠物时会丢弃
+		// 上一只宠物的手动缩放。
 		this.referenceScale = computePreviewScale(entity, BASE_SCALE);
 		this.currentScale = this.referenceScale;
 	}
@@ -830,53 +910,53 @@ public class TrulyScreen extends Screen {
 	}
 
 	/**
-	 * Computes the scale parameter for
-	 * {@link InventoryScreen#renderEntityInInventory}, following the approach
-	 * used by Ice &amp; Fire's {@code GuiDragon}.
+	 * 计算
+	 * {@link InventoryScreen#renderEntityInInventory} 的缩放参数，采用
+	 * Ice &amp; Fire 的 {@code GuiDragon} 所使用的做法。
 	 *
-	 * <p>Forge's {@link Entity#getScale()} reflects the entity's visual scale
-	 * attribute (e.g., IaF dragons return a large value at higher stages, the
-	 * Ender Dragon returns ~1.0 but its model is already oversized).  Dividing
-	 * a base size by this scale yields a parameter that keeps any entity
-	 * inside the preview area, including multipart entities whose bounding
-	 * box alone is far smaller than their actual model.</p>
+	 * <p>Forge 的 {@link Entity#getScale()} 反映实体的可视缩放
+	 * 属性（例如 IaF 龙在更高阶段返回较大的值，
+	 * 末影龙返回约 1.0 但其模型本身就已超大）。将
+	 * 基础尺寸除以该缩放值得到的参数能让任何实体
+	 * 保持在预览区域内，包括那些碰撞箱本身
+	 * 远小于实际模型的多部件实体。</p>
 	 *
-	 * <p>For ordinary entities ({@code getScale() == 1.0}) we use their standing
-	 * dimensions with the classic bounding-box heuristic. Using the current
-	 * bounding box would make sleeping or crouching pets appear much larger in
-	 * the preview because those poses temporarily reduce entity height.</p>
+	 * <p>对于普通实体（{@code getScale() == 1.0}），我们使用其站立
+	 * 尺寸结合经典的碰撞箱启发式。使用当前
+	 * 碰撞箱会让睡觉或蹲伏的宠物在
+	 * 预览中显得大很多，因为这些姿势会暂时降低实体高度。</p>
 	 *
-	 * <p>No fixed numeric clamp is applied here — the caller stores the result
-	 * as {@code referenceScale} and the scroll-zoom handler clamps
-	 * proportionally around it.</p>
+	 * <p>此处不应用固定的数值钳制 —— 调用方将结果
+	 * 存储为 {@code referenceScale}，由滚轮缩放处理器
+	 * 围绕它按比例进行钳制。</p>
 	 *
-	 * @param entity  the preview entity (must not be null)
-	 * @param baseSize  the reference size used for ordinary entities
-	 * @return the raw auto-computed scale (unclamped)
+	 * @param entity  预览实体（不能为 null）
+	 * @param baseSize  用于普通实体的参考尺寸
+	 * @return 原始自动计算的缩放值（未钳制）
 	 */
 	static float computePreviewScale(LivingEntity entity, float baseSize) {
 		float scale = entity.getScale();
 		boolean multipart = entity.getParts() != null && entity.getParts().length > 0;
 		if (scale > 1.0001f) {
-			// Scaled entity (IaF dragon, ...): use the IaF formula.
+			// 已缩放实体（IaF 龙……）：使用 IaF 公式。
 			return baseSize / scale;
 		}
-		// Ordinary entity: use stable standing dimensions rather than a
-		// pose-dependent current bounding box.
+		// 普通实体：使用稳定的站立尺寸，而非
+		// 依赖姿势的当前碰撞箱。
 		var standingDimensions = entity.getDimensions(Pose.STANDING);
 		float maxDim = Math.max(standingDimensions.width(), standingDimensions.height());
 		if (maxDim <= 0) return baseSize;
 		float computed = baseSize * (HORSE_MAX_DIM / maxDim);
-		// Multipart entities whose getScale() == 1 (e.g. the Ender Dragon)
-		// have very large bounding boxes that make the heuristic produce a
-		// tiny value.  Apply a floor so the model stays visible.
+		// getScale() == 1 的多部件实体（例如末影龙）
+		// 其碰撞箱非常大，会让该启发式算出一个
+		// 极小的值。应用一个下限，使模型保持可见。
 		if (multipart) {
 			return Math.max(computed, baseSize * 0.25f);
 		}
 		return computed;
 	}
 
-	// === Scroll / Sorting ===
+	// === 滚动 / 排序 ===
 
 	private int getMaxScrollOffset() {
 		return Math.max(0, (petUuids.size() - 1) / COLUMNS - (MAX_VISIBLE / COLUMNS - 1)) * COLUMNS;
@@ -911,8 +991,62 @@ public class TrulyScreen extends Screen {
 	}
 
 	private void sortPetUuids() {
-		petUuids.sort(Comparator.comparingInt(uuid -> PetIOUtil.clampPriority(
-				petPriorities.getOrDefault(uuid, PetIOUtil.DEFAULT_PRIORITY))));
+		petUuids.sort(petSortComparator(sortMode, sortAscending,
+				uuid -> PetIOUtil.clampPriority(
+						petPriorities.getOrDefault(uuid, PetIOUtil.DEFAULT_PRIORITY)),
+				petNbtCache::get));
+	}
+
+	/**
+	 * 按给定排序依据与方向构造宠物排序器。
+	 *
+	 * <p>抽成静态纯函数以便脱离界面状态直接测试；两个取值函数分别提供
+	 * 宠物的优先级与快照标签，这样比较器本身不依赖任何界面字段。</p>
+	 */
+	static <T> Comparator<T> petSortComparator(ListSortMode mode, boolean ascending,
+	                                          ToIntFunction<T> priorityOf,
+	                                          Function<T, CompoundTag> nbtOf) {
+		Comparator<T> byPriority = Comparator.comparingInt(priorityOf);
+		Comparator<T> comparator = switch (mode) {
+			case PRIORITY -> byPriority;
+			// 缺失注册时间戳的旧宠物读作 0，统一排到“最早”的一端；
+			// 时间戳相同时退化为按优先级排列，避免呈现出无意义的哈希顺序。
+			case REGISTERED_AT -> Comparator
+					.comparingLong((T pet) -> PetIOUtil.registeredAtFrom(nbtOf.apply(pet)))
+					.thenComparing(byPriority);
+			// 生命值比例越低越“需要治疗”，升序时排在最前；
+			// 比例相同时同样退化为按优先级排列（例如一群满血宠物）。
+			case HEALTH -> Comparator
+					.comparingDouble((T pet) -> (double) PetIOUtil.healthRatioFrom(nbtOf.apply(pet)))
+					.thenComparing(byPriority);
+		};
+		// reversed() 只反转方向：比较结果相同时仍为 0，稳定排序会保留它们原有的相对顺序。
+		return ascending ? comparator : comparator.reversed();
+	}
+
+	/** 当前是否按升序排列列表。 */
+	boolean isSortAscending() {
+		return sortAscending;
+	}
+
+	/** 在升序与降序之间切换。 */
+	void toggleSortDirection() {
+		sortAscending = !sortAscending;
+		resortPetList();
+	}
+
+	/** 切换排序依据并立即重排列表。 */
+	void setSortMode(ListSortMode mode) {
+		if (mode == null || mode == sortMode) return;
+		sortMode = mode;
+		resortPetList();
+	}
+
+	/** 按当前排序设置重新过滤并重排列表，按 UUID 保留当前选中项，然后回到列表顶部。 */
+	private void resortPetList() {
+		applyPetFilters();
+		scrollOffset = 0;
+		rebuildPetWidgets();
 	}
 
 	void onShiftReleased() {
@@ -928,12 +1062,12 @@ public class TrulyScreen extends Screen {
 	}
 
 	// ============================
-	//        RENDER
+	//        渲染
 	// ============================
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-		// Draw the panel first, then layer custom widgets and overlays on top.
+		// 先绘制面板，再在其上叠加自定义控件与覆盖层。
 		this.renderBackground(g, mouseX, mouseY, partialTick);
 		g.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
 		if (!squadMode) {
@@ -949,14 +1083,14 @@ public class TrulyScreen extends Screen {
 			renderSquadGrid(g, mouseX, mouseY);
 		}
 		PetEntry selectedEntry = null;
-		SpeciesDropdown speciesDropdown = null;
+		List<net.minecraft.client.gui.components.Renderable> dropdowns = new ArrayList<>();
 		for (GuiEventListener listener : this.children()) {
-			if (listener instanceof SpeciesDropdown dropdown) {
-				speciesDropdown = dropdown;
+			if (listener instanceof SpeciesDropdown || listener instanceof SortModeDropdown) {
+				dropdowns.add((net.minecraft.client.gui.components.Renderable) listener);
 			} else if (listener instanceof PetEntry entry && entry.isSelected()) {
 				selectedEntry = entry;
 			} else if (listener instanceof DeleteButton) {
-				// Render above the entity preview below so large models cannot cover the X.
+				// 在下方实体预览之上渲染，这样大型模型不会盖住 X。
 			} else if (listener instanceof net.minecraft.client.gui.components.Renderable renderable) {
 				renderable.render(g, mouseX, mouseY, partialTick);
 			}
@@ -983,26 +1117,28 @@ public class TrulyScreen extends Screen {
 					() -> deleteButton.render(g, mouseX, mouseY, partialTick));
 		}
 
-		// Keep the expanded dropdown above pet entries and the pet-list scrollbar.
-		if (speciesDropdown != null) {
-			SpeciesDropdown dropdown = speciesDropdown;
-			renderAtDepth(g, SPECIES_DROPDOWN_OVERLAY_Z,
+		// 保持展开的下拉框位于宠物条目和宠物列表滚动条之上。
+		for (net.minecraft.client.gui.components.Renderable dropdown : dropdowns) {
+			renderAtDepth(g, LIST_DROPDOWN_OVERLAY_Z,
 					() -> dropdown.render(g, mouseX, mouseY, partialTick));
 		}
 
-		// L2Tabs tooltip overlay (must render after children)
+		// L2Tabs 悬浮提示覆盖层（必须在子控件之后渲染）
 		if (tabManager != null) {
 			try {
 				tabManager.getClass()
 						.getMethod("onToolTipRender", GuiGraphics.class, int.class, int.class)
 						.invoke(tabManager, g, mouseX, mouseY);
 			} catch (ReflectiveOperationException ignored) {
-				// Optional L2Tabs versions do not all expose a tooltip hook.
+				// 可选的 L2Tabs 版本并非都暴露悬浮提示钩子。
 			}
 		}
 
 		if (squadButton != null) {
 			squadButton.renderTooltip(g, mouseX, mouseY);
+		}
+		if (sortButton != null) {
+			sortButton.renderTooltip(g, mouseX, mouseY);
 		}
 		if (detailsButton != null) {
 			detailsButton.renderTooltip(g, mouseX, mouseY);
@@ -1034,7 +1170,7 @@ public class TrulyScreen extends Screen {
 		}
 	}
 
-	/** Hover tooltip for empty formation slots: add hints, or the red full-team warning. */
+	/** 空编队槽位的悬停悬浮提示：添加提示，或红色的队伍已满警告。 */
 	private void renderEmptySlotTooltip(GuiGraphics g, int mouseX, int mouseY) {
 		Map<Integer, UUID> members = selectedTeamSlots();
 		int slot = squadMode ? squadSlotAt(mouseX, mouseY) : -1;
@@ -1133,27 +1269,27 @@ public class TrulyScreen extends Screen {
 		int ex = this.leftPos + ENTITY_PREVIEW_OFFSET_X;
 		int ey = this.topPos + ENTITY_PREVIEW_OFFSET_Y;
 
-		// For multipart / scaled entities (IaF dragons, Ender Dragon, ...)
-		// the model animation is driven by yBodyRot and a single full turn
-		// (360°) is required before the model lines up again — hence the
-		// "need to drag 720° before it looks right" symptom.  Ice & Fire's
-		// own GuiDragon avoids this by NOT touching yBodyRot / yHeadRot /
-		// setYRot at all (leaving them at the default 0°) and relying solely
-		// on the quaternion passed to renderEntityInInventory.
+		// 对于多部件 / 已缩放实体（IaF 龙、末影龙……）
+		// 其模型动画由 yBodyRot 驱动，需要完整转一圈
+		//（360°）模型才会重新对齐 —— 这就是
+		//“必须拖拽 720° 才看起来正常”的现象。Ice & Fire 自己的
+		// GuiDragon 通过完全不触碰 yBodyRot / yHeadRot /
+		// setYRot（将它们保持在默认的 0°）并仅依赖
+		// 传给 renderEntityInInventory 的四元数来避免这一点。
 		//
-		// We replicate that: for multipart entities (detected via getParts()
-		// or getScale() > 1) we leave yBodyRot at 0° and fold the user's
-		// horizontal drag (rotX) into the quaternion via rotateY, so the
-		// model stays in its canonical pose while the whole rendered entity
-		// still rotates with the mouse.  Ordinary pets keep the original
-		// yBodyRot-driven behaviour.
+		// 我们复刻这一做法：对于多部件实体（通过 getParts()
+		// 或 getScale() > 1 检测）我们将 yBodyRot 保持为 0°，并把用户的
+		// 水平拖拽（rotX）经由 rotateY 折入四元数，使
+		// 模型保持其规范姿态，而整个渲染出的实体
+		// 仍随鼠标旋转。普通宠物保持原来的
+		// 由 yBodyRot 驱动的行为。
 		boolean multipart = isMultipartPreview(entity);
 		Quaternionf quat;
 		Quaternionf quatPitch;
 		if (multipart) {
-			// Auto-detect Y base offset from the entity's model head position.
-			// Standard models (head at -Z) need 0; non-standard (head at +Z,
-			// e.g. Ice & Fire dragons) need PI to face the camera.
+			// 从实体模型头部位置自动检测 Y 基准偏移。
+			// 标准模型（头部在 -Z）需要 0；非标准模型（头部在 +Z，
+			// 例如 Ice & Fire 龙）需要 PI 才能面向相机。
 			float yBase = detectMultipartYBase(entity);
 			float pitch = multipartPitchRadians(rotY);
 			quat = buildMultipartPose(
@@ -1176,10 +1312,10 @@ public class TrulyScreen extends Screen {
 		float currentHealth = nbt.contains("Health") ? nbt.getFloat("Health") : 0;
 		float maxHealth = nbt.contains("MaxHealth") ? nbt.getFloat("MaxHealth") : 0;
 
-		// If MaxHealth is missing or zero, try to recover from the vanilla
-		// Attributes list.  Prefer the top-level MaxHealth (written by
-		// savePetData from getAttributeValue) over Attributes.Base, because
-		// Base holds the untamed base value (e.g. 20 for a 40-HP tamed wolf).
+		// 若 MaxHealth 缺失或为零，尝试从原版的
+		// Attributes 列表恢复。优先使用顶层 MaxHealth（由
+		// savePetData 从 getAttributeValue 写入）而非 Attributes.Base，因为
+		// Base 保存的是未驯服时的基础值（例如 40 HP 的已驯服狼为 20）。
 		if (maxHealth <= 0 && nbt.contains("Attributes")) {
 			for (Tag tag : nbt.getList("Attributes", 10)) {
 				CompoundTag attr = (CompoundTag) tag;
@@ -1190,12 +1326,12 @@ public class TrulyScreen extends Screen {
 			}
 		}
 
-		// Guard against missing / zero-max-health edge cases (modded creatures
-		// that don't register MAX_HEALTH, or NBT from older mod versions).
+		// 防范缺失 / 最大生命值为零的边界情况（未注册 MAX_HEALTH 的
+		// 模组生物，或来自旧版模组的 NBT）。
 		if (maxHealth <= 0) maxHealth = 20;
 		if (currentHealth < 0) currentHealth = 0;
 
-		// Clamp ratio to [0, 1] so the bar never overflows its background.
+		// 将比例钳制到 [0, 1]，使血条永不溢出其背景。
 		float healthRatio = Mth.clamp(currentHealth / maxHealth, 0f, 1f);
 
 		int hx = this.leftPos + HEART_X;
@@ -1254,12 +1390,12 @@ public class TrulyScreen extends Screen {
 		int lx = this.leftPos + PET_INFO_OFFSET_X;
 		int ly = this.topPos + LOCATION_Y;
 
-		// Dead pet: show revive info with item icon
+		// 死亡宠物：显示带物品图标的复活信息
 		if (nbt.contains("Health") && nbt.getFloat("Health") <= 0) {
 			coordsHovered = false;
 			tpDimKey = null;
 			tpSubLevelId = null;
-			// Whitelisted entity types cannot be revived: show warning instead of item icon
+			// 白名单实体类型无法复活：显示警告而非物品图标
 			if (nbt.contains("EntityType") && Config.isNoReviveEntity(nbt.getString("EntityType"))) {
 				Component warning = Component.translatable("trulybestfriends.revive.not_revivable")
 						.withStyle(net.minecraft.ChatFormatting.RED);
@@ -1316,7 +1452,7 @@ public class TrulyScreen extends Screen {
 		int infoRight = this.leftPos + this.imageWidth - 4;
 		int maxTextWidth = infoRight - lx;
 
-		// Line 1 (ly): world name, or "已收回" for recalled pets
+		// 第 1 行 (ly)：世界名称，对已收回的宠物显示 "已收回"
 		if (isRecalled) {
 			coordsHovered = false;
 			tpDimKey = null;
@@ -1335,7 +1471,7 @@ public class TrulyScreen extends Screen {
 			drawClippedScrollingString(g, dimText, lx, ly, maxTextWidth, 0x000000);
 		}
 
-		// Line 2 (ly + 10): timed warning or coordinates
+		// 第 2 行 (ly + 10)：限时警告或坐标
 		if (warningText != null && System.currentTimeMillis() < warningUntil
 				&& warningUuid != null && warningUuid.equals(getSelectedUuid())) {
 			int warnColor = isRecalled ? 0xFFFF55 : 0xFF5555;
@@ -1393,7 +1529,7 @@ public class TrulyScreen extends Screen {
 	}
 
 	// ============================
-	//        MOUSE INPUT
+	//        鼠标输入
 	// ============================
 
 	@Override
@@ -1407,12 +1543,12 @@ public class TrulyScreen extends Screen {
 			return true;
 		}
 		if (hasSelection() && isOverEntityPreview(mouseX, mouseY)) {
-			// Proportional zoom: each notch multiplies/divides by a fixed
-			// factor so the relative change per step is constant regardless
-			// of the current scale.  Bounds are proportional to the current
-			// entity's auto-computed referenceScale, so a huge dragon (small
-			// referenceScale) and a tiny pet (large referenceScale) each get
-			// the same relative zoom range instead of sharing fixed numbers.
+			// 按比例缩放：每一格都乘以/除以一个固定
+			// 因子，因此每步的相对变化与
+			// 当前缩放值无关且恒定。边界与当前
+			// 实体自动计算的 referenceScale 成正比，所以巨型龙（较小的
+			// referenceScale）和微小宠物（较大的 referenceScale）各自获得
+			// 相同的相对缩放范围，而不是共用固定数值。
 			float factor = verticalDelta > 0 ? 1.1f : (1f / 1.1f);
 			currentScale = Mth.clamp(currentScale * factor, referenceScale * 0.5f, referenceScale * 2.0f);
 			return true;
@@ -1471,7 +1607,12 @@ public class TrulyScreen extends Screen {
 				squadDragStartY = my;
 			}
 		}
-		if (speciesFilterButton != null && speciesFilterButton.mouseClicked(mx, my, button)) return true;
+		if (speciesFilterButton != null && speciesFilterButton.mouseClicked(mx, my, button)) {
+			// 两个下拉框互斥展开，避免同时弹出两个列表。
+			if (sortModeDropdown != null) sortModeDropdown.collapse();
+			return true;
+		}
+		if (sortModeDropdown != null && sortModeDropdown.mouseClicked(mx, my, button)) return true;
 		if (button == 0 && hasSelection() && isOverEntityPreview(mx, my)) {
 			isDraggingEntity = true;
 			return true;
@@ -1587,7 +1728,7 @@ public class TrulyScreen extends Screen {
 	}
 
 	// ============================
-	//        MISC
+	//        杂项
 	// ============================
 
 	@Override

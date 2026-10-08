@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Server-side registry for the short absolute-damage immunity granted after revival. */
+/** 服务端注册表，用于管理复活后授予的短暂绝对伤害免疫。 */
 public final class ReviveProtection {
     private static final Map<UUID, Protection> PROTECTIONS = new ConcurrentHashMap<>();
 

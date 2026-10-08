@@ -21,7 +21,7 @@ import org.lwjgl.glfw.GLFW;
 
 import java.util.UUID;
 
-/** Millisecond-precise hold state for repeat summon, bottle transition, and radial selection. */
+/** 用于重复召唤、瓶子切换与径向选择的毫秒级按住状态。 */
 public final class SummonKeyHandler {
     private static final long ROTATION_START_MILLIS = 300L;
     private static final long RELEASE_TEXTURE_MILLIS = 390L;
@@ -47,7 +47,7 @@ public final class SummonKeyHandler {
 
     private SummonKeyHandler() {}
 
-    /** Returns true when this handler took ownership of the event (the caller should cancel it). */
+    /** 当本处理器接管了该事件时返回 true（调用方应取消该事件）。 */
     public static boolean onKeyInput(int keyCode, int scanCode, int action) {
         if (!matchesKey(keyCode, scanCode)) return false;
         if (action == GLFW.GLFW_PRESS) {

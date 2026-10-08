@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public final class PetPersistenceSmokeTest {
     private PetPersistenceSmokeTest() {}
@@ -32,7 +33,105 @@ public final class PetPersistenceSmokeTest {
         testDirectDieCompatibilityGuard();
         testThreeStateInventoryRestore();
         testPriorityNormalization();
-        System.out.println("PetPersistenceSmokeTest: 13/13 passed");
+        testRegistrationTimestamp();
+        testIdempotentSnapshotWrite();
+        System.out.println("PetPersistenceSmokeTest: 15/15 passed");
+    }
+
+    private static void testRegistrationTimestamp() throws Exception {
+        Path directory = Files.createTempDirectory("tbf-registered-at-");
+        File target = directory.resolve("new-pet.nbt").toFile();
+        File legacy = directory.resolve("legacy-pet.nbt").toFile();
+        try {
+            // 全新文件首次落盘时写入当前时间
+            CompoundTag snapshot = new CompoundTag();
+            snapshot.putInt("Value", 1);
+            long before = System.currentTimeMillis();
+            PetIOUtil.writePetSnapshot(target, snapshot, false);
+            long after = System.currentTimeMillis();
+
+            long registeredAt = PetIOUtil.registeredAtFrom(NbtFileIO.readCompressed(target));
+            require(registeredAt >= before && registeredAt <= after,
+                    "a brand new pet file was not stamped with the current time");
+            require(!snapshot.contains(PetIOUtil.REGISTERED_AT_KEY),
+                    "stamping modified the caller's snapshot");
+
+            // 后续保存沿用文件里已有的时间戳，而不是刷新成当前时间
+            CompoundTag updated = new CompoundTag();
+            updated.putInt("Value", 2);
+            PetIOUtil.writePetSnapshot(target, updated, false);
+            require(PetIOUtil.registeredAtFrom(NbtFileIO.readCompressed(target)) == registeredAt,
+                    "the registration stamp changed on a later save");
+
+            // 升级前就存在、且不含时间戳的旧文件保持缺失
+            CompoundTag legacyStored = new CompoundTag();
+            legacyStored.putInt("Value", 3);
+            NbtFileIO.writeCompressed(legacyStored, legacy);
+            PetIOUtil.writePetSnapshot(legacy, new CompoundTag(), false);
+            require(!NbtFileIO.readCompressed(legacy).contains(PetIOUtil.REGISTERED_AT_KEY),
+                    "an existing file without a stamp was retroactively stamped");
+            require(PetIOUtil.registeredAtFrom(NbtFileIO.readCompressed(legacy)) == 0L,
+                    "an unstamped legacy file did not read as unknown");
+
+            // 缺失时间戳的标签一律读作未知，不会因为取不到键而报错
+            require(PetIOUtil.registeredAtFrom(new CompoundTag()) == 0L,
+                    "a missing registration stamp did not read as unknown");
+            require(PetIOUtil.registeredAtFrom(null) == 0L,
+                    "a null tag did not read as an unknown registration time");
+        } finally {
+            Files.deleteIfExists(target.toPath());
+            Files.deleteIfExists(legacy.toPath());
+            Files.deleteIfExists(directory);
+        }
+    }
+
+    /**
+     * 同一个快照重复落盘不应改写文件，内容真的变了才写。
+     *
+     * <p>文件名刻意使用合法 UUID：`writePetSnapshot` 只有在
+     * 文件名能解析出 UUID 时才会走到“载入旧文件并整树比对”这条分支，
+     * 而既有测试用的都是 `pet.nbt` 之类，从未覆盖到这里。</p>
+     */
+    private static void testIdempotentSnapshotWrite() throws Exception {
+        Path directory = Files.createTempDirectory("tbf-idempotent-");
+        File target = directory.resolve(UUID.randomUUID() + ".nbt").toFile();
+        try {
+            CompoundTag snapshot = new CompoundTag();
+            snapshot.putFloat("Health", 20.0f);
+            PetIOUtil.writePetSnapshot(target, snapshot, false);
+
+            CompoundTag first = NbtFileIO.readCompressed(target);
+            require(first.getFloat("Health") == 20.0f, "the first snapshot was not written");
+            require(first.getInt("Priority") == PetIOUtil.DEFAULT_PRIORITY,
+                    "the default priority was not folded into the stored snapshot");
+
+            // 内容未变化：只比对、不重写，修改时间应当原地不动
+            Thread.sleep(100L);
+            long stamp = target.lastModified();
+            PetIOUtil.writePetSnapshot(target, snapshot, false);
+            require(NbtFileIO.readCompressed(target).equals(first),
+                    "an unchanged snapshot produced different content");
+            require(target.lastModified() == stamp, "an unchanged snapshot rewrote the file");
+
+            // 内容真的变了：必须落盘，且不能丢掉已存的优先级
+            CompoundTag changed = new CompoundTag();
+            changed.putFloat("Health", 7.0f);
+            PetIOUtil.writePetSnapshot(target, changed, false);
+            require(NbtFileIO.readCompressed(target).getFloat("Health") == 7.0f,
+                    "a changed snapshot was not persisted");
+            require(NbtFileIO.readCompressed(target).getInt("Priority") == PetIOUtil.DEFAULT_PRIORITY,
+                    "a rewrite lost the stored priority");
+
+            // 周期保存走的是保留收回标志的那条重载，其幂等性同样依赖这次比对
+            Thread.sleep(100L);
+            long stamp2 = target.lastModified();
+            PetIOUtil.writePetSnapshotPreservingRecall(target, changed);
+            require(target.lastModified() == stamp2,
+                    "an unchanged snapshot rewrote the file on the recall-preserving path");
+        } finally {
+            Files.deleteIfExists(target.toPath());
+            Files.deleteIfExists(directory);
+        }
     }
 
     private static void testPriorityNormalization() {

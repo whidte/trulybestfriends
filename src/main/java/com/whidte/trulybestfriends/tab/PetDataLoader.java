@@ -17,9 +17,9 @@ import com.whidte.trulybestfriends.network.NbtFileIO;
 import net.minecraft.world.level.storage.LevelResource;
 
 /**
- * Handles all disk I/O for pet NBT data.
- * Used by TrulyScreen to load and refresh pet data from the world save directory.
- * Entity creation is deferred to TrulyScreen/PetEntry on demand.
+ * 处理宠物 NBT 数据的全部磁盘 I/O。
+ * 由 TrulyScreen 用于从世界存档目录加载和刷新宠物数据。
+ * 实体的创建推迟到 TrulyScreen/PetEntry 按需进行。
  */
 final class PetDataLoader {
 
@@ -37,21 +37,21 @@ final class PetDataLoader {
 		return type != null ? type.getDescription() : Component.literal("???");
 	}
 
-	/** Resolve the owner-specific pet save directory.
-	 *  Returns null in multiplayer (client cannot access server saves); use
-	 *  RequestPetDataPacket / SyncPetDataPacket for multiplayer data sync. */
+	/** 解析特定于主人的宠物存档目录。
+	 *  在多人游戏中返回 null（客户端无法访问服务端存档）；请使用
+	 *  RequestPetDataPacket / SyncPetDataPacket 进行多人游戏数据同步。 */
 	static Path getPetSaveDir(Minecraft mc) {
 		if (mc.player == null) return null;
 		if (mc.hasSingleplayerServer() && mc.getSingleplayerServer() != null) {
 			Path worldPath = mc.getSingleplayerServer().getWorldPath(LevelResource.ROOT);
 			return PetIOUtil.getOwnerDir(PetIOUtil.getModDir(worldPath), mc.player.getUUID());
 		}
-		// Multiplayer: client cannot read server saves. Data must arrive via
-		// SyncPetDataPacket (server -> client). Return null so callers skip disk I/O.
+		// 多人游戏：客户端无法读取服务端存档。数据必须通过
+		// SyncPetDataPacket（服务端 -> 客户端）送达。返回 null，让调用方跳过磁盘 I/O。
 		return null;
 	}
 
-	/** Full reload: populate cache and priorities from disk. Entity creation is deferred. */
+	/** 完整重载：从磁盘填充缓存和优先级。实体的创建被推迟。 */
 	static void loadAll(Minecraft mc, Map<UUID, CompoundTag> cache, Map<UUID, Integer> priorities) {
 		cache.clear();
 		priorities.clear();

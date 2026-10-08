@@ -15,7 +15,7 @@ import static com.whidte.trulybestfriends.tab.TrulyConstants.DELETE_BUTTON_SIZE;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.DELETE_ICON;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.DELETE_ICON_HIGHLIGHTED;
 
-/** Borderless delete control shared by alive, recalled, lost and dead pets. */
+/** 无边框的删除控件，供存活、已收回、丢失和已死亡的宠物共用。 */
 final class DeleteButton extends AbstractWidget {
     private final TrulyScreen screen;
 

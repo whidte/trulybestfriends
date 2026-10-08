@@ -9,26 +9,26 @@ import net.minecraft.resources.ResourceLocation;
 import java.util.UUID;
 
 /**
- * Server → client: syncs Sable SubLevel tracking state after a teleport.
+ * 服务端 → 客户端：在传送之后同步 Sable SubLevel 追踪状态。
  *
- * <p>Sent by {@link TeleportToPetPacket#handle} when a player teleports to a pet
- * inside a Sable SubLevel. The server's {@code teleportTo} updates the player's
- * position but does not sync Sable's SubLevel tracking — the client needs this
- * separate packet to "enter" the SubLevel and render its interior.</p>
+ * <p>当玩家传送到位于 Sable SubLevel 内的宠物时，由 {@link TeleportToPetPacket#handle} 发送。
+ * 服务端的 {@code teleportTo} 会更新玩家位置，但不会
+ * 同步 Sable 的 SubLevel 追踪——客户端需要这个
+ * 单独的数据包来“进入”SubLevel 并渲染其内部。</p>
  *
- * <p>Mirrors WaystonesSable's {@code SableTeleportPayload}: the client calls
- * {@code player.moveTo()} to confirm the world-space position, then
- * {@code sable$setTrackingSubLevel()} to enter the SubLevel, and
- * {@code setOldPosNoMovement()} to prevent rubber-banding.</p>
+ * <p>仿照 WaystonesSable 的 {@code SableTeleportPayload}：客户端调用
+ * {@code player.moveTo()} 来确认世界空间位置，然后
+ * 调用 {@code sable$setTrackingSubLevel()} 进入 SubLevel，并
+ * 调用 {@code setOldPosNoMovement()} 防止橡皮筋回弹。</p>
  *
- * <p>If Sable is not loaded on the client, the handler silently does nothing.</p>
+ * <p>如果客户端未加载 Sable，处理器会静默地什么都不做。</p>
  */
 public class SableSubLevelSyncPacket implements CustomPacketPayload {
     public static final Type<SableSubLevelSyncPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "sable_sublevel_sync"));
     public static final StreamCodec<FriendlyByteBuf, SableSubLevelSyncPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), SableSubLevelSyncPacket::decode);
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
 
-    private final UUID subLevelId;  // null = no SubLevel (clear tracking)
+    private final UUID subLevelId;  // null = 无 SubLevel（清除追踪）
     private final double worldX, worldY, worldZ;
 
     public SableSubLevelSyncPacket(UUID subLevelId, double worldX, double worldY, double worldZ) {

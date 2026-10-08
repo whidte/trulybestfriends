@@ -2,7 +2,7 @@ package com.whidte.trulybestfriends.network;
 
 import net.minecraft.nbt.CompoundTag;
 
-/** Persistent state for pets intercepted before their normal death lifecycle. */
+/** 宠物在其正常死亡生命周期之前被拦截时的持久化状态。 */
 public final class PetDeathState {
     public static final String STATE_TAG = "TBF_State";
     public static final String DEAD_STORED = "dead_stored";
@@ -23,19 +23,19 @@ public final class PetDeathState {
         return DEAD_STORED.equals(nbt.getString(STATE_TAG));
     }
 
-    /** Accept pre-state-machine death snapshots so existing worlds remain revivable. */
+    /** 接受状态机之前的死亡快照，使现有世界仍可复活。 */
     public static boolean isDeadSnapshot(CompoundTag nbt) {
         return isStoredDead(nbt)
                 || (nbt.contains("Health") && nbt.getFloat("Health") <= 0.0F);
     }
 
-    /** Whether deleting this stored snapshot should first restore it to the world. */
+    /** 删除此已存储快照时是否应先将其还原到世界中。 */
     public static boolean shouldReleaseBeforeUntracking(CompoundTag nbt, boolean deleteStoredPetsDirectly) {
         return shouldReleaseBeforeUntracking(nbt, deleteStoredPetsDirectly, false);
     }
 
     /**
-     * @param noReviveEntity true for legacy unmarked death snapshots whose entity type is currently no-revive
+     * @param noReviveEntity 对于其实体类型当前不可复活的旧版未标记死亡快照为 true
      */
     public static boolean shouldReleaseBeforeUntracking(CompoundTag nbt, boolean deleteStoredPetsDirectly,
                                                         boolean noReviveEntity) {
@@ -46,7 +46,7 @@ public final class PetDeathState {
                 || (!nbt.getBoolean("Recalled") && !isDeadSnapshot(nbt));
     }
 
-    /** Creates a live release snapshot without mutating the revivable stored copy. */
+    /** 创建一个实时可用于释放的快照，同时不改动可复活的已存储副本。 */
     public static CompoundTag prepareForUntrackedRelease(CompoundTag nbt) {
         CompoundTag released = nbt.copy();
         clear(released);

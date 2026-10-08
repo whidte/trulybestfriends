@@ -3,6 +3,7 @@ package com.whidte.trulybestfriends.network;
 import com.whidte.trulybestfriends.trulybestfriends;
 import com.whidte.trulybestfriends.compat.SableCompat;
 import com.whidte.trulybestfriends.Config;
+import com.whidte.trulybestfriends.TbfOwnerTag;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
@@ -29,16 +30,16 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Client → Server: requests pet data.
+ * 客户端 → 服务端：请求宠物数据。
  *
- * Two request modes:
- *  - REQUEST_FULL_LIST: client just opened the UI (or wants a refresh), server
- *                       replies with a SyncPetDataPacket.fullList containing all pets.
- *  - REQUEST_SELECTED:  client wants the latest NBT for a specific pet (selected),
- *                       server replies with SyncPetDataPacket.update or .delete.
+ * 两种请求模式：
+ *  - REQUEST_FULL_LIST：客户端刚打开界面（或想要刷新），服务端
+ *                       回以包含全部宠物的 SyncPetDataPacket.fullList。
+ *  - REQUEST_SELECTED： 客户端想要某个特定宠物（当前选中）的最新 NBT，
+ *                       服务端回以 SyncPetDataPacket.update 或 .delete。
  *
- * This packet is the replacement for client-side disk reads in PetDataLoader and
- * TrulyScreen.refreshSelectedFromDisk.
+ * 此数据包是 PetDataLoader 与
+ * TrulyScreen.refreshSelectedFromDisk 中客户端磁盘读取的替代品。
  */
 public class RequestPetDataPacket implements CustomPacketPayload {
     public static final Type<RequestPetDataPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "request_pet_data"));
@@ -48,7 +49,7 @@ public class RequestPetDataPacket implements CustomPacketPayload {
     public static final int REQUEST_SELECTED = 1;
 
     private final int mode;
-    private final UUID petUuid;  // only for REQUEST_SELECTED
+    private final UUID petUuid;  // 仅用于 REQUEST_SELECTED
 
     public RequestPetDataPacket(int mode, UUID petUuid) {
         this.mode = mode;
@@ -97,11 +98,12 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                             if (list.size() >= limit) break;
                             try {
                                 CompoundTag storedNbt = NbtFileIO.readCompressed(f);
-                                String uuidStr = f.getName().replace(".nbt", "");
+                                String fileName = f.getName();
+                                String uuidStr = fileName.substring(0, fileName.length() - 4);
                                 UUID uuid = UUID.fromString(uuidStr);
                                 CompoundTag replyNbt = toClientNbt(storedNbt);
-                                // Stored-dead pets intentionally have no world entity.
-                                // Only an unloaded living pet is considered lost.
+                                // 存储时已死亡的宠物有意不设世界实体。
+                                // 只有未加载的存活宠物才被视为丢失。
                                 replyNbt.putBoolean("Lost",
                                         shouldMarkLost(storedNbt, isPetLoaded(player, uuid)));
                                 // 注入内存中的死亡时刻（不写盘），供客户端计算复活冷却
@@ -124,6 +126,9 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                 for (SyncPetDataPacket reply : SyncPetDataPacket.fullListBatches(list)) {
                     SyncPetDataPacket.sendToPlayer(player, reply);
                 }
+                // 列表已经发出去了，再开始存在性精确探测：命中 presenceProbeWhitelist 的宠物会被逐个查实，
+                // 确证不在世界上的随后以 SyncPetDataPacket.delete 从这个列表里消失。
+                PetPresenceProbe.requestFor(player);
             } else {
                 File nbtFile = petDir.resolve(packet.petUuid + ".nbt").toFile();
                 if (!nbtFile.exists()) {
@@ -137,7 +142,7 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                     CompoundTag storedNbt = NbtFileIO.readCompressed(nbtFile);
                     CompoundTag liveNbt = getLoadedPetNbt(player, packet.petUuid, storedNbt);
                     CompoundTag replyNbt = liveNbt != null ? liveNbt : toClientNbt(storedNbt);
-                    // Explicit false clears stale client state because updates merge keys.
+                    // 显式写入 false 可清除客户端过期状态，因为更新会合并键。
                     replyNbt.putBoolean("Lost", shouldMarkLost(storedNbt, liveNbt != null));
                     // 注入内存中的死亡时刻（不写盘），供客户端计算复活冷却
                     trulybestfriends.injectDeathTimeIntoNbt(packet.petUuid, replyNbt);
@@ -161,7 +166,7 @@ public class RequestPetDataPacket implements CustomPacketPayload {
         if (shoulderNbt != null) {
             CompoundTag nbt = toClientNbt(shoulderNbt);
             preserveStoredUiFields(storedNbt, nbt);
-            nbt.putString("OwnerUUID", player.getUUID().toString());
+            TbfOwnerTag.write(nbt, player.getUUID());
             String typeKey = shoulderNbt.getString("id");
             if (!typeKey.isEmpty()) nbt.putString("EntityType", typeKey);
             nbt.putString("Dimension", player.serverLevel().dimension().location().toString());
@@ -199,9 +204,9 @@ public class RequestPetDataPacket implements CustomPacketPayload {
         return !loaded && !PetDeathState.isDeadSnapshot(storedNbt);
     }
 
-    /** Checks whether a pet entity is currently loaded and owned by the player
-     *  in any server level.  Used to set the "Lost" flag in full-list snapshots
-     *  without the overhead of building the full GUI NBT. */
+    /** 检查某个宠物实体当前是否已加载且归属于该玩家
+     *  （在任意服务端世界中）。用于在完整列表快照中设置 "Lost" 标志，
+     *  而无需构建完整界面 NBT 的开销。 */
     private static boolean isPetLoaded(ServerPlayer player, UUID petUuid) {
         if (PetIOUtil.getShoulderEntity(player, petUuid) != null) return true;
         return PetIOUtil.findEntity(player.server, petUuid, entity ->
@@ -228,14 +233,16 @@ public class RequestPetDataPacket implements CustomPacketPayload {
 
     private static CompoundTag toClientNbt(Entity entity, ServerLevel level, CompoundTag storedNbt) {
         CompoundTag nbt = toClientNbt(storedNbt);
-        // Prefer live CustomName over stale disk value (pet may have been renamed
-        // since the last save, or disk NBT may predate tracking).
+        // 优先使用实时的 CustomName，而非过期的磁盘值（宠物可能自上次保存以来
+        // 已被重命名，或磁盘 NBT 早于追踪开始）。
         if (entity.hasCustomName()) {
             nbt.putString("CustomName", Component.Serializer.toJson(entity.getCustomName(), entity.registryAccess()));
         } else {
             nbt.remove("CustomName");
         }
-        nbt.putString("OwnerUUID", storedNbt.getString("OwnerUUID"));
+        // 把 TBF 记录的主人带到客户端界面，使用 TBF 自己的键，读取新
+        // 键或重命名前快照的旧字符串。
+        nbt.putString(TbfOwnerTag.KEY, TbfOwnerTag.readString(storedNbt));
         nbt.putString("EntityType", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
         nbt.putString("Dimension", level.dimension().location().toString());
 
@@ -245,8 +252,8 @@ public class RequestPetDataPacket implements CustomPacketPayload {
         pos.add(DoubleTag.valueOf(entity.getZ()));
         nbt.put("Pos", pos);
 
-        // Refresh SubLevel info from the live entity's current position.
-        // If the pet moved out of a SubLevel, this clears the stale UUID.
+        // 根据实时实体的当前位置刷新 SubLevel 信息。
+        // 如果宠物已移出某个 SubLevel，这会清除过期的 UUID。
         SableCompat.captureSubLevelInfo(nbt, level, entity.position());
 
         if (entity instanceof LivingEntity living) {
@@ -264,9 +271,9 @@ public class RequestPetDataPacket implements CustomPacketPayload {
 
     static CompoundTag toClientNbt(CompoundTag source) {
         CompoundTag nbt = source.copy();
-        // Entity trees and stored inventory contents are not needed to render or
-        // manage the tracked pet. Keep visual equipment fields such as ArmorItem,
-        // ArmorItems, HandItems, and SaddleItem intact for the GUI preview.
+        // 渲染或管理被追踪的宠物并不需要实体树和存储的背包内容。
+        // 保留 ArmorItem、ArmorItems、HandItems 和 SaddleItem 等
+        // 视觉装备字段，以供界面预览。
         nbt.remove("Passengers");
         nbt.remove("Items");
         nbt.remove("Inventory");
@@ -283,6 +290,11 @@ public class RequestPetDataPacket implements CustomPacketPayload {
         }
         if (storedNbt.getBoolean("Recalled")) {
             nbt.putBoolean("Recalled", true);
+        }
+        // 注册时间只存在于宠物文件里，实时实体 NBT 不会带，
+        // 因此从肩上实体拼装客户端 NBT 时需要单独补上，否则列表按注册时间排序时会丢失依据。
+        if (storedNbt.contains(PetIOUtil.REGISTERED_AT_KEY)) {
+            nbt.putLong(PetIOUtil.REGISTERED_AT_KEY, storedNbt.getLong(PetIOUtil.REGISTERED_AT_KEY));
         }
     }
 }

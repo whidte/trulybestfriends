@@ -9,7 +9,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
 
-/** Releases a recalled pet without attempting a ride swap. */
+/** 释放一只已收回的宠物，不尝试骑乘交换。 */
 public class ReleaseRecalledPetPacket implements CustomPacketPayload {
     public static final Type<ReleaseRecalledPetPacket> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "release_recalled_pet"));

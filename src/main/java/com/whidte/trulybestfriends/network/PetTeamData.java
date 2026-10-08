@@ -17,18 +17,18 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
 
-/** Persistent per-player formation data stored beside the pet snapshots. */
+/** 存储在每个宠物快照旁边的、按玩家持久化的编队数据。 */
 public final class PetTeamData {
     public static final String FILE_NAME = "team.nbt";
     public static final List<String> TEAM_COLORS = List.of(
             "white", "purple", "red", "blue", "green", "black", "orange", "yellow");
-    /** Highest numbered slot exposed by the 3x3 formation grid. */
+    /** 3x3 编队网格所暴露的最高编号槽位。 */
     public static final int GRID_SLOT_COUNT = 8;
     private static final int VERSION = 1;
 
     private PetTeamData() {}
 
-    /** Resolves an untrusted network index to one of the configured team colors. */
+    /** 把来自网络的不可信索引解析为某个已配置的队伍颜色。 */
     public static String colorAt(int index) {
         return TEAM_COLORS.get(Math.max(0, Math.min(TEAM_COLORS.size() - 1, index)));
     }
@@ -37,7 +37,7 @@ public final class PetTeamData {
         return slot >= 1 && slot <= GRID_SLOT_COUNT;
     }
 
-    /** Returns the member UUIDs without exposing the persistent NBT layout to packet handlers. */
+    /** 返回成员 UUID，而不向数据包处理器暴露持久化的 NBT 布局。 */
     public static List<UUID> memberUuids(CompoundTag data, String color) {
         List<UUID> members = new ArrayList<>();
         for (Tag tag : teamMembers(data, color)) {
@@ -47,7 +47,7 @@ public final class PetTeamData {
         return members;
     }
 
-    /** Creates the file when absent and removes stale or structurally invalid members. */
+    /** 当文件不存在时创建它，并移除过期或结构无效的成员。 */
     public static synchronized void ensureAndPrune(Path ownerDir) throws IOException {
         Files.createDirectories(ownerDir);
         File file = ownerDir.resolve(FILE_NAME).toFile();
@@ -59,7 +59,7 @@ public final class PetTeamData {
         }
     }
 
-    /** Removes a pet from every formation in this owner's file. */
+    /** 从该主人文件中的所有编队中移除某个宠物。 */
     public static synchronized void removePet(Path ownerDir, UUID petUuid) throws IOException {
         File file = ownerDir.resolve(FILE_NAME).toFile();
         if (!file.exists()) return;
@@ -69,14 +69,14 @@ public final class PetTeamData {
         if (!normalized.equals(existing)) NbtFileIO.writeCompressed(normalized, file);
     }
 
-    /** Reads the team file normalized, creating it when absent. */
+    /** 以规范化方式读取队伍文件，文件不存在时创建它。 */
     public static synchronized CompoundTag teamData(Path ownerDir) throws IOException {
         Files.createDirectories(ownerDir);
         return commit(ownerDir, readRaw(ownerDir));
     }
 
-    /** Places a pet into a numbered slot of one color team, kicking the previous
-     *  occupant. The pet may keep its membership in other teams. */
+    /** 把宠物放入某个颜色队伍的一个编号槽位，踢出先前的
+     *  占用者。该宠物可保留其在其他队伍中的成员身份。 */
     public static synchronized CompoundTag setMember(Path ownerDir, String color, int slot, UUID uuid) throws IOException {
         CompoundTag raw = teamData(ownerDir);
         ListTag currentMembers = teamMembers(raw, color);
@@ -107,7 +107,7 @@ public final class PetTeamData {
         return commit(ownerDir, raw);
     }
 
-    /** Moves a member to another numbered slot, swapping with the occupant when present. */
+    /** 把成员移动到另一个编号槽位，若该槽位有占用者则与之交换。 */
     public static synchronized CompoundTag moveMember(Path ownerDir, String color, int fromSlot, int toSlot) throws IOException {
         if (!isValidSlot(fromSlot) || !isValidSlot(toSlot) || fromSlot == toSlot) {
             return teamData(ownerDir);
@@ -132,7 +132,7 @@ public final class PetTeamData {
         return commit(ownerDir, raw);
     }
 
-    /** Removes a pet from one color team. */
+    /** 从某个颜色队伍中移除某个宠物。 */
     public static synchronized CompoundTag removeMember(Path ownerDir, String color, UUID uuid) throws IOException {
         if (uuid == null) return teamData(ownerDir);
         CompoundTag raw = readRaw(ownerDir);
@@ -140,14 +140,14 @@ public final class PetTeamData {
         return commit(ownerDir, raw);
     }
 
-    /** Persists the currently selected team color. */
+    /** 持久化当前选中的队伍颜色。 */
     public static synchronized CompoundTag setSelectedTeam(Path ownerDir, String color) throws IOException {
         CompoundTag raw = readRaw(ownerDir);
         raw.putString("SelectedTeam", color);
         return commit(ownerDir, raw);
     }
 
-    /** Persists the last wheel-summoned member as team color + slot number. */
+    /** 把最后一次通过轮盘召唤的成员持久化为队伍颜色 + 槽位编号。 */
     public static synchronized CompoundTag setLastSummon(Path ownerDir, String color, int slot) throws IOException {
         if (!isValidSlot(slot)) return teamData(ownerDir);
         CompoundTag raw = readRaw(ownerDir);
@@ -164,9 +164,12 @@ public final class PetTeamData {
     }
 
     private static CompoundTag commit(Path ownerDir, CompoundTag raw) throws IOException {
+        Path file = ownerDir.resolve(FILE_NAME);
         CompoundTag normalized = normalize(raw, Config.maxPendingSummons,
                 uuid -> Files.isRegularFile(ownerDir.resolve(uuid + ".nbt")));
-        NbtFileIO.writeCompressed(normalized, ownerDir.resolve(FILE_NAME).toFile());
+        if (!Files.isRegularFile(file) || !normalized.equals(raw)) {
+            NbtFileIO.writeCompressed(normalized, file.toFile());
+        }
         return normalized;
     }
 

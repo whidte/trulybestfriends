@@ -31,3 +31,6 @@ l2tabs.mixins.json
 l2library.refmap.json
 logs
 output
+
+# AI 助手的工作记忆目录，不纳入版本控制
+.workbuddy

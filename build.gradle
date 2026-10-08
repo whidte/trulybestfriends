@@ -68,8 +68,8 @@ repositories {
     }
 }
 
-// ModDev injects these repositories with the primary host. Use NeoForge's
-// official CDN because the primary host is not reachable on some networks.
+// ModDev 会用主主机注入这些仓库。请改用 NeoForge 的
+// 官方 CDN，因为某些网络环境下无法访问主主机。
 repositories.named('NeoForged Releases') {
     url = uri('https://neoforged.forgecdn.net/releases')
 }
@@ -108,15 +108,31 @@ tasks.withType(JavaExec).configureEach {
 
 tasks.register('configDimensionSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Runs the standalone dimension-name smoke test.'
+    description = '运行独立的维度名称冒烟测试。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.ConfigDimensionTest'
 }
 
+tasks.register('entityTypeListMatcherSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证实体类型名单的精确匹配与命名空间通配匹配。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.EntityTypeListMatcherSmokeTest'
+}
+
+tasks.register('petPresenceProbeSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证存在性探测的三态判定与确认窗口边界。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.PetPresenceProbeSmokeTest'
+}
+
 tasks.register('reviveCooldownSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Runs the standalone revive-cooldown smoke test.'
+    description = '运行独立的复活冷却冒烟测试。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.ReviveCooldownTest'
@@ -124,21 +140,35 @@ tasks.register('reviveCooldownSmokeTest', JavaExec) {
 
 tasks.named('check') {
     dependsOn tasks.named('configDimensionSmokeTest')
+    dependsOn tasks.named('entityTypeListMatcherSmokeTest')
+    dependsOn tasks.named('petPresenceProbeSmokeTest')
     dependsOn tasks.named('reviveCooldownSmokeTest')
     dependsOn tasks.named('ownerNbtResolverSmokeTest')
     dependsOn tasks.named('petPersistenceSmokeTest')
     dependsOn tasks.named('multipartRotationSmokeTest')
     dependsOn tasks.named('petGuiNbtSmokeTest')
     dependsOn tasks.named('petListFilterSmokeTest')
+    dependsOn tasks.named('petSortSmokeTest')
     dependsOn tasks.named('reviveProtectionSmokeTest')
+    dependsOn tasks.named('areaRecallMessageSmokeTest')
     dependsOn tasks.named('petIndexBlacklistTest')
+    dependsOn tasks.named('tbfOwnerTagTest')
     dependsOn tasks.named('petHealingSmokeTest')
     dependsOn tasks.named('petTeamDataTest')
+    dependsOn tasks.named('modCommandSuggestionSmokeTest')
+}
+
+tasks.register('modCommandSuggestionSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证 /tbf open 补全列表的排序与截断规则。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.command.ModCommandSuggestionSmokeTest'
 }
 
 tasks.register('ownerNbtResolverSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates top-level and nested owner NBT path resolution.'
+    description = '验证顶层与嵌套主人 NBT 路径的解析。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.OwnerNbtResolverSmokeTest'
@@ -146,7 +176,7 @@ tasks.register('ownerNbtResolverSmokeTest', JavaExec) {
 
 tasks.register('petHealingSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates pet healing duration, pulse, cap, and pending-state rules.'
+    description = '验证宠物治疗的持续时间、脉冲、上限与待处理状态规则。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.network.PetHealingSmokeTest'
@@ -154,15 +184,23 @@ tasks.register('petHealingSmokeTest', JavaExec) {
 
 tasks.register('petIndexBlacklistTest', JavaExec) {
     group = 'verification'
-    description = 'Validates persistent UUID blacklist entries in the pet index.'
+    description = '验证宠物索引中的持久化 UUID 黑名单条目。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.PetIndexBlacklistTest'
 }
 
+tasks.register('tbfOwnerTagTest', JavaExec) {
+    group = 'verification'
+    description = '验证 TBF\'s 自身的 owner 字段：双重读取与旧版字符串修复。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.TbfOwnerTagTest'
+}
+
 tasks.register('petTeamDataTest', JavaExec) {
     group = 'verification'
-    description = 'Validates the eight-team NBT schema, slots, capacity, and stale-member cleanup.'
+    description = '验证八队伍 NBT 结构、槽位、容量与过期成员清理。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.network.PetTeamDataTest'
@@ -170,7 +208,7 @@ tasks.register('petTeamDataTest', JavaExec) {
 
 tasks.register('petPersistenceSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates legacy horse-slot migration and atomic NBT replacement.'
+    description = '验证旧版马槽位迁移与原子化 NBT 替换。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.network.PetPersistenceSmokeTest'
@@ -178,7 +216,7 @@ tasks.register('petPersistenceSmokeTest', JavaExec) {
 
 tasks.register('multipartRotationSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates that multipart pitch remains view-space invariant across yaw angles.'
+    description = '验证多部件俯仰角在不同偏航角下保持视角空间不变性。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.tab.MultipartRotationSmokeTest'
@@ -186,7 +224,7 @@ tasks.register('multipartRotationSmokeTest', JavaExec) {
 
 tasks.register('petGuiNbtSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates one-pet full-NBT sync and passenger-tree filtering.'
+    description = '验证单只宠物全量 NBT 同步与乘客树过滤。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.network.PetGuiNbtSmokeTest'
@@ -194,16 +232,32 @@ tasks.register('petGuiNbtSmokeTest', JavaExec) {
 
 tasks.register('petListFilterSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates combined species and pet-name filtering.'
+    description = '验证物种与宠物名称的组合过滤。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.tab.PetListFilterSmokeTest'
 }
 
+tasks.register('petSortSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证按优先级与按注册时间排序及其升降序方向。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.tab.PetSortSmokeTest'
+}
+
 tasks.register('reviveProtectionSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates the exact 20-tick post-revive protection window.'
+    description = '验证精确的 20 tick 复活后保护窗口。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.ReviveProtectionSmokeTest'
+}
+
+tasks.register('areaRecallMessageSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证群体收回消息的名称合并格式、名字上的点击事件与名称解析优先级。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.AreaRecallMessageSmokeTest'
 }

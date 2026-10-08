@@ -89,7 +89,7 @@ class ActionButton extends AbstractWidget {
 		}
 		guiGraphics.blit(WIDGET_BUTTON, getX(), getY(), 0, frameV, 20, 20, 256, 256);
 
-		// Center 16x16 icon
+		// 居中 16x16 图标
 		ResourceLocation icon;
 		if (shiftHeld) {
 			icon = ICON_AREA_RECALL;
@@ -117,7 +117,7 @@ class ActionButton extends AbstractWidget {
 	public void onClick(double mouseX, double mouseY) {
 		if (!screen.hasSelection()) return;
 
-		// Shift-held: area recall — ignores cooldown and dead state
+		// 按住 Shift：区域收回——忽略冷却和死亡状态
 		if (Screen.hasShiftDown()) {
 			PacketDistributor.sendToServer(new AreaRecallPacket(screen.areaRecallRange));
 			return;
@@ -159,10 +159,12 @@ class ActionButton extends AbstractWidget {
 		if (nbt.contains("Pos")) {
 			var posList = nbt.getList("Pos", 6);
 			if (posList.size() >= 3) {
-				double dx = posList.getDouble(0) - player.getX();
-				double dy = posList.getDouble(1) - player.getY();
-				double dz = posList.getDouble(2) - player.getZ();
-				if (Math.sqrt(dx * dx + dy * dy + dz * dz) > Config.recallRange) return true;
+				// 走 Entity#distanceToSqr(double,double,double)：Sable 用 @Overwrite 把它换成
+				// SubLevel 感知的全局空间距离；手算 dx/dy/dz 在坐标位于子级 plot 网格内时会误判。
+				// 保留开方的写法以维持与原本完全相同的语义（含 recallRange 为负数时的表现）。
+				double distance = Math.sqrt(player.distanceToSqr(
+						posList.getDouble(0), posList.getDouble(1), posList.getDouble(2)));
+				if (distance > Config.recallRange) return true;
 			}
 		}
 

@@ -11,9 +11,9 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import java.nio.file.Path;
 
 /**
- * Client → Server: persist the last wheel-summoned member as
- * team color + slot number. The server answers with an authoritative
- * {@link TeamDataPacket}.
+ * 客户端 → 服务端：把最近一次通过轮盘召唤的成员持久化为
+ * 队伍颜色 + 槽位编号。服务端以权威的
+ * {@link TeamDataPacket} 回应。
  */
 public class SetLastSummonPacket implements CustomPacketPayload {
     public static final Type<SetLastSummonPacket> TYPE = new Type<>(

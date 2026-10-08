@@ -14,12 +14,12 @@ import java.nio.file.Path;
 import java.util.UUID;
 
 /**
- * Client → Server: set a pet's Priority field.
+ * 客户端 → 服务端：设置宠物的 Priority 字段。
  *
- * Replaces the old client-side disk write in PetEntry.writePriorityToDisk,
- * which was broken in multiplayer (client wrote to local saves dir, server
- * never knew about the change). Server now owns the write and pushes the
- * updated NBT back to the client via SyncPetDataPacket.update.
+ * 取代了 PetEntry.writePriorityToDisk 中旧的客户端磁盘写入，
+ * 那在多人游戏下是坏的（客户端写入本地存档目录，服务端
+ * 从不知道这一变更）。现在由服务端负责写入，并通过
+ * SyncPetDataPacket.update 把更新后的 NBT 推回客户端。
  */
 public class SetPriorityPacket implements CustomPacketPayload {
     public static final Type<SetPriorityPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "set_priority"));
@@ -47,7 +47,7 @@ public class SetPriorityPacket implements CustomPacketPayload {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
 
-            // Clamp to valid range [1, 6]
+            // 限制到有效范围 [1, 6]
             int priority = PetIOUtil.clampPriority(packet.priority);
 
             Path petDir = PetIOUtil.getOwnerDir(player);
@@ -55,7 +55,7 @@ public class SetPriorityPacket implements CustomPacketPayload {
             File nbtFile = petDir.resolve(packet.petUuid + ".nbt").toFile();
             if (!nbtFile.exists()) {
                 PetSyncTracker.forgetPet(player.getUUID(), packet.petUuid);
-                // Pet was deleted — notify client so it can remove the entry
+                // 宠物已被删除——通知客户端以便其移除该条目
                 SyncPetDataPacket reply = SyncPetDataPacket.delete(packet.petUuid);
                 SyncPetDataPacket.sendToPlayer(player, reply);
                 return;
@@ -66,7 +66,7 @@ public class SetPriorityPacket implements CustomPacketPayload {
                 nbt.putInt("Priority", priority);
                 NbtFileIO.writeCompressed(nbt, nbtFile);
 
-                // Push updated NBT back to client so its cache stays in sync
+                // 把更新后的 NBT 推回客户端，使其缓存保持同步
                 CompoundTag replyNbt = RequestPetDataPacket.createUpdateNbt(
                         player, packet.petUuid, nbt);
                 if (PetSyncTracker.shouldSendUpdate(player.getUUID(), packet.petUuid, replyNbt)) {

@@ -14,17 +14,17 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
 
-/** Client requests teleport to pet's last known position. Server validates permissions and dimension.
- *  If the pet is inside a Sable SubLevel, the server transforms local coordinates to world
- *  coordinates before teleporting and sends a {@link SableSubLevelSyncPacket} so the client
- *  can apply SubLevel tracking. */
+/** 客户端请求传送到宠物最后已知的位置。服务端校验权限和维度。
+ *  如果宠物位于 Sable SubLevel 内，服务端会在传送前把本地坐标转换为世界
+ *  坐标，并发送 {@link SableSubLevelSyncPacket}，以便客户端
+ *  应用 SubLevel 追踪。 */
 public class TeleportToPetPacket implements CustomPacketPayload {
     public static final Type<TeleportToPetPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(trulybestfriends.MODID, "teleport_to_pet"));
     public static final StreamCodec<FriendlyByteBuf, TeleportToPetPacket> STREAM_CODEC = StreamCodec.of((buf, packet) -> encode(packet, buf), TeleportToPetPacket::decode);
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     private final String dimKey;
     private final double x, y, z;
-    private final UUID subLevelId;  // null when pet is not in a Sable SubLevel
+    private final UUID subLevelId;  // 当宠物不在 Sable SubLevel 中时为 null
 
     public TeleportToPetPacket(String dimKey, double x, double y, double z, UUID subLevelId) {
         this.dimKey = dimKey;
@@ -57,17 +57,17 @@ public class TeleportToPetPacket implements CustomPacketPayload {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player == null) return;
 
-            // Only OP (level >= 2) in creative mode can teleport
+            // 只有创造模式下的 OP（权限等级 >= 2）才能传送
             if (!player.hasPermissions(2) || !player.isCreative()) return;
 
-            // Resolve the dimension
+            // 解析维度
             ServerLevel targetLevel = PetIOUtil.getLevel(player.server, packet.dimKey);
-            if (targetLevel == null) return; // unknown dimension
+            if (targetLevel == null) return; // 未知维度
 
-            // Transform SubLevel-local coordinates to world coordinates.
-            // When Sable is loaded and the pet is inside a SubLevel, the stored Pos
-            // is in the SubLevel's local coordinate space. projectToWorld converts
-            // it to the parent dimension's world space so teleportTo lands correctly.
+            // 把 SubLevel 本地坐标转换为世界坐标。
+            // 当加载了 Sable 且宠物位于 SubLevel 内时，存储的 Pos
+            // 处于 SubLevel 的本地坐标空间。projectToWorld 会将其
+            // 转换为父维度的世界空间，使 teleportTo 落在正确位置。
             double targetX = packet.x;
             double targetY = packet.y;
             double targetZ = packet.z;
@@ -80,15 +80,15 @@ public class TeleportToPetPacket implements CustomPacketPayload {
                 }
             }
 
-            // Teleport
+            // 传送
             player.teleportTo(targetLevel, targetX, targetY, targetZ, player.getYRot(), player.getXRot());
             player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT,
                     net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
 
-            // Send SubLevel tracking sync to the client. The server's teleportTo
-            // updates the player's position but does not sync Sable's SubLevel
-            // tracking state — the client needs a separate packet to "enter" the
-            // SubLevel and render its interior.
+            // 向客户端发送 SubLevel 追踪同步。服务端的 teleportTo
+            // 会更新玩家位置，但不会同步 Sable 的 SubLevel
+            // 追踪状态——客户端需要单独的数据包来“进入”
+            // SubLevel 并渲染其内部。
             if (SableCompat.isLoaded() && packet.subLevelId != null) {
                 PacketDistributor.sendToPlayer(player,
                         new SableSubLevelSyncPacket(packet.subLevelId, targetX, targetY, targetZ));
