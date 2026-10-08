@@ -10,9 +10,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 /**
- * Isolated L2Tabs integration layer.
- * Only loaded via Class.forName when L2Tabs is present at runtime.
- * When absent, the mod functions normally via keybinding.
+ * 隔离的 L2Tabs 集成层。
+ * 仅在运行时存在 L2Tabs 时通过 Class.forName 加载。
+ * 不存在时，模组通过按键绑定正常工作。
  */
 public class L2TabsIntegration {
 
@@ -25,8 +25,8 @@ public class L2TabsIntegration {
     }
 
     /**
-     * Create and initialise a TabManager for a TrulyScreen so that L2Tabs
-     * tab bar (inventory, attributes, curios, etc.) shows on top of the pet panel.
+     * 为 TrulyScreen 创建并初始化 TabManager，使 L2Tabs
+     * 标签栏（物品栏、属性、饰品等）显示在宠物面板之上。
      */
     public static TabManager createTabManager(TrulyScreen screen) {
         TabManager manager = new TabManager(screen);

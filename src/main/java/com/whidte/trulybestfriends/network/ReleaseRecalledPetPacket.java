@@ -6,7 +6,7 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/** Releases a recalled pet without attempting a ride swap. */
+/** 释放一只已收回的宠物，不尝试骑乘交换。 */
 public class ReleaseRecalledPetPacket {
     private final UUID petUuid;
 

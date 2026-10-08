@@ -15,17 +15,17 @@ import org.jetbrains.annotations.NotNull;
 
 import static com.whidte.trulybestfriends.tab.TrulyConstants.WIDGETS_TEXTURE;
 
-/** A compact species selector sized to remain inside the lower list panel. */
+/** 紧凑的物种选择器，其尺寸保证不会超出下方列表面板。 */
 final class SpeciesDropdown extends AbstractWidget {
-    /** Maximum number of species shown before the expanded list becomes scrollable. */
+    /** 展开列表变为可滚动之前最多显示的物种数量。 */
     static final int MAX_VISIBLE_SPECIES = 6;
-    /** Height of one option in the expanded list. */
+    /** 展开列表中单个选项的高度。 */
     private static final int OPTION_HEIGHT = 10;
-    /** Width of the expanded list scrollbar. */
+    /** 展开列表滚动条的宽度。 */
     private static final int SCROLLBAR_WIDTH = 4;
-    /** Milliseconds a marquee-scrolled label holds still at each end before moving on. */
+    /** 跑马灯滚动标签在每一端停留静止的毫秒数，之后才继续移动。 */
     private static final long MARQUEE_PAUSE_MILLIS = 800L;
-    /** Milliseconds the marquee needs to travel one pixel of overflowing text. */
+    /** 跑马灯移动一个像素溢出文字所需的毫秒数。 */
     private static final double MARQUEE_MILLIS_PER_PIXEL = 30.0;
 
     private final TrulyScreen screen;
@@ -112,9 +112,9 @@ final class SpeciesDropdown extends AbstractWidget {
     }
 
     /**
-     * Pixel offset that marquee-scrolls labels wider than the available space. The animation
-     * ping-pongs (scroll out, hold, scroll back, hold) and its phase is derived from the label
-     * text, so every label scrolls independently and deterministically.
+     * 使宽度超过可用空间的标签跑马灯滚动的像素偏移。动画来回摆动
+     * （滚出、停留、滚回、停留），其相位由标签文字推导而来，
+     * 因此每个标签都独立且确定性地滚动。
      */
     private int marqueeOffset(Component label, int maxWidth) {
         int textWidth = screen.font().width(label);

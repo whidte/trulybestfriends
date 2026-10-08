@@ -23,8 +23,8 @@ import static com.whidte.trulybestfriends.tab.TrulyConstants.*;
 import static com.whidte.trulybestfriends.tab.RenderHelper.*;
 
 /**
- * Bottom-left button. Normal mode: summons recalled pet. Dead mode: revives dead pet (costs items).
- * Uses widgets.png texture regions scaled to 20px height via 10-param blit.
+ * 左下角按钮。普通模式：召唤已收回的宠物。死亡模式：复活已死亡的宠物（消耗物品）。
+ * 通过 10 参数 blit 缩放 widgets.png 中的纹理区域至 20px 高度。
  */
 class SummonToPlayerButton extends AbstractWidget {
     private static final int TEX_W = 256;
@@ -45,7 +45,7 @@ class SummonToPlayerButton extends AbstractWidget {
         this.screen = screen;
     }
 
-    /** Whitelisted entity types cannot be revived via this mod. */
+    /** 白名单中的实体类型无法通过本模组复活。 */
     private boolean isPetNotRevivable() {
         CompoundTag nbt = screen.getSelectedNbt();
         return nbt != null && nbt.contains("EntityType")
@@ -57,7 +57,7 @@ class SummonToPlayerButton extends AbstractWidget {
         return uuid != null && screen.isPetOnShoulder(uuid);
     }
 
-    /** Check the recall/summon cooldown (Config.recallCooldownMs), shared with ActionButton */
+    /** 检查收回/召唤冷却（Config.recallCooldownMs），与 ActionButton 共用 */
     private boolean isRecallCooldownActive() {
         java.util.UUID uuid = screen.getSelectedUuid();
         if (uuid == null) return true;
@@ -72,7 +72,7 @@ class SummonToPlayerButton extends AbstractWidget {
         return Math.max(0, remaining);
     }
 
-    /** Check if the local player has enough revive items in inventory. Creative players always pass. */
+    /** 检查本地玩家背包中是否有足够的复活物品。创造模式玩家始终通过。 */
     private boolean hasReviveItems() {
         var player = screen.getMinecraft().player;
         if (player == null) return false;
@@ -114,15 +114,15 @@ class SummonToPlayerButton extends AbstractWidget {
 
         int v;
         if (notRevivable) {
-            v = 46; // disabled — cannot be revived
+            v = 46; // 禁用——无法复活
         } else if (dead && !hasItems) {
-            v = 46; // disabled style — lack items
+            v = 46; // 禁用样式——物品不足
         } else if (dead && (cooldown || reviveCooldown)) {
-            v = 46; // cooldown
+            v = 46; // 冷却
         } else if (dead) {
-            v = isHovered() ? 86 : 66; // revive available
+            v = isHovered() ? 86 : 66; // 可复活
         } else if (recalled && recallCooldown) {
-            v = 46; // recall cooldown active
+            v = 46; // 收回冷却进行中
         } else if (onShoulder || cooldown) {
             v = 46;
         } else if (isHovered() && this.active) {
@@ -188,13 +188,13 @@ class SummonToPlayerButton extends AbstractWidget {
         boolean directTeleport = Screen.hasShiftDown() && screen.canSwapToSelectedPet();
 
         if (screen.isSelectedPetDead()) {
-            // Whitelisted entity types cannot be revived
+            // 白名单中的实体类型无法复活
             if (isPetNotRevivable()) return;
             if (screen.isButtonCooldownActive(lastClickTick)) return;
             if (getReviveCooldownRemainingMs() > 0) return;
             if (!hasReviveItems()) return;
             lastClickTick = screen.currentGameTick();
-            // Optimistic update: mark pet as alive with 1 HP in cache immediately
+            // 乐观更新：立即在缓存中把宠物标记为存活并设置 1 点生命值
             CompoundTag nbt = screen.getSelectedNbt();
             if (nbt != null) {
                 nbt.putFloat("Health", 1.0f);
@@ -207,8 +207,8 @@ class SummonToPlayerButton extends AbstractWidget {
             return;
         }
 
-        // Recalled pet: release via RecallPetPacket (same as ActionButton),
-        // gated by Config.recallCooldownMs
+        // 已收回的宠物：通过 RecallPetPacket 释放（与 ActionButton 相同），
+        // 受 Config.recallCooldownMs 约束
         if (screen.isSelectedPetRecalled()) {
             if (isRecallCooldownActive()) return;
             long now = System.currentTimeMillis();
@@ -216,7 +216,7 @@ class SummonToPlayerButton extends AbstractWidget {
             if (uuid != null) {
                 screen.cooldowns.put(uuid, now);
             }
-            // Optimistic update: clear Recalled flag
+            // 乐观更新：清除 Recalled 标记
             CompoundTag nbt = screen.getSelectedNbt();
             if (nbt != null) {
                 nbt.remove("Recalled");
@@ -224,7 +224,7 @@ class SummonToPlayerButton extends AbstractWidget {
             trulybestfriends.CHANNEL.sendToServer(directTeleport
                     ? new ReleaseRecalledPetPacket(screen.getSelectedUuid())
                     : new RecallPetPacket(screen.getSelectedUuid()));
-            // Unloaded ("lost") pets can be summoned too, so always refresh quick-summon.
+            // 未加载（“丢失”）的宠物也可以召唤，因此始终刷新快速召唤。
             SummonKeyHandler.rememberSummon(screen.getSelectedUuid());
             return;
         }

@@ -18,26 +18,26 @@ public class Config
     private static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
 
     public static final ForgeConfigSpec.BooleanValue PERFORMANCE_MODE = BUILDER
-            .comment("If true, disables automatic pet registration from tame events, entity joins, nearby scans, and full scans.",
-                    "Pets must be registered with /tbf load or the manual registration item.")
+            .comment("若为 true，则禁用来自驯服事件、实体加入、附近扫描和全量扫描的宠物自动注册。",
+                    "宠物必须通过 /tbf load 或手动注册物品来注册。")
             .define("performanceMode", false);
 
     public static final ForgeConfigSpec.IntValue PERFORMANCE_MODE_SYNC_INTERVAL_TICKS = BUILDER
-            .comment("In performance mode, interval in ticks for updating loaded pets by their already tracked UUIDs.")
+            .comment("性能模式下，按已追踪的 UUID 更新已加载宠物的间隔（单位：tick）。")
             .defineInRange("performanceModeSyncIntervalTicks", 5, 1, 1200);
 
     public static final ForgeConfigSpec.IntValue BOSS_FIGHT_PET_LIMIT = BUILDER
-            .comment("Anti-gang-up: when a boss bar is visible to a player, every 20 ticks randomly recall",
-                    "that player's owned pets within LOCAL_SYNC_CHUNK_RADIUS chunks until this many remain.",
-                    "Pets in the player's current team, pets being ridden, and untracked pets are excluded.",
-                    "-1 disables the check entirely. Values above (maxPets - current team size) are clamped",
-                    "to that bound (0-512, default -1).")
+            .comment("防围殴：当玩家能看到 Boss 血条时，每 20 tick 随机收回",
+                    "该玩家在 LOCAL_SYNC_CHUNK_RADIUS 区块内的有主宠物，直到剩余数量降到该值。",
+                    "玩家当前队伍中的宠物、正被骑乘的宠物以及未被追踪的宠物不在此列。",
+                    "-1 表示完全禁用该检查。高于 (maxPets - 当前队伍规模) 的值会被钳制",
+                    "到该上限（0-512，默认 -1）。")
             .defineInRange("bossFightPetLimit", -1, -1, 512);
 
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> OWNER_NBT_FIELDS = BUILDER
-            .comment("NBT paths used to find an owner UUID on living entities that do not implement OwnableEntity.",
-                    "Use dots to traverse nested compounds, for example ForgeData.Owner. Paths are checked in order.",
-                    "The final field may contain either a UUID tag or a UUID string. Path segments are case-sensitive.")
+            .comment("用于在未实现 OwnableEntity 的生物实体上查找主人 UUID 的 NBT 路径。",
+                    "使用点号遍历嵌套复合标签，例如 ForgeData.Owner。路径按顺序依次检查。",
+                    "最后一个字段可以包含 UUID 标签或 UUID 字符串。路径段区分大小写。")
             .defineListAllowEmpty("ownerNbtFields", java.util.Arrays.asList(
                     "Owner",
                     "OwnerUUID",
@@ -45,123 +45,123 @@ public class Config
             ), s -> s instanceof String path && OwnerNbtResolver.isValidPath(path));
 
     public static final ForgeConfigSpec.IntValue SYNC_INTERVAL_TICKS = BUILDER
-            .comment("Interval in ticks for full fallback scan of all loaded owned entities and caching their latest pet data.",
-                    "Set to 0 to disable the full scan.")
+            .comment("对所有已加载的有主实体进行全量兜底扫描并缓存其最新宠物数据的间隔（单位：tick）。",
+                    "设为 0 则禁用全量扫描。")
             .defineInRange("syncIntervalTicks", 103, 0, 1200);
 
     public static final ForgeConfigSpec.IntValue LOCAL_SYNC_INTERVAL_TICKS = BUILDER
-            .comment("Interval in ticks for scanning nearby entities around players who completed the Truly Best Friends advancement")
+            .comment("对已完成 Truly Best Friends 进度的玩家周围附近实体进行扫描的间隔（单位：tick）")
             .defineInRange("localSyncIntervalTicks", 5, 1, 100);
 
     public static final ForgeConfigSpec.IntValue SAVE_PET_DATA_COOLDOWN_TICKS = BUILDER
-            .comment("Interval in ticks for flushing cached pet data to disk. Player logout and server stop always flush immediately.")
+            .comment("将缓存的宠物数据落盘到磁盘的间隔（单位：tick）。玩家退出登录和服务器停止时总是立即落盘。")
             .defineInRange("savePetDataCooldownTicks", 100, 1, 1200);
 
     public static final ForgeConfigSpec.DoubleValue RECALL_RANGE = BUILDER
-            .comment("Maximum distance (blocks) for recalling a pet back into storage. Set to -1 for unlimited range")
+            .comment("把宠物收回存储的最大距离（方块）。设为 -1 表示距离不限")
             .defineInRange("recallRange", 16.0, -1.0, 64.0);
 
     public static final ForgeConfigSpec.IntValue RECALL_COOLDOWN_MS = BUILDER
-            .comment("Cooldown in milliseconds between recall/summon actions (min 250ms = 5 ticks to ensure entity cleanup completes)")
+            .comment("收回/召唤操作之间的冷却，单位为毫秒（最小 250 毫秒 = 5 tick，以确保实体清理完成）")
             .defineInRange("recallCooldownMs", 3000, 250, 30000);
 
     public static final ForgeConfigSpec.IntValue MAX_PETS = BUILDER
-            .comment("Maximum number of pets a player can have tracked at once (1-512, default 64)")
+            .comment("玩家一次可追踪的宠物数量上限（1-512，默认 64）")
             .defineInRange("maxPets", 64, 1, 512);
 
     public static final ForgeConfigSpec.BooleanValue DELETE_STORED_PETS_DIRECTLY = BUILDER
-            .comment("If true, deleting a recalled or dead pet from tracking permanently removes its stored data",
-                    "without releasing the entity into the world. Default false preserves the existing release behavior.")
+            .comment("若为 true，从追踪中删除已收回或已死亡的宠物会永久移除其存储数据，",
+                    "而不把实体释放到世界中。默认 false 保留现有的释放行为。")
             .define("deleteStoredPetsDirectly", false);
 
     public static final ForgeConfigSpec.IntValue AREA_RECALL_DEFAULT_RANGE = BUILDER
-            .comment("Default range (blocks) for area recall when holding Shift. Adjustable with scroll wheel (1-16).")
+            .comment("按住 Shift 进行区域收回时的默认范围（方块）。可用滚轮调节（1-16）。")
             .defineInRange("areaRecallDefaultRange", 8, 1, 16);
 
     public static final ForgeConfigSpec.IntValue MAX_PENDING_SUMMONS = BUILDER
-            .comment("Max simultaneous pending summons per player for pets in unloaded chunks.",
-                    "Also defines the number of numbered member slots in each of the eight formation teams.",
-                    "Team slot numbers range from 1 to this value (1-8, default 6). Effective pending cap = this value + 2 buffer.")
+            .comment("每名玩家针对未加载区块中宠物的同时待处理召唤数量上限。",
+                    "同时也定义八个编队队伍中每队编号成员槽位的数量。",
+                    "队伍槽位编号从 1 到该值（1-8，默认 6）。实际待处理上限 = 该值 + 2 缓冲。")
             .defineInRange("maxPendingSummons", 6, 1, 8);
 
     public static final ForgeConfigSpec.IntValue SUMMON_BOTTLE_RIGHT_OFFSET = BUILDER
-            .comment("Distance in GUI pixels between the summon-key bottle animation and the right screen edge.")
+            .comment("召唤键瓶子动画与屏幕右边缘之间的间距（GUI 像素）。")
             .defineInRange("summonBottleRightOffset", 8, 0, 4096);
 
     public static final ForgeConfigSpec.IntValue SUMMON_BOTTLE_VERTICAL_OFFSET = BUILDER
-            .comment("Vertical GUI-pixel offset of the summon-key bottle animation from screen center.")
+            .comment("召唤键瓶子动画相对屏幕中心的垂直偏移（GUI 像素）。")
             .defineInRange("summonBottleVerticalOffset", 0, -4096, 4096);
 
     public static final ForgeConfigSpec.ConfigValue<String> REVIVE_ITEM = BUILDER
-            .comment("Item ID required to revive a dead pet (e.g. \"minecraft:totem_of_undying\").",
-                    "Set this to an empty string (reviveItem = \"\") to require no item.",
-                    "When empty, the item prompt is hidden and revival is available as soon as the cooldown expires.")
+            .comment("复活死亡宠物所需的物品 ID（例如 \"minecraft:totem_of_undying\"）。",
+                    "将其设为空字符串（reviveItem = \"\"）表示不需要物品。",
+                    "为空时，物品提示会被隐藏，冷却结束后即可立即复活。")
             .define("reviveItem", "minecraft:totem_of_undying");
 
     public static final ForgeConfigSpec.ConfigValue<String> MANUAL_REGISTER_ITEM = BUILDER
-            .comment("Item used to manually register a pet by right-clicking the entity.",
-                    "The registration uses the same checks and behavior as /tbf load.")
+            .comment("用于通过右键点击实体来手动注册宠物的物品。",
+                    "该注册使用与 /tbf load 相同的检查和行为。")
             .define("manualRegisterItem", "minecraft:feather",
                     value -> value instanceof String && ResourceLocation.tryParse((String) value) != null);
 
     public static final ForgeConfigSpec.BooleanValue CONSUME_MANUAL_REGISTER_ITEM = BUILDER
-            .comment("If true, a successful manual pet registration consumes the configured number of items.",
-                    "Items are not consumed when registration fails or when the player is in creative mode.")
+            .comment("若为 true，手动注册宠物成功时会消耗配置数量的物品。",
+                    "注册失败或玩家处于创造模式时不消耗物品。")
             .define("consumeManualRegisterItem", false);
 
     public static final ForgeConfigSpec.IntValue MANUAL_REGISTER_ITEM_CONSUME_COUNT = BUILDER
-            .comment("Number of held manual registration items consumed after a successful registration.")
+            .comment("成功注册后消耗的持有手动注册物品数量。")
             .defineInRange("manualRegisterItemConsumeCount", 1, 1, 64);
 
     public static final ForgeConfigSpec.IntValue REVIVE_ITEM_COUNT = BUILDER
-            .comment("Number of revive items required to revive a dead pet.",
-                    "Ignored when reviveItem is empty.")
+            .comment("复活死亡宠物所需的复活物品数量。",
+                    "当 reviveItem 为空时忽略。")
             .defineInRange("reviveItemCount", 1, 1, 64);
 
     public static final ForgeConfigSpec.IntValue REVIVE_COOLDOWN_SECONDS = BUILDER
-            .comment("Cooldown in seconds after reviving a pet before another revive can be used.")
+            .comment("复活宠物后、再次复活可用之前的冷却（单位：秒）。")
             .defineInRange("reviveCooldownSeconds", 120, 0, 86400);
 
     public static final ForgeConfigSpec.IntValue HEAL_HUNGER_COST = BUILDER
-            .comment("Food points consumed when starting or extending pet healing. Creative players pay no cost.")
+            .comment("开始或延长宠物治疗时消耗的饱食度点数。创造模式玩家无需消耗。")
             .defineInRange("healHungerCost", 3, 0, 20);
 
     public static final ForgeConfigSpec.IntValue ADVANCED_HEAL_HUNGER_COST = BUILDER
-            .comment("Food points consumed by Shift-click advanced pet healing. Creative players pay no cost.")
+            .comment("Shift-点击高级宠物治疗消耗的饱食度点数。创造模式玩家无需消耗。")
             .defineInRange("advancedHealHungerCost", 9, 0, 20);
 
     public static final ForgeConfigSpec.IntValue HEAL_PULSE_INTERVAL_TICKS = BUILDER
-            .comment("Ticks between pet healing pulses.")
+            .comment("宠物治疗脉冲之间的间隔（单位：tick）。")
             .defineInRange("healPulseIntervalTicks", 50, 1, 1200);
 
     public static final ForgeConfigSpec.IntValue ADVANCED_HEAL_PULSE_INTERVAL_TICKS = BUILDER
-            .comment("Ticks between advanced pet healing pulses.")
+            .comment("高级宠物治疗脉冲之间的间隔（单位：tick）。")
             .defineInRange("advancedHealPulseIntervalTicks", 25, 1, 1200);
 
     public static final ForgeConfigSpec.IntValue HEAL_DURATION_PER_CLICK_TICKS = BUILDER
-            .comment("Healing duration added by one click.")
+            .comment("一次点击增加的治疗时长。")
             .defineInRange("healDurationPerClickTicks", 300, 1, 72000);
 
     public static final ForgeConfigSpec.IntValue HEAL_MAX_DURATION_TICKS = BUILDER
-            .comment("Maximum remaining healing duration. A click that would exceed this value is rejected.")
+            .comment("最大剩余治疗时长。会使结果超过该值的一次点击将被拒绝。")
             .defineInRange("healMaxDurationTicks", 1200, 1, 72000);
 
     public static final ForgeConfigSpec.DoubleValue HEAL_FLAT_AMOUNT = BUILDER
-            .comment("Flat health restored by each pulse.")
+            .comment("每次脉冲恢复的固定生命值。")
             .defineInRange("healFlatAmount", 1.0, 0.0, 1000000.0);
 
     public static final ForgeConfigSpec.DoubleValue HEAL_MAX_HEALTH_FRACTION = BUILDER
-            .comment("Fraction of the pet's current maximum health restored by each pulse (0.01 = 1%).")
+            .comment("每次脉冲恢复的宠物当前最大生命值的比例（0.01 = 1%）。")
             .defineInRange("healMaxHealthFraction", 0.01, 0.0, 1.0);
 
     public static final ForgeConfigSpec.BooleanValue ENABLE_LOGIN_LOAD_DIAGNOSTICS = BUILDER
-            .comment("If true, validates pet .nbt files on login and reports entity NBT serialization failures in chat. Debug only.")
+            .comment("若为 true，则在登录时校验宠物 .nbt 文件并在聊天中报告实体 NBT 序列化失败。仅用于调试。")
             .define("enableLoginLoadDiagnostics", false);
 
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> AUTO_REGISTER_BLACKLIST = BUILDER
-            .comment("Entity types that should not be automatically registered as pets even if they are OwnableEntity.",
-                    "Format: entity id such as \"minecraft:wolf\", or namespace wildcard such as \"some_mod:*\".",
-                    "This only blocks future automatic registration and does not remove already tracked pets.")
+            .comment("即使属于 OwnableEntity 也不应被自动注册为宠物的实体类型。",
+                    "格式：实体 id，例如 \"minecraft:wolf\"，或命名空间通配符，例如 \"some_mod:*\"。",
+                    "这只会阻止未来的自动注册，不会移除已追踪的宠物。")
             .defineListAllowEmpty("autoRegisterBlacklist", java.util.Arrays.asList(
                     "irons_spellbooks:spectral_steed",
                     "irons_spellbooks:summoned_vex",
@@ -173,14 +173,15 @@ public class Config
                     "irons_spellbooks:summoned_rapier",
                     "irons_spellbooks:spectral_hammer",
                     "irons_spellbooks:wisp",
+                    "irons_spellbooks:root",
                     "touhou_little_maid:broom",
                     "touhou_little_maid:chair"
             ), s -> s instanceof String && (((String) s).contains(":") || ((String) s).endsWith(":*")));
 
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> NO_REVIVE_WHITELIST = BUILDER
-            .comment("Entity types that keep their death drops and cannot be revived via this mod.",
-                    "Format: entity id, e.g. \"minecraft:villager\". Pets of these types will still be tracked,",
-                    "but on death they drop loot normally and the revive button is disabled for them.")
+            .comment("会保留死亡掉落且无法通过本模组复活的实体类型。",
+                    "格式：实体 id，例如 \"minecraft:villager\"，或命名空间通配符，例如 \"some_mod:*\"。",
+                    "这些类型的宠物仍会被追踪，但死亡时会正常掉落战利品，且它们的复活按钮会被禁用。")
             .defineListAllowEmpty("noReviveWhitelist", java.util.Arrays.asList(
                     "modulargolems:metal_golem",
                     "modulargolems:humanoid_golem",
@@ -188,10 +189,10 @@ public class Config
             ), s -> s instanceof String && ((String) s).contains(":"));
 
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> CLEAR_ON_DEATH_WHITELIST = BUILDER
-            .comment("Entity types that, on death, behave like noReviveWhitelist entities AND additionally",
-                    "have their stored NBT data and in-memory cache completely cleared.",
-                    "Use this for disposable or summon-only entities that should leave no trace after death.",
-                    "Format: entity id, e.g. \"minecraft:horse\".")
+            .comment("死亡时表现得像 noReviveWhitelist 实体，并且额外",
+                    "将其存储的 NBT 数据和内存缓存完全清除的实体类型。",
+                    "用于一次性或仅可召唤的实体，这些实体在死亡后不应留下任何痕迹。",
+                    "格式：实体 id，例如 \"minecraft:horse\"，或命名空间通配符，例如 \"some_mod:*\"。")
             .defineListAllowEmpty("clearOnDeathWhitelist", java.util.Arrays.asList(
                     "touhou_little_maid:maid",
                     "goety:vex_servant",
@@ -256,6 +257,14 @@ public class Config
                     "goety:wavewhisperer"
             ), s -> s instanceof String && ((String) s).contains(":"));
 
+    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> PRESENCE_PROBE_WHITELIST = BUILDER
+            .comment("需要做「存在性精确探测」的实体类型。",
+                    "玩家每次打开宠物标签页时，这些类型的宠物（未收回、未死亡、不在肩上）会被逐个查实",
+                    "到底在不在世界上：确认已不在世界上的，会从宠物列表、磁盘 NBT 文件与内存缓存中一并删除。",
+                    "格式：实体 id，例如 \"minecraft:wolf\"，或命名空间通配符，例如 \"some_mod:*\"。",
+                    "留空（默认）表示完全关闭该探测。")
+            .defineListAllowEmpty("presenceProbeWhitelist", java.util.Arrays.asList(),
+                    s -> s instanceof String && ((String) s).contains(":"));
 
     static final ForgeConfigSpec SPEC = BUILDER.build();
 
@@ -292,12 +301,14 @@ public class Config
     public static double healMaxHealthFraction;
     public static boolean enableLoginLoadDiagnostics;
     public static java.util.Set<String> autoRegisterBlacklist = new java.util.HashSet<>();
-    /** Entity type ids that keep death drops and cannot be revived. */
+    /** 保留死亡掉落且无法复活的实体类型 id。 */
     public static java.util.Set<String> noReviveWhitelist = new java.util.HashSet<>();
-    /** Entity type ids that, on death, additionally clear NBT data and in-memory cache. Also treated as no-revive. */
+    /** 死亡时额外清除 NBT 数据和内存缓存的实体类型 id。同时按不可复活处理。 */
     public static java.util.Set<String> clearOnDeathWhitelist = new java.util.HashSet<>();
+    /** 需要在打开标签页时做存在性精确探测的实体类型 id；确证不在世界上的会被清理。 */
+    public static java.util.Set<String> presenceProbeWhitelist = new java.util.HashSet<>();
 
-    /** Whether reviving a dead pet requires the configured item. */
+    /** 复活死亡宠物是否需要配置的物品。 */
     public static boolean isReviveItemRequired() {
         return reviveItem == null || !reviveItem.isBlank();
     }
@@ -308,7 +319,7 @@ public class Config
         CLEAR_ON_DEATH_WHITELIST
     }
 
-    /** Adds an entity type to the selected runtime list and persists the common config. */
+    /** 将实体类型加入所选的运行时列表并持久化公共配置。 */
     public static synchronized boolean addEntityType(EntityTypeList list, String entityTypeId) {
         ForgeConfigSpec.ConfigValue<List<? extends String>> configValue = switch (list) {
             case AUTO_REGISTER_BLACKLIST -> AUTO_REGISTER_BLACKLIST;
@@ -376,11 +387,14 @@ public class Config
         clearOnDeathWhitelist.clear();
         clearOnDeathWhitelist.addAll(CLEAR_ON_DEATH_WHITELIST.get());
 
+        presenceProbeWhitelist.clear();
+        presenceProbeWhitelist.addAll(PRESENCE_PROBE_WHITELIST.get());
+
     }
 
     /**
-     * Get the display name for a dimension in the currently selected language.
-     * Falls back to the raw dimension id when no language entry exists.
+     * 获取维度在当前所选语言下的显示名称。
+     * 当不存在语言条目时，兜底使用原始维度 id。
      */
     @OnlyIn(Dist.CLIENT)
     public static String getDimensionDisplayName(String dimKey) {
@@ -422,27 +436,44 @@ public class Config
         };
     }
 
+    /**
+     * 检查某个实体类型 id 是否在自动注册黑名单中。
+     *
+     * <p>名单条目支持命名空间通配符，例如 {@code some_mod:*}。</p>
+     */
     public static boolean isAutoRegisterBlacklisted(String entityTypeKey) {
-        if (entityTypeKey == null || entityTypeKey.isEmpty()) return false;
-        if (autoRegisterBlacklist.contains(entityTypeKey)) return true;
-        ResourceLocation id = ResourceLocation.tryParse(entityTypeKey);
-        return id != null && autoRegisterBlacklist.contains(id.getNamespace() + ":*");
+        return EntityTypeListMatcher.matches(autoRegisterBlacklist, entityTypeKey);
     }
 
     /**
-     * Check whether an entity type id is in the no-revive whitelist.
-     * Such entities keep their death drops and cannot be revived via this mod.
-     * Entities in clearOnDeathWhitelist are also treated as no-revive.
+     * 检查某个实体类型 id 是否在不可复活白名单中。
+     * 此类实体保留死亡掉落且无法通过本模组复活。
+     * clearOnDeathWhitelist 中的实体也按不可复活处理。
+     *
+     * <p>两个名单的条目都支持命名空间通配符，例如 {@code some_mod:*}。</p>
      */
     public static boolean isNoReviveEntity(String entityTypeKey) {
-        return entityTypeKey != null && (noReviveWhitelist.contains(entityTypeKey) || clearOnDeathWhitelist.contains(entityTypeKey));
+        return EntityTypeListMatcher.matches(noReviveWhitelist, entityTypeKey)
+                || EntityTypeListMatcher.matches(clearOnDeathWhitelist, entityTypeKey);
     }
 
     /**
-     * Check whether an entity type id is in the clear-on-death whitelist.
-     * Such entities behave like no-revive AND have their NBT data + cache cleared on death.
+     * 检查某个实体类型 id 是否在死亡清除白名单中。
+     * 此类实体表现得像不可复活实体，并且死亡时会清除其 NBT 数据和缓存。
+     *
+     * <p>名单条目支持命名空间通配符，例如 {@code some_mod:*}。</p>
      */
     public static boolean isClearOnDeathEntity(String entityTypeKey) {
-        return entityTypeKey != null && clearOnDeathWhitelist.contains(entityTypeKey);
+        return EntityTypeListMatcher.matches(clearOnDeathWhitelist, entityTypeKey);
+    }
+
+    /**
+     * 检查某个实体类型 id 是否需要在打开标签页时做存在性精确探测。
+     * 命中者若被确证不在世界上，会被从列表、磁盘与内存缓存中删除。
+     *
+     * <p>名单条目支持命名空间通配符，例如 {@code some_mod:*}。</p>
+     */
+    public static boolean isPresenceProbeEntity(String entityTypeKey) {
+        return EntityTypeListMatcher.matches(presenceProbeWhitelist, entityTypeKey);
     }
 }

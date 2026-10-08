@@ -3,9 +3,9 @@ package com.whidte.trulybestfriends;
 import java.util.Objects;
 
 /**
- * Standalone smoke test for dimension translation key generation.
- * Does NOT depend on Minecraft/Forge — pure Java.
- * Run with: javac ConfigDimensionTest.java && java ConfigDimensionTest
+ * 维度翻译键生成的独立冒烟测试。
+ * 不依赖 Minecraft/Forge —— 纯 Java。
+ * 运行方式：javac ConfigDimensionTest.java && java ConfigDimensionTest
  */
 public class ConfigDimensionTest {
 

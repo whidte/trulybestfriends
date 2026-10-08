@@ -7,8 +7,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.PacketDistributor;
 
 /**
- * Server → Client: full normalized formation team data
- * (color → numbered member slots).
+ * 服务端 → 客户端：完整且规范化的阵型队伍数据
+ * （颜色 → 带编号的成员槽位）。
  */
 public class TeamDataPacket {
     private final CompoundTag teamData;

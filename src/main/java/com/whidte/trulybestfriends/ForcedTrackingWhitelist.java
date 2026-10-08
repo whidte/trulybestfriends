@@ -7,7 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** Pure NBT operations for entities force-tracked by /tbf load master. */
+/** 对由 /tbf load master 强制追踪的实体进行纯 NBT 操作。 */
 final class ForcedTrackingWhitelist {
     static final String KEY = "TBF_ForcedTrackingWhitelist";
 

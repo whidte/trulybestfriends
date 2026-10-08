@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 
-/** Provides atomic compressed-NBT writes for the Forge 1.20.1 File API. */
+/** 为 Forge 1.20.1 的 File API 提供原子的压缩 NBT 写入。 */
 public final class NbtFileIO {
     private NbtFileIO() {}
 
@@ -32,15 +32,15 @@ public final class NbtFileIO {
                         StandardCopyOption.ATOMIC_MOVE,
                         StandardCopyOption.REPLACE_EXISTING);
             } catch (IOException atomicFailure) {
-                // Windows/JDK 21 can report AccessDeniedException rather than
-                // AtomicMoveNotSupportedException when atomically replacing an existing file.
+                // 在原子替换已存在的文件时，Windows/JDK 21 可能报告
+                // AccessDeniedException 而不是 AtomicMoveNotSupportedException。
                 try {
                     Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
                 } catch (IOException replacementFailure) {
                     replacementFailure.addSuppressed(atomicFailure);
-                    // An open reader may deny the replacement semantics used by both
-                    // move variants on Windows. Stream the completed temp file into the
-                    // existing target only as a last, non-atomic fallback.
+                    // 在 Windows 上，处于打开状态的读取方可能拒绝两种 move 变体
+                    // 所用的替换语义。仅在最后作为非原子的兜底手段时，
+                    // 才把已完成的临时文件流式写入现有目标。
                     try {
                         try (var output = Files.newOutputStream(target,
                                 StandardOpenOption.WRITE,

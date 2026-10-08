@@ -27,66 +27,66 @@ base {
     archivesName = mod_id
 }
 
-// Mojang ships Java 17 to end users in 1.18+, so your mod should target Java 17.
+// Mojang 从 1.18+ 起向最终用户发布 Java 17，因此你的模组应以 Java 17 为目标。
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
 minecraft {
-    // The mappings can be changed at any time and must be in the following format.
-    // Channel:   Version:
-    // official   MCVersion             Official field/method names from Mojang mapping files
-    // parchment  YYYY.MM.DD-MCVersion  Open community-sourced parameter names and javadocs layered on top of official
+    // 映射可以随时更改，且必须采用以下格式。
+    // 通道:   版本:
+    // official   MCVersion             Mojang 映射文件中的官方字段/方法名
+    // parchment  YYYY.MM.DD-MCVersion  在官方映射之上叠加的开放社区来源参数名与 javadoc
     //
-    // You must be aware of the Mojang license when using the 'official' or 'parchment' mappings.
-    // See more information here: https://github.com/MinecraftForge/MCPConfig/blob/master/Mojang.md
+    // 使用 'official' 或 'parchment' 映射时，你必须了解 Mojang 许可证。
+    // 更多信息见：https://github.com/MinecraftForge/MCPConfig/blob/master/Mojang.md
     //
-    // Parchment is an unofficial project maintained by ParchmentMC, separate from MinecraftForge
-    // Additional setup is needed to use their mappings: https://parchmentmc.org/docs/getting-started
+    // Parchment 是由 ParchmentMC 维护的非官方项目，独立于 MinecraftForge
+    // 要使用它们的映射需要额外配置：https://parchmentmc.org/docs/getting-started
     //
-    // Use non-default mappings at your own risk. They may not always work.
-    // Simply re-run your setup task after changing the mappings to update your workspace.
+    // 使用非默认映射风险自负。它们不一定总能正常工作。
+    // 更改映射后，只需重新运行 setup 任务即可更新你的工作区。
     mappings channel: mapping_channel, version: mapping_version
 
-    // When true, this property will have all Eclipse/IntelliJ IDEA run configurations run the "prepareX" task for the given run configuration before launching the game.
-    // In most cases, it is not necessary to enable.
+    // 当为 true 时，此属性会让所有 Eclipse/IntelliJ IDEA 运行配置在启动游戏前，为给定的运行配置运行 "prepareX" 任务。
+    // 大多数情况下无需启用。
     // enableEclipsePrepareRuns = true
     // enableIdeaPrepareRuns = true
 
-    // This property allows configuring Gradle's ProcessResources task(s) to run on IDE output locations before launching the game.
-    // It is REQUIRED to be set to true for this template to function.
-    // See https://docs.gradle.org/current/dsl/org.gradle.language.jvm.tasks.ProcessResources.html
+    // 此属性允许将 Gradle 的 ProcessResources 任务配置为在启动游戏前于 IDE 输出位置运行。
+    // 此模板要正常工作，必须将其设为 true。
+    // 见 https://docs.gradle.org/current/dsl/org.gradle.language.jvm.tasks.ProcessResources.html
     copyIdeResources = true
 
-    // When true, this property will add the folder name of all declared run configurations to generated IDE run configurations.
-    // The folder name can be set on a run configuration using the "folderName" property.
-    // By default, the folder name of a run configuration is the name of the Gradle project containing it.
+    // 当为 true 时，此属性会把所有已声明运行配置的文件夹名添加到生成的 IDE 运行配置中。
+    // 可使用 "folderName" 属性为运行配置设置文件夹名。
+    // 默认情况下，运行配置的文件夹名是包含它的 Gradle 项目名称。
     // generateRunFolders = true
 
-    // This property enables access transformers for use in development.
-    // They will be applied to the Minecraft artifact.
-    // The access transformer file can be anywhere in the project.
-    // However, it must be at "META-INF/accesstransformer.cfg" in the final mod jar to be loaded by Forge.
-    // This default location is a best practice to automatically put the file in the right place in the final jar.
-    // See https://docs.minecraftforge.net/en/latest/advanced/accesstransformers/ for more information.
+    // 此属性启用开发时使用的访问转换器。
+    // 它们会被应用到 Minecraft 制品上。
+    // 访问转换器文件可以位于项目中的任意位置。
+    // 但在最终模组 jar 中，它必须位于 "META-INF/accesstransformer.cfg" 才能被 Forge 加载。
+    // 这个默认位置是一种最佳实践，可自动把文件放到最终 jar 中的正确位置。
+    // 更多信息见 https://docs.minecraftforge.net/en/latest/advanced/accesstransformers/。
     // accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
 
-    // Default run configurations.
-    // These can be tweaked, removed, or duplicated as needed.
+    // 默认运行配置。
+    // 可根据需要调整、删除或复制。
     runs {
-        // applies to all the run configs below
+        // 适用于下面所有运行配置
         configureEach {
             workingDirectory project.file('run')
 
-            // Recommended logging data for a userdev environment
-            // The markers can be added/remove as needed separated by commas.
-            // "SCAN": For mods scan.
-            // "REGISTRIES": For firing of registry events.
-            // "REGISTRYDUMP": For getting the contents of all registries.
+            // userdev 环境推荐的日志数据
+            // 标记可按需增删，以逗号分隔。
+            // "SCAN"：用于模组扫描。
+            // "REGISTRIES"：用于触发注册表事件。
+            // "REGISTRYDUMP"：用于获取所有注册表的内容。
             property 'forge.logging.markers', 'REGISTRIES'
 
-            // Recommended logging level for the console
-            // You can set various levels here.
-            // Please read: https://stackoverflow.com/questions/2031163/when-to-use-the-different-log-levels
+            // 控制台推荐的日志级别
+            // 你可以在此设置各种级别。
+            // 请阅读：https://stackoverflow.com/questions/2031163/when-to-use-the-different-log-levels
             property 'forge.logging.console.level', 'debug'
 
             mods {
@@ -97,7 +97,7 @@ minecraft {
         }
 
         client {
-            // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
+            // 用于加载 gametest 的命名空间列表，以逗号分隔。留空 = 所有命名空间。
             property 'forge.enabledGameTestNamespaces', mod_id
         }
 
@@ -106,29 +106,29 @@ minecraft {
             args '--nogui'
         }
 
-        // This run config launches GameTestServer and runs all registered gametests, then exits.
-        // By default, the server will crash when no gametests are provided.
-        // The gametest system is also enabled by default for other run configs under the /test command.
+        // 此运行配置会启动 GameTestServer，运行所有已注册的 gametest，然后退出。
+        // 默认情况下，未提供任何 gametest 时服务端会崩溃。
+        // 对于其他运行配置，gametest 系统在 /test 命令下也默认启用。
         gameTestServer {
             property 'forge.enabledGameTestNamespaces', mod_id
         }
 
         data {
-            // example of overriding the workingDirectory set in configureEach above
+            // 覆盖上面 configureEach 中所设置 workingDirectory 的示例
             workingDirectory project.file('run-data')
 
-            // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
+            // 指定用于数据生成的 modid、生成资源的输出位置，以及查找现有资源的位置。
             args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
         }
     }
 }
 
-// Include resources generated by data generators.
+// 包含数据生成器生成的资源。
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 repositories {
-    // Put repositories for dependencies here
-    // ForgeGradle automatically adds the Forge maven and Maven Central for you
+    // 在此放置依赖所需的仓库
+    // ForgeGradle 会自动为你添加 Forge maven 和 Maven Central
 
     maven { url = "https://maven.theillusivec4.top/" }
     maven { url = "https://maven.ftb.dev/releases" }
@@ -146,30 +146,30 @@ repositories {
 }
 
 dependencies {
-    // Specify the version of Minecraft to use.
-    // Any artifact can be supplied so long as it has a "userdev" classifier artifact and is a compatible patcher artifact.
-    // The "userdev" classifier will be requested and setup by ForgeGradle.
-    // If the group id is "net.minecraft" and the artifact id is one of ["client", "server", "joined"],
-    // then special handling is done to allow a setup of a vanilla dependency without the use of an external repository.
+    // 指定要使用的 Minecraft 版本。
+    // 只要制品带有 "userdev" 分类器制品以及兼容的 patcher 制品，就可以提供任意制品。
+    // ForgeGradle 会请求并配置 "userdev" 分类器。
+    // 如果 group id 为 "net.minecraft" 且 artifact id 属于 ["client", "server", "joined"] 之一，
+    // 则会进行特殊处理，以便在不使用外部仓库的情况下搭建原版依赖。
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
-    // L2Library and L2Tabs are optional soft dependencies.
+    // L2Library 和 L2Tabs 是可选的软依赖。
     compileOnly fg.deobf("curse.maven:l2library-620203:6806000")
     compileOnly fg.deobf("dev.ftb.mods:ftb-teams-forge:2001.3.1")
 
-    // When installed, the mod gains an inventory tab; otherwise a keybinding opens the screen.
+    // 安装后，模组会获得一个物品栏标签页；否则通过按键绑定打开界面。
     compileOnly files('libs/l2tabs-0.3.3.jar')
 
-    // For more info:
+    // 更多信息：
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
 }
 
-// This block of code expands all declared replace properties in the specified resource targets.
-// A missing property will result in an error. Properties are expanded using ${} Groovy notation.
-// When "copyIdeResources" is enabled, this will also run before the game launches in IDE environments.
-// See https://docs.gradle.org/current/dsl/org.gradle.language.jvm.tasks.ProcessResources.html
+// 这段代码会在指定资源目标中展开所有声明的 replace 属性。
+// 缺少属性会导致错误。属性使用 ${} Groovy 记法展开。
+// 当启用 "copyIdeResources" 时，此任务也会在 IDE 环境中启动游戏前运行。
+// 见 https://docs.gradle.org/current/dsl/org.gradle.language.jvm.tasks.ProcessResources.html
 tasks.named('processResources', ProcessResources).configure {
     var replaceProperties = [
             minecraft_version: minecraft_version, minecraft_version_range: minecraft_version_range,
@@ -185,13 +185,13 @@ tasks.named('processResources', ProcessResources).configure {
     }
 }
 
-// Example for how to get properties into the manifest for reading at runtime.
+// 如何将属性放入 manifest 以便在运行时读取的示例。
 tasks.named('jar', Jar).configure {
     manifest {
         attributes([
                 'Specification-Title'     : mod_id,
                 'Specification-Vendor'    : mod_authors,
-                'Specification-Version'   : '1', // We are version 1 of ourselves
+                'Specification-Version'   : '1', // 我们自己就是版本 1
                 'Implementation-Title'    : project.name,
                 'Implementation-Version'  : project.jar.archiveVersion,
                 'Implementation-Vendor'   : mod_authors,
@@ -199,16 +199,16 @@ tasks.named('jar', Jar).configure {
         ])
     }
 
-    // This is the preferred method to reobfuscate your jar file
+    // 这是重新混淆 jar 文件的首选方法
     finalizedBy 'reobfJar'
 }
 
-// However if you are in a multi-project build, dev time needs unobfed jar files, so you can delay the obfuscation until publishing by doing:
+// 不过，如果你处于多项目构建中，开发时需要未混淆的 jar 文件，因此可以改为把混淆推迟到发布时再进行：
 // tasks.named('publish').configure {
 //     dependsOn 'reobfJar'
 // }
 
-// Example configuration to allow publishing using the maven-publish plugin
+// 允许使用 maven-publish 插件进行发布的示例配置
 publishing {
     publications {
         register('mavenJava', MavenPublication) {
@@ -223,12 +223,12 @@ publishing {
 }
 
 tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+    options.encoding = 'UTF-8' // Java 编译使用 UTF-8 字符集
 }
 
 tasks.register('petPersistenceSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates legacy horse-slot migration and atomic NBT replacement.'
+    description = '验证旧版马槽位迁移与原子化 NBT 替换。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.network.PetPersistenceSmokeTest'
@@ -236,7 +236,7 @@ tasks.register('petPersistenceSmokeTest', JavaExec) {
 
 tasks.register('multipartRotationSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates that multipart pitch remains view-space invariant across yaw angles.'
+    description = '验证多部件俯仰角在不同偏航角下保持视角空间不变性。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.tab.MultipartRotationSmokeTest'
@@ -244,7 +244,7 @@ tasks.register('multipartRotationSmokeTest', JavaExec) {
 
 tasks.register('petGuiNbtSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates one-pet full-NBT sync and passenger-tree filtering.'
+    description = '验证单只宠物全量 NBT 同步与乘客树过滤。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.network.PetGuiNbtSmokeTest'
@@ -252,15 +252,39 @@ tasks.register('petGuiNbtSmokeTest', JavaExec) {
 
 tasks.register('petListFilterSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates combined species and pet-name filtering.'
+    description = '验证物种与宠物名称的组合过滤。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.tab.PetListFilterSmokeTest'
 }
 
+tasks.register('petSortSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证按优先级与按注册时间排序及其升降序方向。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.tab.PetSortSmokeTest'
+}
+
+tasks.register('entityTypeListMatcherSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证实体类型名单的精确匹配与命名空间通配匹配。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.EntityTypeListMatcherSmokeTest'
+}
+
+tasks.register('petPresenceProbeSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证存在性探测的三态判定与确认窗口边界。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.PetPresenceProbeSmokeTest'
+}
+
 tasks.register('reviveProtectionSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates the exact 20-tick post-revive protection window.'
+    description = '验证精确的 20 tick 复活后保护窗口。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.ReviveProtectionSmokeTest'
@@ -272,15 +296,29 @@ tasks.named('check') {
     dependsOn tasks.named('multipartRotationSmokeTest')
     dependsOn tasks.named('petGuiNbtSmokeTest')
     dependsOn tasks.named('petListFilterSmokeTest')
+    dependsOn tasks.named('petSortSmokeTest')
     dependsOn tasks.named('reviveProtectionSmokeTest')
+    dependsOn tasks.named('entityTypeListMatcherSmokeTest')
+    dependsOn tasks.named('petPresenceProbeSmokeTest')
     dependsOn tasks.named('petIndexBlacklistTest')
+    dependsOn tasks.named('tbfOwnerTagTest')
     dependsOn tasks.named('petHealingSmokeTest')
     dependsOn tasks.named('petTeamDataTest')
+    dependsOn tasks.named('areaRecallMessageSmokeTest')
+    dependsOn tasks.named('modCommandSuggestionSmokeTest')
+}
+
+tasks.register('modCommandSuggestionSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证 /tbf open 补全列表的排序与截断规则。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.command.ModCommandSuggestionSmokeTest'
 }
 
 tasks.register('ownerNbtResolverSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates top-level and nested owner NBT path resolution.'
+    description = '验证顶层与嵌套主人 NBT 路径的解析。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.OwnerNbtResolverSmokeTest'
@@ -288,7 +326,7 @@ tasks.register('ownerNbtResolverSmokeTest', JavaExec) {
 
 tasks.register('petHealingSmokeTest', JavaExec) {
     group = 'verification'
-    description = 'Validates pet healing duration, pulse, cap, and pending-state rules.'
+    description = '验证宠物治疗的持续时间、脉冲、上限与待处理状态规则。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.network.PetHealingSmokeTest'
@@ -296,21 +334,29 @@ tasks.register('petHealingSmokeTest', JavaExec) {
 
 tasks.register('petIndexBlacklistTest', JavaExec) {
     group = 'verification'
-    description = 'Validates persistent UUID blacklist entries in the pet index.'
+    description = '验证宠物索引中的持久化 UUID 黑名单条目。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.PetIndexBlacklistTest'
 }
 
+tasks.register('tbfOwnerTagTest', JavaExec) {
+    group = 'verification'
+    description = '验证 TBF\'s 自身的 owner 字段：双重读取与旧版字符串修复。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.TbfOwnerTagTest'
+}
+
 tasks.register('petTeamDataTest', JavaExec) {
     group = 'verification'
-    description = 'Validates the eight-team NBT schema, slots, capacity, and stale-member cleanup.'
+    description = '验证八队伍 NBT 结构、槽位、容量与过期成员清理。'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.whidte.trulybestfriends.network.PetTeamDataTest'
 }
 
-// Clean stale lock files from previous runClient before launching
+// 启动前清理上次 runClient 遗留的陈旧锁文件
 tasks.register('cleanRunLocks') {
     doLast {
         def runDir = file('run')
@@ -324,4 +370,12 @@ tasks.register('cleanRunLocks') {
 }
 tasks.matching { it.name == 'runClient' }.configureEach {
     dependsOn 'cleanRunLocks'
+}
+
+tasks.register('areaRecallMessageSmokeTest', JavaExec) {
+    group = 'verification'
+    description = '验证群体收回消息的名称合并格式、名字上的点击事件与名称解析优先级。'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.whidte.trulybestfriends.network.AreaRecallMessageSmokeTest'
 }

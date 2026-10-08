@@ -34,9 +34,9 @@ public class RecallPetPacket {
         return new RecallPetPacket(buf.readUUID());
     }
 
-    /** Server determines action based on actual world state, not client guess.
-     *  Mirrors TeleportPetToPlayerPacket's strict entity-existence checks:
-     *  searches the pet's stored dimension before falling back to chunk force-load. */
+    /** 服务端根据实际世界状态决定动作，而非客户端猜测。
+     *  与 TeleportPetToPlayerPacket 的严格实体存在性检查保持一致：
+     *  先搜索宠物所存储的维度，再回退到区块强制加载。 */
     public static void handle(RecallPetPacket packet, Supplier<NetworkEvent.Context> ctx) {
         handle(packet, ctx, true);
     }
@@ -52,25 +52,25 @@ public class RecallPetPacket {
             if (player == null) return;
             ServerLevel playerLevel = player.serverLevel();
 
-            // --- Case 1: pet is alive in player's current dimension ---
+            // --- 情况 1：宠物存活于玩家当前所在维度 ---
             Entity entity = playerLevel.getEntity(packet.petUuid);
 
-            // Multipart sub-parts (e.g., dragon tail) are never tracked
-            // directly — refuse to recall them to avoid discarding a part
-            // without its parent, which would corrupt the multipart entity.
+            // 多部件子部件（例如末影龙的尾巴）从不被直接追踪
+            // ——拒绝收回它们，以免在没有其父级的情况下丢弃某个部件，
+            // 从而破坏多部件实体。
             if (entity instanceof PartEntity<?>) return;
 
             if (entity instanceof LivingEntity living && living.isAlive()) {
-                // If the entity is no longer tracked, its data was already cleared
-                // (e.g. clearOnDeath whitelist, manual delete). Refuse recall to
-                // prevent recreating a pet that should be gone.
+                // 如果实体已被取消追踪，说明其数据已被清除
+                // （例如 clearOnDeath 白名单、手动删除）。拒绝收回，
+                // 以防重新创建本应消失的宠物。
                 if (!trulybestfriends.isTrackedPet(packet.petUuid)
                         || !trulybestfriends.isOwnedBy(living, player.getUUID())) return;
 
                 if (Config.recallRange < 0 || entity.distanceTo(player) <= Config.recallRange) {
-                    // RECALL: pet is alive in world → save and remove
-                    // Force dismount: eject all passengers and dismount the pet from its vehicle
-                    // before saving, otherwise the saved NBT / passenger references become stale.
+                    // RECALL：宠物存活于世界中 → 保存并移除
+                    // 强制下坐骑：在保存前弹出所有乘客并让宠物从其载具上下来，
+                    // 否则保存的 NBT / 乘客引用会过期。
                     living.ejectPassengers();
                     living.stopRiding();
                     if (savePetToDisk(player.getUUID(), living, playerLevel)) {
@@ -81,10 +81,10 @@ public class RecallPetPacket {
                 return;
             }
 
-            // Entity exists in current dim but is not a living/alive entity → do nothing
+            // 实体存在于当前维度，但不是生物/存活实体 → 不做任何事
             if (entity != null) return;
 
-            // --- Not in player's current dimension: check shoulder, then disk ---
+            // --- 不在玩家当前维度：先检查肩上，再检查磁盘 ---
             var shoulderNbt = PetIOUtil.getShoulderEntity(player, packet.petUuid);
             if (shoulderNbt != null) {
                 trulybestfriends.flushPendingPetSaves(player.getUUID());
@@ -95,10 +95,10 @@ public class RecallPetPacket {
                 return;
             }
 
-            // --- Check disk NBT ---
+            // --- 检查磁盘 NBT ---
             Path ownerDir = PetIOUtil.getOwnerDir(player);
             File nbtFile = ownerDir.resolve(packet.petUuid + ".nbt").toFile();
-            if (!nbtFile.exists()) return;  // never tracked, do nothing
+            if (!nbtFile.exists()) return;  // 从未被追踪，不做任何事
 
             CompoundTag nbt;
             try {
@@ -108,7 +108,7 @@ public class RecallPetPacket {
                 return;
             }
 
-            // --- SUMMON path: pet was recalled to disk → release back into world ---
+            // --- SUMMON 路径：宠物已被收回至磁盘 → 释放回世界 ---
             if (nbt.getBoolean("Recalled")) {
                 if (trulybestfriends.isPendingRemoval(player.getUUID(), packet.petUuid)) {
                     PetWarningPacket.send(player, 2, packet.petUuid);
@@ -125,22 +125,22 @@ public class RecallPetPacket {
                 return;
             }
 
-            // --- RECALL path: pet is supposedly alive somewhere (not Recalled on disk) ---
-            // Dead pets cannot be recalled (use revive instead)
+            // --- RECALL 路径：宠物按说存活于某处（磁盘上未标记 Recalled）---
+            // 死亡的宠物无法被收回（请改用复活）
             if (PetDeathState.isDeadSnapshot(nbt)) return;
 
-            // Resolve the pet's last known dimension from NBT
+            // 从 NBT 解析宠物最后已知的维度
             ServerLevel resolved = PetIOUtil.getLevel(player.server, nbt.getString("Dimension"));
             ServerLevel petLevel = resolved != null ? resolved : playerLevel;
 
-            // --- Case 2: pet is alive in its stored dimension (same or different from player) ---
+            // --- 情况 2：宠物存活于其存储的维度（与玩家相同或不同）---
             Entity petEntity = petLevel.getEntity(packet.petUuid);
             if (petEntity instanceof LivingEntity living && living.isAlive()) {
                 if (!trulybestfriends.isTrackedPet(packet.petUuid)
                         || !trulybestfriends.isOwnedBy(living, player.getUUID())) return;
 
-                // Range check: same dimension uses real distance; cross-dimension
-                // allows recall (player explicitly chose to recall from another dimension)
+                // 范围检查：同一维度使用真实距离；跨维度
+                // 则允许收回（玩家明确选择从另一个维度收回）
                 if (Config.recallRange >= 0 && petLevel == playerLevel) {
                     if (living.distanceTo(player) > Config.recallRange) return;
                 }
@@ -154,23 +154,23 @@ public class RecallPetPacket {
                 return;
             }
 
-            // --- Case 3: pet not found in stored dimension → check chunk load status ---
+            // --- 情况 3：在存储维度中未找到宠物 → 检查区块加载状态 ---
             var storedChunk = PetIOUtil.getStoredChunk(nbt);
-            if (storedChunk == null) return;  // no position info
+            if (storedChunk == null) return;  // 没有位置信息
             int cx = storedChunk.x;
             int cz = storedChunk.z;
 
-            // If the chunk IS loaded but the entity wasn't found, the pet truly
-            // doesn't exist (was removed/died). Warn the player and keep the disk
-            // entry intact — player can use the delete mode to clean it up manually.
+            // 如果区块确实已加载，却未找到实体，说明宠物确实
+            // 不存在（已被移除/死亡）。警告玩家并保持磁盘
+            // 条目不变 —— 玩家可用删除模式手动清理。
             if (petLevel.hasChunk(cx, cz)) {
                 trulybestfriends.LOGGER.debug("Recall: pet {} not found in loaded chunk {},{}", packet.petUuid, cx, cz);
                 PetWarningPacket.send(player, 3, packet.petUuid);
                 return;
             }
 
-            // --- Case 4: chunk is unloaded → force-load and queue removal ---
-            // Range check using NBT Pos (the only position info we have)
+            // --- 情况 4：区块未加载 → 强制加载并排队移除 ---
+            // 使用 NBT Pos 做范围检查（这是我们唯一拥有的位置信息）
             if (Config.recallRange >= 0 && nbt.contains("Pos")) {
                 var posList = nbt.getList("Pos", 6);
                 if (posList.size() >= 3) {
@@ -228,13 +228,16 @@ public class RecallPetPacket {
         }
     }
 
-    private static boolean summonPet(ServerPlayer player, UUID petUuid, ServerLevel level, CompoundTag nbt) {
-        return TeleportPetToPlayerPacket.summonFromDisk(nbt, petUuid, player, level);
+    private static boolean summonPet(ServerPlayer player, UUID petUuid, ServerLevel level,
+                                     CompoundTag nbt, File nbtFile) {
+        UUID ownerHint = PetIOUtil.ownerFromPetFile(nbtFile);
+        return TeleportPetToPlayerPacket.summonFromDisk(nbt, petUuid, player, level,
+                ownerHint != null ? ownerHint : player.getUUID());
     }
 
     /**
-     * Release a recalled pet back into the world. The disk flag is cleared
-     * before summoning and restored if summoning fails.
+     * 把一只已收回的宠物释放回世界。磁盘标志在召唤前被清除，
+     * 若召唤失败则恢复。
      */
     public static boolean releaseRecalledPet(ServerPlayer player, UUID petUuid, ServerLevel level) {
         Path ownerDir = PetIOUtil.getOwnerDir(player);
@@ -265,7 +268,7 @@ public class RecallPetPacket {
             return false;
         }
 
-        if (summonPet(player, petUuid, level, nbt)) {
+        if (summonPet(player, petUuid, level, nbt, nbtFile)) {
             player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT,
                     net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);
             return true;

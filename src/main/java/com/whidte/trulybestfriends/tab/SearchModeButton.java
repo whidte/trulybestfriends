@@ -8,7 +8,7 @@ import org.jetbrains.annotations.NotNull;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.RECIPE_BOOK_TEXTURE;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.SEARCH_TOGGLE_SIZE;
 
-/** Toggles the shared list control between species filtering and name search. */
+/** 在物种筛选和名称搜索之间切换共用列表控件。 */
 final class SearchModeButton extends AbstractButton {
     private final TrulyScreen screen;
 

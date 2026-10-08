@@ -22,7 +22,7 @@ import org.joml.Vector3f;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.DEFAULT_ROT_X;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.DEFAULT_ROT_Y;
 
-/** Shared low-level rendering helpers used by multiple tab UI classes. */
+/** 多个标签页界面类共用的底层渲染辅助方法。 */
 final class RenderHelper {
 	private static final String[] FACING_PART_NAMES = {"head", "neck", "head1", "neck1", "skull", "jaw"};
 
@@ -52,11 +52,10 @@ final class RenderHelper {
 	}
 
 	/**
-	 * Render an entity in the GUI with float-precision scale, replicating
+	 * 在界面中以浮点精度缩放渲染实体，复刻
 	 * {@link net.minecraft.client.gui.screens.inventory.InventoryScreen#renderEntityInInventory}
-	 * but accepting a float scale instead of int.  The vanilla method casts
-	 * the int scale to float internally, so this version simply skips the
-	 * truncation.
+	 * 但接受 float 缩放值而非 int。原版方法内部会把 int 缩放值转为
+	 * float，因此本版本只是省去了截断。
 	 */
 	static void renderEntityInInventory(GuiGraphics g, int x, int y, float scale,
 	                                     Quaternionf pose, Quaternionf cameraOrientation,
@@ -81,8 +80,8 @@ final class RenderHelper {
 	}
 
 	/**
-	 * Render a small pet preview (formation slot / drag ghost) using the same
-	 * pose logic as the pet-list entries, anchored by the entity's feet at (x, y).
+	 * 渲染小型宠物预览（编队槽位 / 拖动残影），使用与宠物列表条目相同的
+	 * 姿态逻辑，并以实体脚部锚定在 (x, y) 处。
 	 */
 	static void renderMiniPet(GuiGraphics g, int x, int y, float baseSize, LivingEntity pet) {
 		float scale = TrulyScreen.computePreviewScale(pet, baseSize);
@@ -107,9 +106,8 @@ final class RenderHelper {
 	}
 
 	/**
-	 * Builds a multipart preview pose with pitch in view space.  Pitch must be
-	 * composed before yaw so vertical dragging keeps the same screen-space axis
-	 * at every horizontal viewing angle.
+	 * 构建多部件预览姿态，俯仰角位于视图空间。俯仰角必须先于偏航角合成，
+	 * 这样垂直拖动在每个水平视角下都能保持相同的屏幕空间轴向。
 	 */
 	static Quaternionf buildMultipartPose(float yawRadians, float pitchRadians) {
 		return new Quaternionf()
@@ -123,21 +121,21 @@ final class RenderHelper {
 	}
 
 	// ------------------------------------------------------------------
-	//  Multipart entity Y-facing auto-detection
+	//  多部件实体 Y 朝向自动检测
 	// ------------------------------------------------------------------
 
 	private static final java.util.Map<String, Float> MULTIPART_Y_BASE_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
 
 	/**
-	 * Auto-detect the Y-axis base rotation (in radians) for a multipart
-	 * entity by examining its model's head/neck part position.
+	 * 通过检查多部件实体模型的头部/颈部部件位置，自动检测其 Y 轴基础
+	 * 旋转（单位为弧度）。
 	 * <p>
-	 * Minecraft's model convention: -Z is "forward" (where the head is).
-	 * Standard models (e.g. Ender Dragon) have head at -Z → return 0.
-	 * Non-standard models (e.g. Ice &amp; Fire dragons) have head at +Z →
-	 * return PI so the model is flipped to face the camera.
+	 * Minecraft 的模型约定：-Z 为“前方”（头部所在方向）。
+	 * 标准模型（例如末影龙）头部在 -Z → 返回 0。
+	 * 非标准模型（例如 Ice &amp; Fire 的龙）头部在 +Z →
+	 * 返回 PI，使模型翻转以面向摄像机。
 	 * <p>
-	 * Results are cached per entity type id.
+	 * 结果按实体类型 id 缓存。
 	 */
 	static float detectMultipartYBase(LivingEntity entity) {
 		String typeKey = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType()).toString();
@@ -183,7 +181,7 @@ final class RenderHelper {
 		return null;
 	}
 
-	/** Access the protected {@code root} field of Model via reflection. */
+	/** 通过反射访问 Model 的 protected 字段 {@code root}。 */
 	private static ModelPart getModelRoot(EntityModel<?> model) {
 		try {
 			java.lang.reflect.Field f = net.minecraft.client.model.Model.class.getDeclaredField("root");
@@ -195,8 +193,8 @@ final class RenderHelper {
 	}
 
 	/**
-	 * For renderers that don't extend LivingEntityRenderer (e.g.
-	 * EnderDragonRenderer), access the private "model" field via reflection.
+	 * 对于未继承 LivingEntityRenderer 的渲染器（例如
+	 * EnderDragonRenderer），通过反射访问其私有的 "model" 字段。
 	 */
 	private static EntityModel<?> getModelFromRenderer(EntityRenderer<?> renderer) {
 		return findFieldValue(renderer, "model", EntityModel.class);
@@ -225,8 +223,8 @@ final class RenderHelper {
 	}
 
 	/**
-	 * Search the model hierarchy for a child named {@code name} and return
-	 * its local Z offset (in model units, already divided by 16).
+	 * 在模型层级中查找名为 {@code name} 的子部件，并返回
+	 * 其局部 Z 偏移（单位为模型单位，已除以 16）。
 	 */
 	@SuppressWarnings("unchecked")
 	private static Float findPartLocalZ(ModelPart root, String name) {
@@ -250,7 +248,7 @@ final class RenderHelper {
 		return null;
 	}
 
-	/** Tile a texture horizontally with a repeating source region, respecting destination bounds. */
+	/** 使用重复的源区域沿水平方向平铺纹理，并遵循目标区域边界。 */
 	static void tileBlitH(GuiGraphics g, ResourceLocation tex, int x, int y, int drawW, int drawH,
 	                      int u, int v, int srcW, int srcH, int texW, int texH) {
 		int drawn = 0;
@@ -261,14 +259,14 @@ final class RenderHelper {
 		}
 	}
 
-	/** Draw a Component at (x, y) using direct batch rendering. */
+	/** 使用直接批渲染在 (x, y) 处绘制一个 Component。 */
 	static void drawString(GuiGraphics g, Font font, Component text, int x, int y, int color) {
 		font.drawInBatch(text.getVisualOrderText(), x, y, color, false,
 				g.pose().last().pose(), g.bufferSource(),
 				Font.DisplayMode.NORMAL, 0, 15728880);
 	}
 
-	/** Draw a Component with horizontal scrolling when its width exceeds maxWidth. */
+	/** 绘制一个 Component，当其宽度超过 maxWidth 时水平滚动。 */
 	static void drawScrollingString(GuiGraphics g, Font font, Component text, int x, int y, int maxWidth, int color) {
 		int textWidth = font.width(text);
 		if (textWidth <= maxWidth) {

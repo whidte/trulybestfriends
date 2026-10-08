@@ -4,7 +4,7 @@ import net.minecraft.Util;
 
 import java.util.Objects;
 
-/** Tracks whether the same hover target has remained active long enough to show a tooltip. */
+/** 跟踪同一悬停目标是否已持续足够长时间以显示悬浮提示。 */
 final class HoverDelay {
     private static final long DEFAULT_DELAY_MILLIS = 1000L;
 

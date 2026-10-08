@@ -6,7 +6,7 @@ import net.minecraft.nbt.Tag;
 import java.util.UUID;
 import java.util.function.BiPredicate;
 
-/** Mutates fields stored inside one pet UUID node without replacing sibling data. */
+/** 修改存储在单个宠物 UUID 节点内的字段，而不替换同级数据。 */
 public final class PetIndexState {
     private PetIndexState() {}
 

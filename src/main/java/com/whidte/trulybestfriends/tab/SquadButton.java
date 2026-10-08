@@ -4,7 +4,7 @@ import net.minecraft.network.chat.Component;
 
 import static com.whidte.trulybestfriends.tab.TrulyConstants.SQUAD_ICON;
 
-/** Icon-only button placed to the right of the summon button. */
+/** 放置在召唤按钮右侧的纯图标按钮。 */
 class SquadButton extends IconNavigationButton {
     private static final Component LABEL = Component.translatable("trulybestfriends.squad.tooltip");
 

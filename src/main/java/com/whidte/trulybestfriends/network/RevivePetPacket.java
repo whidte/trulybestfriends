@@ -26,7 +26,7 @@ import java.nio.file.Path;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/** Client -> Server: consume items from player inventory and revive a dead pet. */
+/** 客户端 -> 服务端：从玩家背包中消耗物品并复活一只死亡宠物。 */
 public class RevivePetPacket {
     private static final byte TOTEM_ACTIVATION_EVENT = 35;
     private static final int REVIVE_INVULNERABILITY_TICKS = 20;
@@ -58,10 +58,10 @@ public class RevivePetPacket {
             try {
                 CompoundTag nbt = NbtFileIO.readCompressed(nbtFile);
 
-                // Only revive if actually dead
+                // 仅在确实死亡时才复活
                 if (!PetDeathState.isDeadSnapshot(nbt)) return;
 
-                // Whitelisted entity types cannot be revived via this mod
+                // 白名单中的实体类型无法通过本模组复活
                 if (nbt.contains("EntityType") && Config.isNoReviveEntity(nbt.getString("EntityType"))) {
                     player.sendSystemMessage(net.minecraft.network.chat.Component
                             .translatable("trulybestfriends.revive.not_revivable")
@@ -79,16 +79,16 @@ public class RevivePetPacket {
                     return;
                 }
 
-                // Validate first; consume only after the revive has actually succeeded.
+                // 先校验；仅在复活确实成功后才消耗。
                 if (!player.isCreative() && !hasItems(player)) return;
                 CompoundTag deadSnapshot = nbt.copy();
 
-                // Update saved position to a safe spot near the player FIRST,
-                // so the pet appears at the player's location when summoned.
+                // 首先把保存的位置更新为玩家附近的安全点，
+                // 这样召唤时宠物会出现在玩家的位置。
                 nbt.putString("Dimension", level.dimension().location().toString());
                 writeSafePosNearPlayer(nbt, player, level);
 
-                // Revive at 1 HP and clear death markers
+                // 以 1 点生命值复活，并清除死亡标记
                 nbt.putFloat("Health", 1.0f);
                 nbt.remove("Recalled");
                 PetDeathState.clear(nbt);
@@ -96,12 +96,14 @@ public class RevivePetPacket {
                 nbt.remove("HurtTime");
                 nbt.putBoolean("NoAI", false);
 
-                // Apply totem-of-undying status effects
+                // 应用不死图腾的状态效果
                 applyTotemEffects(nbt);
 
-                // Persist the revived NBT, then summon the pet directly into the world
+                // 持久化复活后的 NBT，然后把宠物直接召唤进世界
                 PetIOUtil.writePetState(nbtFile, nbt, level, packet.petUuid);
-                if (!TeleportPetToPlayerPacket.summonFromDisk(nbt, packet.petUuid, player, level)) {
+                UUID ownerHint = PetIOUtil.ownerFromPetFile(nbtFile);
+                if (!TeleportPetToPlayerPacket.summonFromDisk(nbt, packet.petUuid, player, level,
+                        ownerHint != null ? ownerHint : player.getUUID())) {
                     try {
                         PetIOUtil.writePetState(nbtFile, deadSnapshot, level, packet.petUuid);
                     } catch (IOException rollbackError) {
@@ -122,15 +124,15 @@ public class RevivePetPacket {
     }
 
     /**
-     * Compute a safe position near the player and write it into the pet's NBT Pos list.
-     * Creates a temporary entity to get accurate bounding-box dimensions.
+     * 计算玩家附近的安全位置，并将其写入宠物的 NBT Pos 列表。
+     * 创建一个临时实体以获取准确的碰撞箱尺寸。
      */
     private static void writeSafePosNearPlayer(CompoundTag nbt, ServerPlayer player, ServerLevel level) {
         float bbW = 0.6f;
         float bbH = 1.8f;
         Entity tempEntity = null;
 
-        // Try to create a temp entity for accurate dimensions
+        // 尝试创建临时实体以获取准确尺寸
         String typeKey = nbt.getString("EntityType");
         if (!typeKey.isEmpty()) {
             EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(ResourceLocation.tryParse(typeKey));
@@ -150,7 +152,7 @@ public class RevivePetPacket {
                 : PetIOUtil.findSafePositionNearPlayer(level, player, halfWidth, bbH, radius, 6, 16);
         if (tempEntity != null) tempEntity.discard();
 
-        // Match summon fallback: do not move upward when no valid WALKABLE spot exists.
+        // 与召唤兜底保持一致：不存在有效可站立位置时不要向上移动。
         double safeX = safePosition != null ? safePosition.x : player.getX();
         double safeY = safePosition != null
                 ? safePosition.y
@@ -164,12 +166,12 @@ public class RevivePetPacket {
         nbt.put("Pos", pos);
     }
 
-    /** Write the vanilla totem-of-undying status effects into the pet's NBT. */
+    /** 把原版不死图腾的状态效果写入宠物的 NBT。 */
     static void applyTotemEffects(CompoundTag nbt) {
-        // Mirror LivingEntity#checkTotemDeathProtection effects:
-        //   Regeneration II,  45s (900 ticks)
-        //   Absorption II,     5s (100 ticks)
-        //   Fire Resistance,  40s (800 ticks)
+        // 对应 LivingEntity#checkTotemDeathProtection 的效果：
+        //   生命恢复 II， 45s（900 ticks）
+        //   伤害吸收 II， 5s（100 ticks）
+        //   抗火，40s（800 ticks）
         ListTag activeEffects = new ListTag();
 
         activeEffects.add(saveEffect(new MobEffectInstance(MobEffects.REGENERATION, 900, 1)));
@@ -195,7 +197,7 @@ public class RevivePetPacket {
         }
     }
 
-    /** Clear all pre-death effects and grant a fresh set of totem effects. */
+    /** 清除所有死亡前效果，并授予一套全新的图腾效果。 */
     private static void applyFreshTotemEffects(LivingEntity living) {
         living.removeAllEffects();
         living.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 900, 1));

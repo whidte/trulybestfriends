@@ -6,7 +6,7 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/** Teleports a released pet normally without attempting a ride swap. */
+/** 以常规方式传送一只已释放的宠物，不尝试骑乘交换。 */
 public class DirectTeleportPetToPlayerPacket {
     private final UUID petUuid;
 

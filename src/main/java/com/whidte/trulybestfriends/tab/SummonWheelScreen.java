@@ -37,7 +37,7 @@ import static com.whidte.trulybestfriends.tab.TrulyConstants.DEFAULT_ROT_X;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.DEFAULT_ROT_Y;
 import static com.whidte.trulybestfriends.tab.TrulyConstants.LIST_ENTRY_SCALE_RATIO;
 
-/** Hold-to-select radial screen for the eight members of the current formation team. */
+/** 用于当前编队队伍八名成员的按住选择式轮盘界面。 */
 public final class SummonWheelScreen extends Screen {
     private static final ResourceLocation WHEEL = ResourceLocation.fromNamespaceAndPath(
             "truly_best_friends", "textures/gui/wheel.png");
@@ -209,13 +209,13 @@ public final class SummonWheelScreen extends Screen {
         return members.containsKey(DIRECTION_SLOTS[direction]) ? direction : -1;
     }
 
-    /** Display name matching the pet list: CustomName when present, else entity type name. */
+    /** 与宠物列表一致的显示名称：存在 CustomName 时使用它，否则使用实体类型名称。 */
     private Component petName(UUID uuid) {
         CompoundTag nbt = SummonWheelData.petNbt(uuid);
         return nbt == null ? Component.empty() : PetDataLoader.displayName(minecraft, nbt);
     }
 
-    /** Pet-list style name rendering inside the wheel center: scrolls when too long. */
+    /** 轮盘中心处采用宠物列表风格的名称渲染：过长时横向滚动。 */
     private void renderCenterName(GuiGraphics graphics, Component name, int centerX, int centerY) {
         int textWidth = font.width(name);
         int nameX = centerX - CENTER_NAME_MAX_WIDTH / 2;
@@ -233,7 +233,7 @@ public final class SummonWheelScreen extends Screen {
         }
     }
 
-    /** Half-size centered hint text (pose-scaled 0.5x). */
+    /** 半尺寸居中提示文字（通过 pose 缩放 0.5 倍）。 */
     private void renderHalfSizeCentered(GuiGraphics graphics, Component text, int centerX, int y, int color) {
         graphics.pose().pushPose();
         graphics.pose().translate(centerX, y, 0.0F);
@@ -261,7 +261,7 @@ public final class SummonWheelScreen extends Screen {
         return living;
     }
 
-    /** 1px white border matching the pet-list selected frame, drawn under the pet. */
+    /** 与宠物列表选中边框一致的 1 像素白色边框，绘制在宠物下方。 */
     private static void renderSelectedBorder(GuiGraphics graphics, int x, int y) {
         graphics.fill(x, y, x + SLOT_SIZE, y + 1, 0xFFFFFFFF);
         graphics.fill(x, y + SLOT_SIZE - 1, x + SLOT_SIZE, y + SLOT_SIZE, 0xFFFFFFFF);

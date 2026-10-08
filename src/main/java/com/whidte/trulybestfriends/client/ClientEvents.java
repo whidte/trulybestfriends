@@ -10,7 +10,9 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.MovementInputUpdateEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
+import net.minecraftforge.client.event.RegisterParticleProvidersEvent;
 import net.minecraftforge.client.event.RenderGuiEvent;
+import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -36,6 +38,8 @@ public final class ClientEvents {
         MinecraftForge.EVENT_BUS.addListener(ClientEvents::onClientTick);
         MinecraftForge.EVENT_BUS.addListener(ClientEvents::onMovementInputUpdate);
         MinecraftForge.EVENT_BUS.addListener(ClientEvents::onRenderGui);
+        MinecraftForge.EVENT_BUS.addListener(ClientEvents::onMouseScroll);
+        MinecraftForge.EVENT_BUS.addListener(AreaRecallRangeRenderer::onRenderLevelStage);
         event.enqueueWork(() -> {
             if (ModList.get().isLoaded("l2tabs")) {
                 try {
@@ -56,9 +60,19 @@ public final class ClientEvents {
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(OPEN_TAB_KEY);
         event.register(SummonKeyHandler.SUMMON_KEY);
+        event.register(AreaRecallKeyHandler.AREA_RECALL_KEY);
+    }
+
+    /** 短命末影人粒子只在客户端本地生成，注册提供者即可。 */
+    @SubscribeEvent
+    public static void onRegisterParticleProviders(RegisterParticleProvidersEvent event) {
+        event.registerSpriteSet(ModParticleTypes.shortPortal(), ShortPortalParticle.Provider::new);
     }
 
     private static void onKeyInput(InputEvent.Key event) {
+        if (AreaRecallKeyHandler.onKeyInput(event.getKey(), event.getScanCode(), event.getAction())) {
+            return;
+        }
         if (SummonKeyHandler.onKeyInput(event.getKey(), event.getScanCode(), event.getAction())) {
             if (isTabKeySharedWithSummon()) {
                 OPEN_TAB_KEY.consumeClick();
@@ -72,27 +86,39 @@ public final class ClientEvents {
         }
     }
 
-    /** Opens the pet tab screen when the player has no screen open. */
+    /** 按住群体收回键时，滚轮改为调节收回半径，不再切换快捷栏。 */
+    private static void onMouseScroll(InputEvent.MouseScrollingEvent event) {
+        if (AreaRecallKeyHandler.onMouseScroll(event.getScrollDelta())) {
+            event.setCanceled(true);
+        }
+    }
+
+    /** 当玩家没有打开任何界面时，打开宠物标签页。 */
     public static void openPetTab() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null) return;
         minecraft.setScreen(new TrulyScreen(Component.translatable("tab.trulybestfriends.pets")));
     }
 
-    /** True when the summon wheel key and the pet tab key are bound to the same physical key. */
+    /** 当召唤轮盘按键与宠物标签页按键绑定到同一物理按键时为 true。 */
     public static boolean isTabKeySharedWithSummon() {
         return OPEN_TAB_KEY.same(SummonKeyHandler.SUMMON_KEY);
     }
 
     private static void onClientTick(TickEvent.ClientTickEvent event) {
-        if (event.phase == TickEvent.Phase.END) SummonKeyHandler.tick();
+        if (event.phase == TickEvent.Phase.END) {
+            SummonKeyHandler.tick();
+            AreaRecallKeyHandler.tick();
+        }
     }
 
     private static void onMovementInputUpdate(MovementInputUpdateEvent event) {
         SummonKeyHandler.applyMovementInput(event.getInput());
+        AreaRecallKeyHandler.applyMovementInput(event.getInput());
     }
 
     private static void onRenderGui(RenderGuiEvent.Post event) {
         SummonKeyHandler.renderBottle(event.getGuiGraphics());
+        AreaRecallKeyHandler.renderBottle(event.getGuiGraphics());
     }
 }

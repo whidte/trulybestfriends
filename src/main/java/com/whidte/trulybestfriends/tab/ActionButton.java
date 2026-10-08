@@ -87,7 +87,7 @@ class ActionButton extends AbstractWidget {
 		}
 		guiGraphics.blit(WIDGET_BUTTON, getX(), getY(), 0, frameV, 20, 20, 256, 256);
 
-		// Center 16x16 icon
+		// 居中 16x16 图标
 		ResourceLocation icon;
 		if (shiftHeld) {
 			icon = ICON_AREA_RECALL;
@@ -115,7 +115,7 @@ class ActionButton extends AbstractWidget {
 	public void onClick(double mouseX, double mouseY) {
 		if (!screen.hasSelection()) return;
 
-		// Shift-held: area recall — ignores cooldown and dead state
+		// 按住 Shift：区域收回——忽略冷却和死亡状态
 		if (Screen.hasShiftDown()) {
 			trulybestfriends.CHANNEL.sendToServer(new AreaRecallPacket(screen.areaRecallRange));
 			return;

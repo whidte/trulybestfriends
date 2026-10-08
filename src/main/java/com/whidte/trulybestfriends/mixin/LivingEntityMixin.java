@@ -21,7 +21,7 @@ public abstract class LivingEntityMixin {
         }
     }
 
-    /** Direct-die fallback, limited to entities that do not override die. */
+    /** 直接 die 的兜底逻辑，仅限未覆写 die 的实体。 */
     @Inject(method = "die", at = @At("HEAD"), cancellable = true)
     private void trulybestfriends$storeBeforeDeath(DamageSource source, CallbackInfo callback) {
         if (DeathInterceptionCompat.tryStoreDirectDieFallback((LivingEntity) (Object) this)) {

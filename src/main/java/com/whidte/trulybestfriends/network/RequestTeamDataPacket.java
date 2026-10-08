@@ -7,7 +7,7 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
 
-/** Client → Server: request the current formation team data. */
+/** 客户端 → 服务端：请求当前的阵型队伍数据。 */
 public class RequestTeamDataPacket {
 
     public static void encode(RequestTeamDataPacket packet, FriendlyByteBuf buf) {}

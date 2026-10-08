@@ -16,37 +16,38 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Server → Client: pushes pet data to the client.
+ * 服务端 → 客户端：把宠物数据推送给客户端。
  *
- * Three modes:
- *  - FULL_LIST: one complete pet snapshot per packet
- *  - UPDATE:    single pet NBT updated (sent periodically for the selected pet, or on change)
- *  - DELETE:    a pet was removed (file deleted / pet permanently lost)
+ * 三种模式：
+ *  - FULL_LIST：每个数据包含一个完整的宠物快照
+ *  - UPDATE：   单个宠物的 NBT 更新（对选中宠物定期发送，或在变化时发送）
+ *  - DELETE：   某个宠物已被移除（文件被删除 / 宠物永久丢失）
  *
- * This replaces the client-side disk polling in TrulyScreen.refreshSelectedFromDisk
- * and PetDataLoader.loadAll, fixing multiplayer correctness (client cannot read
- * server saves) and removing disk I/O contention in singleplayer.
+ * 这取代了 TrulyScreen.refreshSelectedFromDisk 和 PetDataLoader.loadAll 中的
+ * 客户端磁盘轮询，修复了多人游戏下的正确性（客户端无法读取服务端存档），
+ * 并消除了单人游戏下的磁盘 I/O 争用。
  */
 public class SyncPetDataPacket {
     public static final int MODE_FULL_LIST = 0;
     public static final int MODE_UPDATE = 1;
     public static final int MODE_DELETE = 2;
-    /** Transport-only mode used when a logical packet exceeds the wire limit. */
+    /** 当逻辑数据包超过传输上限时使用的纯传输模式。 */
     public static final int MODE_FRAGMENT = 3;
     public static final int MAX_FULL_LIST_ENTRIES = 1;
-    /** Maximum encoded payload size for one custom packet (30 KiB). */
+    /** 单个自定义数据包的最大编码数据包大小（30 KiB）。 */
     public static final int MAX_PACKET_BYTES = 30 * 1024;
-    /* Leave room for the fragment header and the custom-channel envelope. */
+    /* 为分片头和自定义频道外层预留空间。 */
     private static final int WIRE_OVERHEAD_RESERVE_BYTES = 256;
     private static final int MAX_LOGICAL_PACKET_BYTES = MAX_PACKET_BYTES - WIRE_OVERHEAD_RESERVE_BYTES;
     private static final int MAX_FRAGMENT_CHUNK_BYTES = MAX_LOGICAL_PACKET_BYTES;
     private static final int MAX_FRAGMENT_COUNT = 4096;
+    private static final long FRAGMENT_TIMEOUT_MILLIS = 30_000L;
     private static final Map<UUID, FragmentAccumulator> CLIENT_FRAGMENTS = new ConcurrentHashMap<>();
 
     private final int mode;
-    private final UUID petUuid;          // used by UPDATE / DELETE; null for FULL_LIST
-    private final CompoundTag petNbt;    // used by FULL_LIST (wrapped) / UPDATE; null for DELETE
-    private final ListTag fullList;      // used by FULL_LIST only; null otherwise
+    private final UUID petUuid;          // 由 UPDATE / DELETE 使用；FULL_LIST 时为 null
+    private final CompoundTag petNbt;    // 由 FULL_LIST（包装后）/ UPDATE 使用；DELETE 时为 null
+    private final ListTag fullList;      // 仅由 FULL_LIST 使用；其他情况为 null
     private final long serverTime;
     private final boolean firstBatch;
     private final boolean lastBatch;
@@ -56,7 +57,7 @@ public class SyncPetDataPacket {
     private final int fragmentCount;
     private final byte[] fragmentData;
 
-    // --- Constructors ---
+    // --- 构造函数 ---
 
     private SyncPetDataPacket(int mode, UUID petUuid, CompoundTag petNbt, ListTag fullList, long serverTime,
                               boolean firstBatch, boolean lastBatch) {
@@ -81,7 +82,7 @@ public class SyncPetDataPacket {
         this.fragmentData = fragmentData;
     }
 
-    /** Split a full snapshot into ordered packets containing exactly one pet each. */
+    /** 把完整快照拆分为有序的数据包，每个数据包恰好包含一个宠物。 */
     public static List<SyncPetDataPacket> fullListBatches(ListTag list) {
         List<SyncPetDataPacket> packets = new ArrayList<>();
         if (list.isEmpty()) {
@@ -108,24 +109,24 @@ public class SyncPetDataPacket {
                 firstBatch, lastBatch);
     }
 
-    /** Single pet update. */
+    /** 单个宠物更新。 */
     public static SyncPetDataPacket update(UUID uuid, CompoundTag nbt) {
         return new SyncPetDataPacket(MODE_UPDATE, uuid, nbt, null, System.currentTimeMillis(), true, true);
     }
 
-    /** Pet deletion notice. */
+    /** 宠物删除通知。 */
     public static SyncPetDataPacket delete(UUID uuid) {
         return new SyncPetDataPacket(MODE_DELETE, uuid, null, null, System.currentTimeMillis(), true, true);
     }
 
-    /** Sends one logical packet, splitting its encoded form when necessary. */
+    /** 发送一个逻辑数据包，必要时拆分其编码形式。 */
     public static void sendToPlayer(ServerPlayer player, SyncPetDataPacket packet) {
         for (SyncPetDataPacket wirePacket : packet.splitForWire()) {
             trulybestfriends.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), wirePacket);
         }
     }
 
-    /** Returns this packet or ordered transport fragments small enough for the wire. */
+    /** 返回此数据包本身，或拆分为足够小、可上线传输的有序分片。 */
     static List<SyncPetDataPacket> splitForWire(SyncPetDataPacket packet) {
         return packet.splitForWire();
     }
@@ -165,13 +166,13 @@ public class SyncPetDataPacket {
         }
     }
 
-    // --- Codec ---
+    // --- 编解码器 ---
 
     public static void encode(SyncPetDataPacket packet, FriendlyByteBuf buf) {
         buf.writeVarInt(packet.mode);
         switch (packet.mode) {
             case MODE_FULL_LIST -> {
-                // writeNbt expects a CompoundTag; wrap the ListTag in a holder.
+                // writeNbt 期望接收 CompoundTag；把 ListTag 包装进一个 holder。
                 CompoundTag holder = new CompoundTag();
                 holder.put("List", packet.fullList);
                 holder.putLong("ServerTime", packet.serverTime);
@@ -257,9 +258,12 @@ public class SyncPetDataPacket {
         };
     }
 
-    // --- Fragment assembly (used by the client-only handler) ---
+    // --- 分片组装（由仅客户端的处理器使用）---
 
     public static SyncPetDataPacket collectFragment(SyncPetDataPacket packet) {
+        long now = System.currentTimeMillis();
+        CLIENT_FRAGMENTS.entrySet().removeIf(entry ->
+                now - entry.getValue().lastUpdatedMillis > FRAGMENT_TIMEOUT_MILLIS);
         FragmentAccumulator accumulator = CLIENT_FRAGMENTS.compute(packet.fragmentId, (id, existing) -> {
             if (existing == null || existing.count != packet.fragmentCount
                     || existing.originalMode != packet.originalMode) {
@@ -290,6 +294,7 @@ public class SyncPetDataPacket {
         private final byte[][] chunks;
         private int received;
         private int totalBytes;
+        private volatile long lastUpdatedMillis = System.currentTimeMillis();
 
         private FragmentAccumulator(int originalMode, int count) {
             this.originalMode = originalMode;
@@ -306,6 +311,7 @@ public class SyncPetDataPacket {
                 received++;
                 totalBytes += data.length;
             }
+            lastUpdatedMillis = System.currentTimeMillis();
             return true;
         }
 
@@ -324,7 +330,7 @@ public class SyncPetDataPacket {
         }
     }
 
-    // --- Accessors ---
+    // --- 访问器 ---
 
     public int getMode() { return mode; }
     public UUID getPetUuid() { return petUuid; }

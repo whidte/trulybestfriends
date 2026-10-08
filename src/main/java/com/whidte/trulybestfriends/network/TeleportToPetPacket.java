@@ -9,7 +9,7 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
 
-/** Client requests teleport to pet's last known position. Server validates permissions and dimension. */
+/** 客户端请求传送到宠物最后已知的位置。服务端校验权限和维度。 */
 public class TeleportToPetPacket {
     private final String dimKey;
     private final double x, y, z;
@@ -37,14 +37,14 @@ public class TeleportToPetPacket {
             ServerPlayer player = ctx.get().getSender();
             if (player == null) return;
 
-            // Only OP (level >= 2) in creative mode can teleport
+            // 只有创造模式下的 OP（权限等级 >= 2）才能传送
             if (!player.hasPermissions(2) || !player.isCreative()) return;
 
-            // Resolve the dimension
+            // 解析维度
             ServerLevel targetLevel = PetIOUtil.getLevel(player.server, packet.dimKey);
-            if (targetLevel == null) return; // unknown dimension
+            if (targetLevel == null) return; // 未知维度
 
-            // Teleport
+            // 传送
             player.teleportTo(targetLevel, packet.x, packet.y, packet.z, player.getYRot(), player.getXRot());
             player.playNotifySound(net.minecraft.sounds.SoundEvents.ENDERMAN_TELEPORT,
                     net.minecraft.sounds.SoundSource.PLAYERS, 0.5f, 1.0f);

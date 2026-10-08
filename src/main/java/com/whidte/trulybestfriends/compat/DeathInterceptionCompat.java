@@ -4,7 +4,7 @@ import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
 
-/** Conservative compatibility rules for intercepting modded death flows. */
+/** 用于拦截模组化死亡流程的保守兼容规则。 */
 public final class DeathInterceptionCompat {
     private static final ClassValue<Boolean> USES_BASE_DIE = new ClassValue<>() {
         @Override

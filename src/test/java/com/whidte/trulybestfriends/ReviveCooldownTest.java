@@ -66,7 +66,7 @@ public class ReviveCooldownTest {
             long oldDeathTime = System.currentTimeMillis() - 50_000;
             MockNbt oldNbt = new MockNbt();
             oldNbt.putLong("LastDeathTime", oldDeathTime);
-            oldNbt.putFloat("Health", 0.0f); // dead
+            oldNbt.putFloat("Health", 0.0f); // 已死亡
 
             MockNbt newNbt = writePetDataSimulate(new MockNbt(), oldNbt);
             return newNbt.getLong("LastDeathTime") == oldDeathTime;
@@ -163,13 +163,13 @@ public class ReviveCooldownTest {
     static boolean canRevive(MockNbt nbt, int cooldownSeconds, long timeOffsetMs) {
         long now = System.currentTimeMillis() + timeOffsetMs;
 
-        // Only revive if actually dead
+        // 仅在确实死亡时才允许复活
         if (!nbt.contains("Health") || nbt.getFloat("Health") > 0) return false;
 
         long reviveCooldownMs = cooldownSeconds * 1000L;
         if (reviveCooldownMs > 0 && nbt.contains("LastDeathTime")
                 && now - nbt.getLong("LastDeathTime") < reviveCooldownMs) {
-            return false; // cooldown active
+            return false; // 冷却生效中
         }
         return true;
     }

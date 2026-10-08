@@ -11,7 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** Client-side snapshots needed by the summon wheel while the pet screen is closed. */
+/** 宠物界面关闭时召唤轮盘所需客户端快照。 */
 public final class SummonWheelData {
     private static final Map<UUID, CompoundTag> PETS = new LinkedHashMap<>();
     private static Map<UUID, CompoundTag> pendingFullList;
@@ -59,9 +59,9 @@ public final class SummonWheelData {
         CompoundTag nbt = PETS.get(uuid);
         if (nbt == null || nbt.contains("Health") && nbt.getFloat("Health") <= 0.0F) return false;
         if (nbt.getBoolean("Recalled")) return true;
-        // "Lost" only means the entity is not currently loaded — it may sit in an
-        // unloaded chunk, which the server can force-load and summon just like the
-        // pet-screen summon button does. Keep the data-completeness checks only.
+        // “丢失”仅表示实体当前未加载——它可能位于未加载的区块中，
+        // 服务端可以强制加载并召唤它，就像宠物界面的召唤按钮那样。
+        // 因此只保留数据完整性检查。
         return nbt.contains("Pos")
                 && nbt.contains("Dimension");
     }
@@ -70,7 +70,7 @@ public final class SummonWheelData {
         return teamSlots(selectedTeamColor());
     }
 
-    /** Team color currently selected in the formation tab. */
+    /** 编队标签页中当前选中的队伍颜色。 */
     public static String selectedTeamColor() {
         String color = teamData.getString("SelectedTeam");
         if (!PetTeamData.TEAM_COLORS.contains(color)) color = PetTeamData.TEAM_COLORS.get(0);
@@ -89,7 +89,7 @@ public final class SummonWheelData {
         return result;
     }
 
-    /** Resolves the persisted last summon (team color + slot) to a pet UUID, or null. */
+    /** 将持久化的上次召唤（队伍颜色 + 槽位）解析为宠物 UUID，否则返回 null。 */
     public static UUID resolveLastSummon() {
         CompoundTag lastSummon = teamData.contains("LastSummon", Tag.TAG_COMPOUND)
                 ? teamData.getCompound("LastSummon") : null;
