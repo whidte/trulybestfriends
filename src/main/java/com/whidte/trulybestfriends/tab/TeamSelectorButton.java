@@ -54,9 +54,13 @@ class TeamSelectorButton extends AbstractWidget {
 
     @Override
     protected void renderWidget(@NotNull GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        if (expanded && !isInsidePanel(mouseX, mouseY)) {
-            collapse();
-        }
+        // 注意：这里绝对不要因为鼠标离开面板就收起面板。
+        // renderWidget 收到的是「上一帧的鼠标位置」，而点击坐标来自
+        // 鼠标事件本身；玩家从左下角的按钮快速移到旗帜格（或移动后
+        // 立刻点击）时，渲染帧会先拿着旧坐标把面板收掉，
+        // 随后到达的点击就被 mouseClicked 的 !expanded 分支吞掉，
+        // 表现就是「点旗帜没反应 / 闪一下回到原队」。
+        // 展开状态的收起完全交给 mouseClicked 与 ESC 处理。
         hoveredTeam = teamAt(mouseX, mouseY);
         if (expanded) {
             int panelX = panelX();
