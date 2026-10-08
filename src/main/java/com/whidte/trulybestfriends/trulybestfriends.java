@@ -114,6 +114,16 @@ public class trulybestfriends {
     private static volatile boolean petIndexLoaded;
     private static final long PENDING_REMOVAL_TIMEOUT_TICKS = 100L;
 
+    /**
+     * 周期性落盘时每个 tick 最多写入的宠物数量。周期落盘会把"本轮待写"
+     * 拆到多个 tick 完成，避免多只宠物同时移动时在单 tick 内批量写盘造成卡顿；
+     * 登出、关服、主人变更等路径仍走不限额的 {@link #flushPendingPetSaves()}，不会丢数据。
+     */
+    private static final int MAX_SAVES_PER_TICK = 4;
+
+    /** 本轮周期落盘待写的宠物 UUID 快照；写空后即为排空。 */
+    private final java.util.ArrayDeque<UUID> saveDrainQueue = new java.util.ArrayDeque<>();
+
     /** 宠物死亡时刻（内存，不持久化）。key=petUUID, value=System.currentTimeMillis()。
      *  用于复活冷却计算，避免写盘后被 syncAllPets 反复刷新导致冷却永远不结束。
      *  服务器重启后清空 → 重启前的死亡宠物无冷却，可立即复活（符合"不保存到磁盘"的设计）。 */
@@ -508,7 +518,14 @@ public class trulybestfriends {
             }
             if (saveTickCounter >= Config.savePetDataCooldownTicks) {
                 saveTickCounter = 0;
-                flushPendingPetSaves();
+                // 取本轮待落盘快照。之后按 MAX_SAVES_PER_TICK 逐 tick 写入，
+                // 写入集合与原先"一次全部写出"完全相同，只是摊到后续几个 tick。
+                saveDrainQueue.clear();
+                saveDrainQueue.addAll(pendingPetSaves.keySet());
+            }
+            for (int saveQuota = 0; saveQuota < MAX_SAVES_PER_TICK && !saveDrainQueue.isEmpty(); saveQuota++) {
+                UUID drainUuid = saveDrainQueue.poll();
+                if (pendingPetSaves.containsKey(drainUuid)) flushPendingPetSave(drainUuid);
             }
     }
 

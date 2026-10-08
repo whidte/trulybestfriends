@@ -89,6 +89,8 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                 trulybestfriends.flushPendingPetSaves(player.getUUID());
                 ListTag list = new ListTag();
                 Map<UUID, CompoundTag> sentSnapshot = new HashMap<>();
+                // 同一轮已解析的原始快照，供存在性探测复用，避免重复读盘。
+                Map<UUID, CompoundTag> storedSnapshot = new HashMap<>();
                 Set<UUID> rideablePetUuids = trulybestfriends.getRideablePetUUIDs(player.serverLevel());
                 if (petDir.toFile().exists()) {
                     File[] files = petDir.toFile().listFiles((d, n) -> PetIOUtil.isPetDataFileName(n));
@@ -116,6 +118,7 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                                 entry.put("NBT", replyNbt);
                                 list.add(entry);
                                 sentSnapshot.put(uuid, replyNbt);
+                                storedSnapshot.put(uuid, storedNbt);
                             } catch (Exception e) {
                                 trulybestfriends.LOGGER.error("Failed to read pet file: {}", f, e);
                             }
@@ -128,7 +131,7 @@ public class RequestPetDataPacket implements CustomPacketPayload {
                 }
                 // 列表已经发出去了，再开始存在性精确探测：命中 presenceProbeWhitelist 的宠物会被逐个查实，
                 // 确证不在世界上的随后以 SyncPetDataPacket.delete 从这个列表里消失。
-                PetPresenceProbe.requestFor(player);
+                PetPresenceProbe.requestFor(player, storedSnapshot);
             } else {
                 File nbtFile = petDir.resolve(packet.petUuid + ".nbt").toFile();
                 if (!nbtFile.exists()) {

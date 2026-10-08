@@ -51,6 +51,13 @@ public final class SummonWheelData {
         teamData = packet.teamData().copy();
     }
 
+    /** 断开连接时丢弃客户端快照，避免跨服务器残留过期宠物数据。 */
+    public static void clear() {
+        PETS.clear();
+        pendingFullList = null;
+        teamData = new CompoundTag();
+    }
+
     static CompoundTag petNbt(UUID uuid) {
         return PETS.get(uuid);
     }

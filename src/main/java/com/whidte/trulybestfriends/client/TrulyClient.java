@@ -1,6 +1,7 @@
 package com.whidte.trulybestfriends.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import com.whidte.trulybestfriends.tab.SummonWheelData;
 import com.whidte.trulybestfriends.tab.TrulyScreen;
 import com.whidte.trulybestfriends.trulybestfriends;
 import net.minecraft.client.KeyMapping;
@@ -40,6 +41,7 @@ public final class TrulyClient {
         NeoForge.EVENT_BUS.addListener(TrulyClient::onRenderGui);
         NeoForge.EVENT_BUS.addListener(TrulyClient::onMouseScroll);
         NeoForge.EVENT_BUS.addListener(AreaRecallRangeRenderer::onRenderLevelStage);
+        NeoForge.EVENT_BUS.addListener(TrulyClient::onClientLoggingOut);
     }
 
     private static void registerL2TabsIntegration() {
@@ -129,6 +131,14 @@ public final class TrulyClient {
         SummonKeyHandler.tick();
         AreaRecallKeyHandler.tick();
     }
+
+    /** 断开连接时清空仅客户端持有的静态快照，避免跨服务器残留过期宠物数据。 */
+    private static void onClientLoggingOut(
+            net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent.LoggingOut event) {
+        SummonWheelData.clear();
+        TrulyScreen.clearPendingSyncState();
+    }
+
 
     private static void onMovementInputUpdate(MovementInputUpdateEvent event) {
         SummonKeyHandler.applyMovementInput(event.getInput());

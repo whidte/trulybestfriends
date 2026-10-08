@@ -87,6 +87,17 @@ public final class PetPresenceProbe {
      * 否则读到的是过期快照。</p>
      */
     public static void requestFor(ServerPlayer player) {
+        requestFor(player, null);
+    }
+
+    /**
+     * 与 {@link #requestFor(ServerPlayer)} 相同，但可复用调用方已解析好的宠物快照。
+     *
+     * <p>打开宠物界面时 {@code RequestPetDataPacket} 刚把同一批文件全部读过一遍，
+     * 把结果传进来即可省掉第二轮读盘；传入 null 或某个 UUID 缺失时自动回退到读盘，
+     * 行为与原实现一致。</p>
+     */
+    public static void requestFor(ServerPlayer player, Map<UUID, CompoundTag> preRead) {
         if (Config.presenceProbeWhitelist.isEmpty()) return;
 
         File[] files = PetIOUtil.getOwnerDir(player).toFile()
@@ -101,13 +112,15 @@ public final class PetPresenceProbe {
             UUID petUuid = petUuidOf(file);
             if (petUuid == null || isPending(player.getUUID(), petUuid)) continue;
 
-            CompoundTag nbt;
-            try {
-                nbt = NbtFileIO.readCompressed(file);
-            } catch (IOException e) {
-                trulybestfriends.LOGGER.warn("Presence probe: failed to read pet file {}: {}",
-                        file, e.getMessage());
-                continue;
+            CompoundTag nbt = preRead != null ? preRead.get(petUuid) : null;
+            if (nbt == null) {
+                try {
+                    nbt = NbtFileIO.readCompressed(file);
+                } catch (IOException e) {
+                    trulybestfriends.LOGGER.warn("Presence probe: failed to read pet file {}: {}",
+                            file, e.getMessage());
+                    continue;
+                }
             }
 
             if (!shouldProbe(player, petUuid, nbt)) continue;
